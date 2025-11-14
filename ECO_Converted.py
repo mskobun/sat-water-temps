@@ -292,6 +292,34 @@ def upload_all_to_supabase(filtered_path, roi_path, timestamp, log_path):
 
     print(f"Upload complete. Uploaded: {uploaded_count}, Skipped: {skipped_count}")
 
+    upload_geojson_to_supabase()
+
+
+def upload_geojson_to_supabase():
+    """Upload the ROI GeoJSON to Supabase so the app can fetch it."""
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise ValueError(
+            "Supabase credentials are not set. Please set SUPABASE_URL and SUPABASE_KEY as environment variables."
+        )
+    if not os.path.exists(roi_path):
+        raise FileNotFoundError(f"ROI GeoJSON not found at {roi_path}")
+
+    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    remote_path = "static/polygons_new.geojson"
+
+    try:
+        supabase.storage.from_(bucket_name).remove([remote_path])
+    except Exception:
+        pass
+
+    with open(roi_path, "rb") as geojson_file:
+        supabase.storage.from_(bucket_name).upload(
+            remote_path,
+            geojson_file,
+            {"content-type": "application/geo+json", "cache-control": "3600"},
+        )
+    print(f"Uploaded ROI GeoJSON to Supabase at {remote_path}")
+
 
 # Cleanup old files in local folder and Supabase bucket
 # Local folder version for testing
