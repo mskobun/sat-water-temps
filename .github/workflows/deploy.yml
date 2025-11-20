@@ -7,7 +7,9 @@ on:
     paths:
       - 'lambda_functions/**'
       - 'Dockerfile'
-      - 'requirements.txt'
+      - 'Dockerfile'
+      - 'uv.lock'
+      - 'pyproject.toml'
       - 'terraform/**'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
@@ -37,6 +39,12 @@ jobs:
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Generate requirements.txt
+        run: uv export --no-dev --format requirements-txt --output-file requirements.txt
 
       - name: Build, tag, and push image to Amazon ECR
         id: build-image
