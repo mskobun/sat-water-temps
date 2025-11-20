@@ -10,6 +10,11 @@ venv/
 .env.production
 .env.*
 
+# Terraform
+*.tfvars
+.terraform/
+.terraform.lock.hcl
+
 # Static & test data
 static/
 
