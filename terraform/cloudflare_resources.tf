@@ -8,4 +8,7 @@ resource "cloudflare_pages_project" "static" {
   account_id         = var.cloudflare_account_id
   name               = var.pages_project_name
   production_branch  = var.pages_production_branch
+  
+  # Note: R2 bindings for Pages Functions are configured via wrangler.toml
+  # and applied during deployment via GitHub Actions
 }

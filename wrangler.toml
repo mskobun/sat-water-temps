@@ -1,15 +1,11 @@
-name = "sat-water-temps-worker"
-main = "worker/src/index.ts"
-compatibility_date = "2024-05-01"
-account_id = "6df78a6dde66ef6f6ef937de5dc8e407"
+name = "sat-water-temps"
+pages_build_output_dir = "public"
+compatibility_date = "2025-12-11"
 
-r2_buckets = [
-  { binding = "R2_DATA", bucket_name = "multitifs", preview_bucket_name = "multitifs-dev" }
-]
-
-# Uncomment and set your route/zone for production
-# routes = [
-#   { pattern = "api.example.com/*", zone_name = "example.com" }
-# ]
-
-# If serving APIs under a subpath, set a custom service binding and route accordingly.
+# R2 bindings for Pages Functions
+# Using production bucket for both dev and prod for now
+[[r2_buckets]]
+binding = "R2_DATA"
+bucket_name = "multitifs"
+preview_bucket_name = "multitifs"
+remote = true
