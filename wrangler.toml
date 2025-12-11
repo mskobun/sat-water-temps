@@ -1,15 +1,20 @@
-name = "sat-water-temps-worker"
-main = "worker/src/index.ts"
-compatibility_date = "2024-05-01"
-account_id = "6df78a6dde66ef6f6ef937de5dc8e407"
+name = "sat-water-temps"
+pages_build_output_dir = ".svelte-kit/cloudflare"
+compatibility_date = "2025-12-11"
 
-r2_buckets = [
-  { binding = "R2_DATA", bucket_name = "multitifs", preview_bucket_name = "multitifs-dev" }
-]
+# R2 bindings for Pages Functions
+# Using production bucket for both dev and prod for now
+[[r2_buckets]]
+binding = "R2_DATA"
+bucket_name = "multitifs"
+preview_bucket_name = "multitifs"
+remote = true
 
-# Uncomment and set your route/zone for production
-# routes = [
-#   { pattern = "api.example.com/*", zone_name = "example.com" }
-# ]
-
-# If serving APIs under a subpath, set a custom service binding and route accordingly.
+# D1 database for temperature data and job tracking
+# Note: database_id will be populated after terraform apply
+# Run: terraform -chdir=terraform output -raw d1_database_id
+[[d1_databases]]
+binding = "DB"
+database_name = "sat-water-temps-db"
+database_id = "6fbaa491-9631-4afa-9c8f-0e7b4c133fd5"
+remote = true

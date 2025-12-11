@@ -1,19 +1,29 @@
 {
-  "name": "sat-water-temps-worker",
+  "name": "sat-water-temps",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "publish": "wrangler publish",
-    "lint": "tsc --noEmit"
-  },
-  "dependencies": {
-    "itty-router": "^5.0.18"
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "npm run build && wrangler pages deploy .svelte-kit/cloudflare",
+    "lint": "tsc --noEmit --project functions/tsconfig.json",
+    "wrangler:dev": "npm run build && wrangler pages dev .svelte-kit/cloudflare --compatibility-date=2025-12-11",
+    "wrangler:dev:local": "npm run build && wrangler pages dev .svelte-kit/cloudflare --local --compatibility-date=2025-12-11"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240512.0",
+    "@sveltejs/adapter-cloudflare": "^7.2.4",
+    "@sveltejs/kit": "^2.49.2",
+    "svelte": "^5.45.8",
     "typescript": "^5.3.3",
+    "vite": "^7.2.7",
     "wrangler": "^4.53.0"
+  },
+  "dependencies": {
+    "@types/leaflet": "^1.9.21",
+    "chart.js": "^4.5.1",
+    "leaflet": "^1.9.4"
   }
 }

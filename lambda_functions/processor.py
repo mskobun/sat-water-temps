@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 from PIL import Image
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from typing import List, Dict
 
 # Constants
 INVALID_QC_VALUES = {15, 2501, 3525, 65535}
@@ -44,6 +45,155 @@ def get_token(user, password):
     )
     response.raise_for_status()
     return response.json()["token"]
+
+
+def query_d1(sql: str, params: List = None) -> Dict:
+    """Execute SQL query against D1 database via Cloudflare API"""
+    d1_db_id = os.environ.get("D1_DATABASE_ID")
+    cf_account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
+    cf_api_token = os.environ.get("CLOUDFLARE_API_TOKEN")
+
+    if not all([d1_db_id, cf_account_id, cf_api_token]):
+        print("Warning: D1 credentials not configured, skipping database insert")
+        return {"success": False}
+
+    url = f"https://api.cloudflare.com/client/v4/accounts/{cf_account_id}/d1/database/{d1_db_id}/query"
+    headers = {
+        "Authorization": f"Bearer {cf_api_token}",
+        "Content-Type": "application/json",
+    }
+    payload = {"sql": sql}
+    if params:
+        payload["params"] = params
+
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"D1 query error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def log_job_to_d1(
+    job_type: str,
+    feature_id: str = None,
+    date: str = None,
+    task_id: str = None,
+    status: str = "started",
+    duration_ms: int = None,
+    error_message: str = None,
+    metadata_json: str = None,
+):
+    """Log processing job to D1 database"""
+    try:
+        import time
+
+        if status == "started":
+            sql = """
+            INSERT INTO processing_jobs 
+            (job_type, task_id, feature_id, date, status, started_at, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """
+            params = [
+                job_type,
+                task_id,
+                feature_id,
+                date,
+                status,
+                int(time.time() * 1000),
+                metadata_json,
+            ]
+            result = query_d1(sql, params)
+
+            # Return the job ID (if available in response)
+            if result.get("success") is not False:
+                # Get last insert ID
+                last_id_result = query_d1("SELECT last_insert_rowid() as id")
+                if last_id_result.get("results"):
+                    return last_id_result["results"][0].get("id")
+        else:
+            # Update existing job
+            sql = """
+            UPDATE processing_jobs 
+            SET status = ?, completed_at = ?, duration_ms = ?, error_message = ?
+            WHERE feature_id = ? AND date = ? AND status = 'started'
+            ORDER BY started_at DESC
+            LIMIT 1
+            """
+            import time
+
+            params = [
+                status,
+                int(time.time() * 1000),
+                duration_ms,
+                error_message,
+                feature_id,
+                date,
+            ]
+            query_d1(sql, params)
+    except Exception as e:
+        print(f"Warning: Failed to log job to D1: {e}")
+        return None
+
+
+def insert_metadata_to_d1(feature_id: str, date: str, metadata: Dict):
+    """Insert only metadata into D1 (temperature data stays in R2)"""
+    try:
+        # Construct R2 file paths
+        csv_path = f"{feature_id}/csv/{date}.csv"
+        tif_path = f"{feature_id}/tif/{date}.tif"
+        png_path = f"{feature_id}/png/{date}.png"
+
+        # Insert metadata with file paths
+        meta_sql = """
+        INSERT OR REPLACE INTO temperature_metadata 
+        (feature_id, date, min_temp, max_temp, mean_temp, median_temp, std_dev,
+         data_points, water_pixel_count, land_pixel_count, wtoff,
+         csv_path, tif_path, png_path)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        meta_params = [
+            feature_id,
+            date,
+            metadata.get("min_temp"),
+            metadata.get("max_temp"),
+            metadata.get("mean_temp"),
+            metadata.get("median_temp"),
+            metadata.get("std_dev"),
+            metadata.get("data_points", 0),
+            metadata.get("water_pixel_count", 0),
+            metadata.get("land_pixel_count", 0),
+            1 if metadata.get("wtoff", False) else 0,
+            csv_path,
+            tif_path,
+            png_path,
+        ]
+        query_d1(meta_sql, meta_params)
+
+        # Update feature record
+        name, location = (
+            feature_id.split("/") if "/" in feature_id else (feature_id, "lake")
+        )
+        feature_sql = """
+        INSERT INTO features (id, name, location, latest_date, last_updated)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            latest_date = CASE
+                WHEN excluded.latest_date > latest_date THEN excluded.latest_date
+                ELSE latest_date
+            END,
+            last_updated = excluded.last_updated
+        """
+        import time
+
+        feature_params = [feature_id, name, location, date, int(time.time())]
+        query_d1(feature_sql, feature_params)
+
+        print(f"✓ Inserted {len(data_rows)} temperature points to D1")
+
+    except Exception as e:
+        print(f"Error inserting to D1: {e}")
 
 
 def normalize(data):
@@ -233,7 +383,7 @@ def process_rasters(
     tif_key = f"ECO/{name}/{location}/{base_name}.tif"
     upload_to_r2(s3_client, bucket_name, tif_key, filter_tif_path, "image/tiff")
 
-    # CSV
+    # CSV (keep for archive downloads)
     df.dropna(subset=["LST_filter"], inplace=True)
     df.to_csv(filter_csv_path, index=False)
     csv_key = f"ECO/{name}/{location}/{base_name}.csv"
@@ -269,7 +419,11 @@ def process_rasters(
     meta_key = f"ECO/{name}/{location}/metadata/{base_name}_metadata.json"
     upload_to_r2(s3_client, bucket_name, meta_key, metadata_path, "application/json")
 
-    # Update index
+    # Insert metadata into D1 (CSV data already uploaded to R2)
+    feature_id = f"{name}/{location}" if location != "lake" else name
+    insert_metadata_to_d1(feature_id, date, metadata)
+
+    # Update index (keep for backward compatibility during transition)
     index_key = f"ECO/{name}/{location}/index.json"
     try:
         existing = s3_client.get_object(Bucket=bucket_name, Key=index_key)
@@ -363,6 +517,17 @@ def handler(event, context):
         )
 
         for (aid, date), files in files_by_aid_date.items():
+            import time
+
+            start_time = time.time()
+
+            # Get feature_id for logging
+            name, location = aid_folder_mapping.get(aid, (f"aid{aid}", "lake"))
+            feature_id = f"{name}/{location}" if location != "lake" else name
+
+            # Log job start
+            log_job_to_d1("process", feature_id, date, task_id, "started")
+
             try:
                 process_rasters(
                     aid,
@@ -373,8 +538,21 @@ def handler(event, context):
                     s3_client,
                     bucket_name,
                 )
+
+                # Log success
+                duration_ms = int((time.time() - start_time) * 1000)
+                log_job_to_d1(
+                    "process", feature_id, date, task_id, "success", duration_ms
+                )
+                print(f"✓ Processed {feature_id} {date} in {duration_ms}ms")
+
             except Exception as e:
-                print(f"Error processing {aid} {date}: {e}")
+                # Log failure
+                duration_ms = int((time.time() - start_time) * 1000)
+                log_job_to_d1(
+                    "process", feature_id, date, task_id, "failed", duration_ms, str(e)
+                )
+                print(f"✗ Error processing {aid} {date}: {e}")
 
         # Cleanup
         import shutil

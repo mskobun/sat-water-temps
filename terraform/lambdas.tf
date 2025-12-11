@@ -62,6 +62,9 @@ resource "aws_lambda_function" "processor_lambda" {
       R2_BUCKET_NAME = var.r2_bucket_name
       R2_ACCESS_KEY_ID = var.r2_access_key_id
       R2_SECRET_ACCESS_KEY = var.r2_secret_access_key
+      D1_DATABASE_ID = cloudflare_d1_database.main.id
+      CLOUDFLARE_ACCOUNT_ID = var.cloudflare_account_id
+      CLOUDFLARE_API_TOKEN = var.cloudflare_api_token
     }
   }
 
