@@ -58,9 +58,10 @@ resource "aws_lambda_function" "processor_lambda" {
     variables = {
       APPEEARS_USER = var.appeears_user
       APPEEARS_PASS = var.appeears_pass
-      SUPABASE_URL  = var.supabase_url
-      SUPABASE_KEY  = var.supabase_key
-      BUCKET_NAME   = "multitifs" # Hardcoded for now, could be variable
+      R2_ENDPOINT   = var.r2_endpoint
+      R2_BUCKET_NAME = var.r2_bucket_name
+      R2_ACCESS_KEY_ID = var.r2_access_key_id
+      R2_SECRET_ACCESS_KEY = var.r2_secret_access_key
     }
   }
 

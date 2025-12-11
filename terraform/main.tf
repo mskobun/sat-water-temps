@@ -1,7 +1,3 @@
-provider "aws" {
-  region = var.aws_region
-}
-
 # SQS Queue for completed tasks
 resource "aws_sqs_queue" "eco_processing_queue" {
   name                       = "${var.project_name}-processing-queue"

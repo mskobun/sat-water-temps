@@ -7,7 +7,6 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="icon" href="/static/web_logo.png" type="image/png">
     <style>
         * {
             margin: 0;
@@ -364,7 +363,7 @@
 <body>
     <div id="map-container">
         <div id="map"></div>
-        <button id="back-btn" onclick="window.history.back();">Back</button>
+        <button id="back-btn" onclick="window.location.href='/';">Back</button>
     </div>
 
     <div id="date-selector-container">
@@ -423,9 +422,6 @@
             </table>
             <button id="download-all-btn" class="view-all-btn">Download All Data</button>
         </div>
-        <!-- <div class="info-box" id="archive-box">
-            <a href="/feature/{{ feature_id }}/archive" id="archive-text">Archive</a>
-        </div> -->
     </div>
     
     <script>
@@ -442,7 +438,7 @@
         let relative_min = 0;
         let relative_max = 0;
 
-        const apiBase = '/api'; // Worker can also work without this prefix
+        const apiBase = '/api'; // Worker API base
         const urlParams = new URLSearchParams(window.location.search);
         const featureId = urlParams.get('feature');
         document.getElementById('location-name').textContent = featureId || '';
@@ -527,7 +523,7 @@
             });
 
             document.getElementById('download-all-btn').addEventListener('click', function() {
-                window.location.href = "/feature/{{ feature_id }}/archive";
+                window.location.href = `/feature_archive.html?feature=${featureId}`;
             });
         }
 
@@ -542,7 +538,7 @@
             
             // Encode data to pass it through the URL
             const encodedData = encodeURIComponent(JSON.stringify(temperatureData));
-            const url = `/feature/full-view?data=${encodedData}&unit=${unit}`;
+            const url = `/full_view.html?data=${encodedData}&unit=${unit}`;
 
             // Window size
             const width = 800;

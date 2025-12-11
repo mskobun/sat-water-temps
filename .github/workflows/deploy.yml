@@ -1,4 +1,4 @@
-name: Build and Deploy Lambda
+name: Build and Deploy
 
 on:
   push:
@@ -6,10 +6,12 @@ on:
       - main
     paths:
       - 'lambda_functions/**'
-      - 'Dockerfile'
+      - 'worker/**'
+      - 'public/**'
       - 'Dockerfile'
       - 'uv.lock'
       - 'pyproject.toml'
+      - 'wrangler.toml'
       - 'terraform/**'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
@@ -19,7 +21,7 @@ env:
   ECR_REPOSITORY: eco-water-temps-lambda-images
 
 jobs:
-  build-and-push:
+  deploy-lambdas:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
@@ -71,10 +73,64 @@ jobs:
         env:
           TF_VAR_appeears_user: ${{ secrets.APPEEARS_USER }}
           TF_VAR_appeears_pass: ${{ secrets.APPEEARS_PASS }}
-          TF_VAR_supabase_url: ${{ secrets.SUPABASE_URL }}
-          TF_VAR_supabase_key: ${{ secrets.SUPABASE_KEY }}
           TF_VAR_lambda_image_uri: ${{ steps.build-image.outputs.image }}
+          TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TF_VAR_r2_bucket_name: ${{ secrets.R2_BUCKET_NAME }}
+          TF_VAR_r2_access_key_id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          TF_VAR_r2_secret_access_key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          TF_VAR_r2_endpoint: ${{ secrets.R2_ENDPOINT }}
+          TF_VAR_pages_project_name: sat-water-temps
+          TF_VAR_pages_production_branch: main
 
       - name: Output deployment info
         run: |
-          echo "✅ Successfully deployed image: ${{ steps.build-image.outputs.image }}"
+          echo "✅ Successfully deployed Lambda image: ${{ steps.build-image.outputs.image }}"
+
+  deploy-worker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Deploy to Cloudflare Workers
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Output deployment info
+        run: |
+          echo "✅ Successfully deployed Cloudflare Worker"
+
+  deploy-pages:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy public --project-name=sat-water-temps
+
+      - name: Output deployment info
+        run: |
+          echo "✅ Successfully deployed Cloudflare Pages"

@@ -1,0 +1,19 @@
+{
+  "name": "sat-water-temps-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "publish": "wrangler publish",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "itty-router": "^5.0.18"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240512.0",
+    "typescript": "^5.3.3",
+    "wrangler": "^4.53.0"
+  }
+}

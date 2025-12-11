@@ -28,3 +28,5 @@ tif-to-png.py
 test.py
 .qodo
 test.txt
+node_modules/
+.wrangler/
