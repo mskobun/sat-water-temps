@@ -17,6 +17,18 @@ resource "cloudflare_pages_project" "static" {
   name               = var.pages_project_name
   production_branch  = var.pages_production_branch
   
+  # Build is managed by GitHub Actions with Wrangler, not by Cloudflare's automatic builds
+  build_config = {
+    destination_dir = ".svelte-kit/cloudflare"
+  }
+  
+  lifecycle {
+    ignore_changes = [
+      build_config,
+      deployment_configs
+    ]
+  }
+  
   # Note: R2 bindings for Pages Functions are configured via wrangler.toml
   # and applied during deployment via GitHub Actions
 }
