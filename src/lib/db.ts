@@ -1,5 +1,7 @@
 // Hybrid architecture: D1 for metadata, R2 for temperature data
 
+import type { D1Database, R2Bucket } from '@cloudflare/workers-types';
+
 export const BUCKET_PREFIX = "ECO";
 
 export function buildFeaturePath(featureId: string, suffix: string): string {
