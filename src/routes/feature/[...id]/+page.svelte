@@ -28,11 +28,19 @@
 	$: unitSymbol = currentUnit === 'Kelvin' ? 'K' : currentUnit === 'Celsius' ? '°C' : '°F';
 	
 	// Convert temperature based on unit
-	function convertTemp(kelvin: number): number {
-		if (currentUnit === 'Celsius') return kelvin - 273.15;
-		if (currentUnit === 'Fahrenheit') return (kelvin - 273.15) * 9/5 + 32;
+	function convertTemp(kelvin: number, unit: 'Kelvin' | 'Celsius' | 'Fahrenheit'): number {
+		if (unit === 'Celsius') return kelvin - 273.15;
+		if (unit === 'Fahrenheit') return (kelvin - 273.15) * 9/5 + 32;
 		return kelvin;
 	}
+	
+	$: convertedTemperatureData = temperatureData.map(point => {
+		const kelvin = parseFloat(point.LST_filter || point.temperature || 0);
+		return {
+			...point,
+			convertedTemp: convertTemp(kelvin, currentUnit)
+		};
+	});
 	
 	function formatDateTime(date: string): string {
 		const year = date.substring(0, 4);
@@ -186,7 +194,7 @@
 		if (!ctx) return;
 		
 		const temps = temperatureData.map(p => parseFloat(p.LST_filter || p.temperature || 0));
-		const convertedTemps = temps.map(t => convertTemp(t));
+		const convertedTemps = temps.map(t => convertTemp(t, currentUnit));
 		const labels = temperatureData.map((_, i) => `Point ${i + 1}`);
 		const latitudes = temperatureData.map(p => parseFloat(p.y || p.latitude || 0));
 		
@@ -352,11 +360,11 @@
 		</select>
 		<div class="mt-2.5 w-full h-5 rounded-md relative {selectedColorScale === 'gray' ? 'color-scale-gray' : 'color-scale-rainbow'}">
 			<span class="absolute top-6 left-0 text-xs text-white">
-				{selectedColorScale === 'relative' ? convertTemp(relativeMin).toFixed(2) : convertTemp(globalMin).toFixed(2)}
+				{selectedColorScale === 'relative' ? convertTemp(relativeMin, currentUnit).toFixed(2) : convertTemp(globalMin, currentUnit).toFixed(2)}
 			</span>
 			<span class="absolute top-6 left-1/2 -translate-x-1/2 text-xs text-white">{unitSymbol}</span>
 			<span class="absolute top-6 right-0 text-xs text-white">
-				{selectedColorScale === 'relative' ? convertTemp(relativeMax).toFixed(2) : convertTemp(globalMax).toFixed(2)}
+				{selectedColorScale === 'relative' ? convertTemp(relativeMax, currentUnit).toFixed(2) : convertTemp(globalMax, currentUnit).toFixed(2)}
 			</span>
 		</div>
 	</div>
@@ -415,12 +423,12 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each temperatureData.slice(0, 10) as point, i}
+					{#each convertedTemperatureData.slice(0, 10) as point, i}
 						<tr class="even:bg-white/[0.03] hover:bg-amber/15 transition-colors">
 							<td class="py-2.5 px-2 border-b border-white/5 font-bold text-amber">{i + 1}</td>
 							<td class="py-2.5 px-2 border-b border-white/5">{parseFloat(point.x || point.longitude || 0).toFixed(4)}</td>
 							<td class="py-2.5 px-2 border-b border-white/5">{parseFloat(point.y || point.latitude || 0).toFixed(4)}</td>
-							<td class="py-2.5 px-2 border-b border-white/5">{convertTemp(parseFloat(point.LST_filter || point.temperature || 0)).toFixed(2)}</td>
+							<td class="py-2.5 px-2 border-b border-white/5">{point.convertedTemp.toFixed(2)}</td>
 						</tr>
 					{/each}
 				</tbody>
