@@ -1,0 +1,45 @@
+@import 'tailwindcss';
+
+@theme {
+	/* Custom colors */
+	--color-deep-navy: #0b1a2e;
+	--color-dark-blue: #102a43;
+	--color-mid-blue: #1f4f96;
+	--color-accent-blue: #00aaff;
+	--color-cyan: #48c6ef;
+	--color-dark-bg: #121212;
+	--color-dark-surface: #1e1e1e;
+	--color-dark-card: #222222;
+	--color-amber: #f9a44a;
+	
+	/* Custom font */
+	--font-poppins: 'Poppins', sans-serif;
+	
+	/* Custom animations */
+	--animate-fade-in: fadeIn 0.5s ease-out forwards;
+}
+
+@keyframes fadeIn {
+	0% {
+		opacity: 0;
+		transform: scale(0.9);
+	}
+	100% {
+		opacity: 1;
+		transform: scale(1);
+	}
+}
+
+/* Leaflet map fix - ensure it displays properly */
+.leaflet-container {
+	z-index: 1;
+}
+
+/* Color scale gradients for temperature visualization */
+.color-scale-rainbow {
+	background: linear-gradient(to right, #000080, #0000ff, #00ffff, #00ff00, #ffff00, #ff0000, #800000);
+}
+
+.color-scale-gray {
+	background: linear-gradient(to right, #000, #fff);
+}

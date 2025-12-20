@@ -36,141 +36,55 @@
 
 <svelte:head>
 	<title>{featureId} Archive</title>
-	<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet" />
 </svelte:head>
 
-<header>
-	<span>{featureId} Archive</span>
-	<button id="back-btn" on:click={() => window.history.back()}>Back</button>
-</header>
+<div class="min-h-screen bg-dark-bg font-poppins text-white">
+	<!-- Header -->
+	<header class="bg-gradient-to-r from-[#0b3d91] to-cyan py-5 px-6 text-2xl font-bold uppercase flex items-center gap-4">
+		<button 
+			class="bg-blue-600 hover:bg-blue-800 text-white px-6 py-3 rounded-xl border-none cursor-pointer text-base font-bold transition-colors duration-300 shrink-0"
+			onclick={() => window.history.back()}
+		>
+			Back
+		</button>
+		<span>{featureId} Archive</span>
+	</header>
 
-<div class="container">
-	<div class="grid-container">
-		{#if loading}
-			<div class="loading">Loading archive data...</div>
-		{:else if dates.length === 0}
-			<div class="loading">No data available for this feature</div>
-		{:else}
-			{#each dates as date}
-				<div class="grid-item">
-					<img 
-						src={`/api/feature/${featureId}/tif/${date}/relative`}
-						alt={`${featureId} - ${formatDateTime(date)}`}
-					/>
-					<div class="caption" title={date}>
-						{formatDateTime(date)}
+	<!-- Content -->
+	<div class="w-[90%] mx-auto py-5 text-center">
+		<div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4 pt-2.5">
+			{#if loading}
+				<div class="text-cyan text-lg p-5 col-span-full">Loading archive data...</div>
+			{:else if dates.length === 0}
+				<div class="text-cyan text-lg p-5 col-span-full">No data available for this feature</div>
+			{:else}
+				{#each dates as date}
+					<div class="bg-dark-surface rounded-lg p-2.5 shadow-lg hover:scale-105 transition-transform duration-300">
+						<img 
+							src={`/api/feature/${featureId}/tif/${date}/relative`}
+							alt={`${featureId} - ${formatDateTime(date)}`}
+							class="w-full rounded-md"
+						/>
+						<div class="mt-2 text-sm font-bold text-gray-300 whitespace-nowrap overflow-hidden text-ellipsis" title={date}>
+							{formatDateTime(date)}
+						</div>
+						<a 
+							class="block mt-1 text-sm text-cyan hover:underline font-semibold no-underline"
+							href={`/api/download_tif/${featureId}/${date}_filter_relative.tif`}
+							download
+						>
+							Download TIF
+						</a>
+						<a 
+							class="block mt-1 text-sm text-cyan hover:underline font-semibold no-underline"
+							href={`/api/download_csv/${featureId}/${date}_filter_relative.csv`}
+							download
+						>
+							Download CSV
+						</a>
 					</div>
-					<a 
-						class="download-link"
-						href={`/api/download_tif/${featureId}/${date}_filter_relative.tif`}
-						download
-					>
-						Download TIF
-					</a>
-					<a 
-						class="download-link"
-						href={`/api/download_csv/${featureId}/${date}_filter_relative.csv`}
-						download
-					>
-						Download CSV
-					</a>
-				</div>
-			{/each}
-		{/if}
+				{/each}
+			{/if}
+		</div>
 	</div>
 </div>
-
-<style>
-	.container {
-		text-align: center;
-	}
-	
-	header {
-		background: linear-gradient(135deg, #0b3d91, #48c6ef);
-		padding: 20px;
-		font-size: 24px;
-		font-weight: bold;
-		text-transform: uppercase;
-		position: relative;
-	}
-	
-	.container {
-		width: 90%;
-		margin: auto;
-		padding: 20px;
-	}
-	
-	.grid-container {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-		gap: 15px;
-		padding-top: 10px;
-	}
-	
-	.grid-item {
-		background: #1e1e1e;
-		border-radius: 8px;
-		padding: 10px;
-		box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
-		transition: transform 0.3s ease;
-	}
-	
-	.grid-item:hover {
-		transform: scale(1.05);
-	}
-	
-	img {
-		width: 100%;
-		border-radius: 5px;
-	}
-	
-	.caption {
-		margin-top: 8px;
-		font-size: 14px;
-		font-weight: bold;
-		color: #ddd;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		max-width: 100%;
-	}
-	
-	.download-link {
-		display: block;
-		margin-top: 5px;
-		font-size: 14px;
-		color: #48c6ef;
-		text-decoration: none;
-		font-weight: 600;
-	}
-	
-	.download-link:hover {
-		text-decoration: underline;
-	}
-	
-	#back-btn {
-		position: absolute;
-		top: 50%;
-		left: 20px;
-		transform: translateY(-50%);
-		background-color: #007BFF;
-		color: #fff;
-		padding: 12px 25px;
-		border: none;
-		border-radius: 10px;
-		cursor: pointer;
-		font-size: 16px;
-		font-weight: bold;
-		transition: background-color 0.3s;
-	}
-	
-	#back-btn:hover {
-		background-color: #0056b3;
-	}
-	
-	.loading {
-		color: #48c6ef;
-		font-size: 18px;
-		padding: 20px;
-	}
-</style>

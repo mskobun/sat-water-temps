@@ -55,82 +55,30 @@
 	<title>Satellite Water Temperature Monitoring</title>
 </svelte:head>
 
-<div class="hero">
-	<h1>Real-Time Global Lake Temperature Analysis</h1>
+<div class="min-h-screen bg-dark-bg font-poppins text-white">
+	<!-- Hero Section -->
+	<div class="relative bg-gradient-to-r from-[#0b3d91] to-cyan py-12 px-5 text-center">
+		<h1 class="m-0 text-3xl md:text-4xl lg:text-5xl font-bold drop-shadow-[3px_3px_6px_rgba(0,0,0,0.6)]">
+			Real-Time Global Lake Temperature Analysis
+		</h1>
+	</div>
+
+	<!-- Map Container -->
+	<div class="relative w-full h-[90vh] bg-dark-card border-t-4 border-cyan -mt-8">
+		<h3 class="text-center text-xl md:text-2xl uppercase font-bold py-4 text-white">
+			Satellite Map
+		</h3>
+		<div bind:this={mapElement} class="h-[calc(100%-60px)] w-full rounded-lg"></div>
+	</div>
+
+	<!-- Footer -->
+	<footer class="bg-dark-surface text-white py-5 text-center text-sm mt-5">
+		<p>&copy; 2025 Satellite Water Temperature Monitoring. All rights reserved.</p>
+		<a 
+			href="/admin/jobs" 
+			class="text-cyan hover:text-white transition-colors duration-300 mt-2 inline-block font-medium"
+		>
+			Admin Dashboard
+		</a>
+	</footer>
 </div>
-
-<div class="map-container">
-	<h3>Satellite Map</h3>
-	<div bind:this={mapElement} id="map"></div>
-</div>
-
-<footer>
-	&copy; 2025 Satellite Water Temperature Monitoring. All rights reserved.
-	<br />
-	<a href="/admin/jobs" style="color: #48c6ef; margin-top: 10px; display: inline-block;">
-		Admin Dashboard
-	</a>
-</footer>
-
-<style>
-	:global(body) {
-		font-family: 'Poppins', sans-serif;
-		margin: 0;
-		padding: 0;
-		background: #121212;
-		color: #fff;
-		transition: all 0.3s ease-in-out;
-	}
-
-	.hero {
-		text-align: center;
-		padding: 50px 20px;
-		background: linear-gradient(to right, #0b3d91, #48c6ef);
-		color: #fff;
-		font-size: 40px;
-		font-weight: 700;
-	}
-
-	.hero h1 {
-		margin: 0;
-		text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.6);
-	}
-
-	.map-container {
-		text-align: center;
-		padding: 20px;
-		background: #222;
-		margin: 0;
-		width: 100vw;
-		height: 90vh;
-		border-radius: 0;
-		box-shadow: none;
-		position: relative;
-		border-top: 5px solid #48c6ef;
-		margin-top: -40px;
-	}
-
-	.map-container h3 {
-		font-size: 28px;
-		margin-bottom: 10px;
-		color: #fff;
-		text-transform: uppercase;
-		font-weight: 700;
-	}
-
-	#map {
-		height: 100%;
-		width: 100%;
-		border-radius: 10px;
-	}
-
-	footer {
-		background-color: #1e1e1e;
-		color: white;
-		padding: 20px;
-		text-align: center;
-		font-size: 14px;
-		margin-top: 20px;
-	}
-</style>
-

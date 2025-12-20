@@ -305,362 +305,132 @@
 	<title>{featureId} - Feature Details</title>
 </svelte:head>
 
-<div class="feature-page-wrapper">
-	<div id="map-container">
-		<div bind:this={mapElement} id="map"></div>
-		<button id="back-btn" on:click={() => goto('/')}>Back</button>
-	</div>
-
-<div id="date-selector-container">
-	<label for="date-selector">Select Date:</label>
-	<select id="date-selector" bind:value={selectedDate}>
-		{#each dates as date}
-			<option value={date}>{formatDateTime(date)}</option>
-		{/each}
-	</select>
-</div>
-
-{#if showWaterOffAlert}
-	<div id="mask-alert-container">
-		<p>Water Mask is off!</p>
-	</div>
-{/if}
-
-<div id="color-selector-container">
-	<label for="color-selector">Color Scale:</label>
-	<select id="color-selector" bind:value={selectedColorScale}>
-		<option value="relative">Relative</option>
-		<option value="fixed">Fixed</option>
-		<option value="gray">Grayscale</option>
-	</select>
-	<div id="color-scale-preview" class:gray={selectedColorScale === 'gray'}>
-		<span class="temp-min-max" id="min-label">
-			{selectedColorScale === 'relative' ? convertTemp(relativeMin).toFixed(2) : convertTemp(globalMin).toFixed(2)}
-		</span>
-		<span class="temp-min-max" id="unit-label">{unitSymbol}</span>
-		<span class="temp-min-max" id="max-label">
-			{selectedColorScale === 'relative' ? convertTemp(relativeMax).toFixed(2) : convertTemp(globalMax).toFixed(2)}
-		</span>
-	</div>
-</div>
-
-<div id="graph-container">
-	<select bind:value={selectedGraphType} class="graph-type-selector">
-		<option value="summary">Statistics</option>
-		<option value="histogram">Distribution</option>
-		<option value="line">Temperatures</option>
-		<option value="scatter">Latitude</option>
-	</select>
-	<canvas bind:this={chartElement} id="temperatureChart"></canvas>
-</div>
-
-<div id="sidebar">
-	<h2>Temperature Data for <span>{featureId}</span></h2>
-	
-	<div class="unit-selector">
-		<button class:active={currentUnit === 'Kelvin'} on:click={() => currentUnit = 'Kelvin'}>Kelvin</button>
-		<button class:active={currentUnit === 'Celsius'} on:click={() => currentUnit = 'Celsius'}>Celsius</button>
-		<button class:active={currentUnit === 'Fahrenheit'} on:click={() => currentUnit = 'Fahrenheit'}>Fahrenheit</button>
-	</div>
-	
-	<div id="temperature-boxes">
-		<table>
-			<thead>
-				<tr>
-					<th>Point</th>
-					<th>X</th>
-					<th>Y</th>
-					<th>Temp ({unitSymbol})</th>
-				</tr>
-			</thead>
-			<tbody>
-				{#each temperatureData.slice(0, 10) as point, i}
-					<tr>
-						<td>{i + 1}</td>
-						<td>{parseFloat(point.x || point.longitude || 0).toFixed(4)}</td>
-						<td>{parseFloat(point.y || point.latitude || 0).toFixed(4)}</td>
-						<td>{convertTemp(parseFloat(point.LST_filter || point.temperature || 0)).toFixed(2)}</td>
-					</tr>
-				{/each}
-			</tbody>
-		</table>
-		<button class="view-all-btn" on:click={() => goto(`/archive/${featureId}`)}>
-			Download All Data
+<div class="fixed inset-0 flex h-screen w-screen overflow-hidden bg-dark-bg z-10 font-poppins">
+	<!-- Map Container -->
+	<div class="flex-[3] relative">
+		<div bind:this={mapElement} class="w-full h-screen brightness-90"></div>
+		<button 
+			class="absolute top-5 left-5 bg-blue-600 hover:bg-blue-800 text-white px-5 py-2.5 rounded-md font-bold text-base transition-colors duration-300 z-[1000] cursor-pointer"
+			onclick={() => goto('/')}
+		>
+			Back
 		</button>
 	</div>
-</div>
-</div>
 
-<style>
-	.feature-page-wrapper {
-		position: fixed;
-		top: 0;
-		left: 0;
-		right: 0;
-		bottom: 0;
-		display: flex;
-		height: 100vh;
-		width: 100vw;
-		overflow: hidden;
-		background-color: #121212;
-		z-index: 1;
-		opacity: 0;
-		transform: scale(0.9);
-		animation: fadeIn 0.5s forwards ease-out;
-	}
-	
-	@keyframes fadeIn {
-		to {
-			opacity: 1;
-			transform: scale(1);
-		}
-	}
-	
-	#map-container {
-		flex: 3;
-		position: relative;
-	}
-	
-	#map {
-		width: 100%;
-		height: 100vh;
-		filter: brightness(90%);
-	}
-	
-	#sidebar {
-		position: fixed;
-		top: 0;
-		right: 0;
-		width: 350px;
-		height: 100vh;
-		background: rgba(30, 30, 30, 0.9);
-		padding: 15px;
-		overflow-y: auto;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		backdrop-filter: blur(10px);
-		box-shadow: -4px 0 10px rgba(0, 0, 0, 0.3);
-		z-index: 1000;
-	}
-	
-	h2 {
-		text-align: center;
-		margin-bottom: 15px;
-		font-size: 18px;
-		font-weight: 600;
-	}
-	
-	#back-btn {
-		position: absolute;
-		top: 20px;
-		left: 20px;
-		background-color: #007BFF;
-		color: #fff;
-		padding: 10px 20px;
-		border: none;
-		border-radius: 5px;
-		cursor: pointer;
-		font-size: 16px;
-		font-weight: bold;
-		transition: background-color 0.3s;
-		z-index: 1000;
-	}
-	
-	#back-btn:hover {
-		background-color: #0056b3;
-	}
-	
-	#date-selector-container {
-		position: absolute;
-		top: 20px;
-		left: 50%;
-		transform: translateX(-50%);
-		background: rgba(30, 30, 30, 0.9);
-		padding: 10px;
-		border-radius: 8px;
-		box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-		z-index: 999;
-	}
-	
-	#date-selector, #color-selector {
-		padding: 5px;
-		border-radius: 5px;
-		border: none;
-		background: #f9a44a;
-		color: #121212;
-		font-weight: bold;
-		cursor: pointer;
-	}
-	
-	#mask-alert-container {
-		position: absolute;
-		top: 70px;
-		left: 50%;
-		transform: translateX(-50%);
-		background-color: #f44336;
-		color: #fff;
-		padding: 10px 20px;
-		border-radius: 5px;
-		box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-		z-index: 1001;
-	}
-	
-	#color-selector-container {
-		position: absolute;
-		top: 20px;
-		left: 70%;
-		transform: translateX(-30%);
-		background: rgba(30, 30, 30, 0.9);
-		padding: 10px;
-		border-radius: 8px;
-		box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-		z-index: 999;
-	}
-	
-	#color-scale-preview {
-		margin-top: 10px;
-		width: 100%;
-		height: 20px;
-		border-radius: 5px;
-		background: linear-gradient(to right, #000080, #0000ff, #00ffff, #00ff00, #ffff00, #ff0000, #800000);
-		position: relative;
-	}
-	
-	#color-scale-preview.gray {
-		background: linear-gradient(to right, #000, #fff);
-	}
-	
-	.temp-min-max {
-		position: absolute;
-		top: 25px;
-		font-size: 12px;
-		color: white;
-	}
-	
-	#min-label { left: 0; }
-	#max-label { right: 0; }
-	#unit-label { left: 50%; transform: translateX(-50%); }
-	
-	.unit-selector {
-		margin-top: 10px;
-		display: flex;
-		gap: 10px;
-		justify-content: center;
-	}
-	
-	.unit-selector button {
-		padding: 8px 16px;
-		border: none;
-		border-radius: 5px;
-		background-color: #f9a44a;
-		color: #121212;
-		font-weight: bold;
-		cursor: pointer;
-		transition: background-color 0.3s;
-	}
-	
-	.unit-selector button.active {
-		background-color: #007BFF;
-		color: #fff;
-	}
-	
-	#temperature-boxes {
-		width: 100%;
-		margin-top: 20px;
-		overflow-x: auto;
-		border-radius: 10px;
-		background: rgba(255, 255, 255, 0.05);
-		box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-	}
-	
-	table {
-		width: 100%;
-		color: white;
-		border-collapse: separate;
-		border-spacing: 0;
-		font-size: 13px;
-		border-radius: 10px;
-		overflow: hidden;
-	}
-	
-	th {
-		padding: 12px 8px;
-		background: rgba(249, 164, 74, 0.8);
-		color: #121212;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.5px;
-		position: sticky;
-		top: 0;
-	}
-	
-	td {
-		padding: 10px 8px;
-		border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-	}
-	
-	tr:nth-child(even) {
-		background-color: rgba(255, 255, 255, 0.03);
-	}
-	
-	tr:hover {
-		background-color: rgba(249, 164, 74, 0.15);
-	}
-	
-	td:first-child {
-		font-weight: bold;
-		color: #f9a44a;
-	}
-	
-	.view-all-btn {
-		background: rgba(66, 135, 245, 0.8);
-		color: white;
-		border: none;
-		padding: 8px 12px;
-		border-radius: 5px;
-		font-weight: bold;
-		cursor: pointer;
-		transition: background 0.3s;
-		margin-top: 10px;
-		width: 100%;
-	}
-	
-	.view-all-btn:hover {
-		background: rgba(66, 135, 245, 1);
-	}
-	
-	#graph-container {
-		position: fixed;
-		bottom: 20px;
-		left: 20px;
-		width: 400px;
-		height: 600px;
-		background: rgba(30, 30, 30, 0.9);
-		border-radius: 10px;
-		padding: 15px;
-		padding-top: 40px;
-		box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-		z-index: 1000;
-		overflow: visible;
-	}
-	
-	.graph-type-selector {
-		position: absolute;
-		top: 10px;
-		left: 10px;
-		z-index: 1001;
-		padding: 5px;
-		border-radius: 5px;
-		background: #f9a44a;
-		color: #121212;
-		border: none;
-		font-weight: bold;
-		cursor: pointer;
-	}
-	
-	#temperatureChart {
-		width: 100%;
-		height: 100%;
-	}
-</style>
+	<!-- Date Selector -->
+	<div class="absolute top-5 left-1/2 -translate-x-1/2 bg-dark-surface/90 p-3 rounded-lg shadow-lg z-[999] backdrop-blur-sm">
+		<label for="date-selector" class="text-white text-sm mr-2">Select Date:</label>
+		<select 
+			id="date-selector" 
+			bind:value={selectedDate}
+			class="py-1.5 px-3 rounded-md border-none bg-amber text-dark-bg font-bold cursor-pointer"
+		>
+			{#each dates as date}
+				<option value={date}>{formatDateTime(date)}</option>
+			{/each}
+		</select>
+	</div>
+
+	<!-- Water Off Alert -->
+	{#if showWaterOffAlert}
+		<div class="absolute top-[70px] left-1/2 -translate-x-1/2 bg-red-500 text-white px-5 py-2.5 rounded-md shadow-lg z-[1001] font-semibold">
+			<p class="m-0">Water Mask is off!</p>
+		</div>
+	{/if}
+
+	<!-- Color Scale Selector -->
+	<div class="absolute top-5 left-[70%] -translate-x-[30%] bg-dark-surface/90 p-3 rounded-lg shadow-lg z-[999] backdrop-blur-sm">
+		<label for="color-selector" class="text-white text-sm mr-2">Color Scale:</label>
+		<select 
+			id="color-selector" 
+			bind:value={selectedColorScale}
+			class="py-1.5 px-3 rounded-md border-none bg-amber text-dark-bg font-bold cursor-pointer"
+		>
+			<option value="relative">Relative</option>
+			<option value="fixed">Fixed</option>
+			<option value="gray">Grayscale</option>
+		</select>
+		<div class="mt-2.5 w-full h-5 rounded-md relative {selectedColorScale === 'gray' ? 'color-scale-gray' : 'color-scale-rainbow'}">
+			<span class="absolute top-6 left-0 text-xs text-white">
+				{selectedColorScale === 'relative' ? convertTemp(relativeMin).toFixed(2) : convertTemp(globalMin).toFixed(2)}
+			</span>
+			<span class="absolute top-6 left-1/2 -translate-x-1/2 text-xs text-white">{unitSymbol}</span>
+			<span class="absolute top-6 right-0 text-xs text-white">
+				{selectedColorScale === 'relative' ? convertTemp(relativeMax).toFixed(2) : convertTemp(globalMax).toFixed(2)}
+			</span>
+		</div>
+	</div>
+
+	<!-- Graph Container -->
+	<div class="fixed bottom-5 left-5 w-[400px] h-[600px] bg-dark-surface/90 rounded-xl p-4 pt-12 shadow-lg z-[1000] backdrop-blur-sm">
+		<select 
+			bind:value={selectedGraphType} 
+			class="absolute top-3 left-3 z-[1001] py-1.5 px-3 rounded-md bg-amber text-dark-bg border-none font-bold cursor-pointer"
+		>
+			<option value="summary">Statistics</option>
+			<option value="histogram">Distribution</option>
+			<option value="line">Temperatures</option>
+			<option value="scatter">Latitude</option>
+		</select>
+		<canvas bind:this={chartElement} class="w-full h-full"></canvas>
+	</div>
+
+	<!-- Sidebar -->
+	<div class="fixed top-0 right-0 w-[350px] h-screen bg-dark-surface/90 p-4 overflow-y-auto flex flex-col items-center backdrop-blur-md shadow-[-4px_0_10px_rgba(0,0,0,0.3)] z-[1000]">
+		<h2 class="text-center mb-4 text-lg font-semibold text-white">
+			Temperature Data for <span class="text-cyan">{featureId}</span>
+		</h2>
+		
+		<!-- Unit Selector -->
+		<div class="mt-2.5 flex gap-2.5 justify-center">
+			<button 
+				class="px-4 py-2 border-none rounded-md font-bold cursor-pointer transition-colors duration-300 {currentUnit === 'Kelvin' ? 'bg-blue-600 text-white' : 'bg-amber text-dark-bg'}"
+				onclick={() => currentUnit = 'Kelvin'}
+			>
+				Kelvin
+			</button>
+			<button 
+				class="px-4 py-2 border-none rounded-md font-bold cursor-pointer transition-colors duration-300 {currentUnit === 'Celsius' ? 'bg-blue-600 text-white' : 'bg-amber text-dark-bg'}"
+				onclick={() => currentUnit = 'Celsius'}
+			>
+				Celsius
+			</button>
+			<button 
+				class="px-4 py-2 border-none rounded-md font-bold cursor-pointer transition-colors duration-300 {currentUnit === 'Fahrenheit' ? 'bg-blue-600 text-white' : 'bg-amber text-dark-bg'}"
+				onclick={() => currentUnit = 'Fahrenheit'}
+			>
+				Fahrenheit
+			</button>
+		</div>
+		
+		<!-- Temperature Table -->
+		<div class="w-full mt-5 overflow-x-auto rounded-xl bg-white/5 shadow-[0_4px_15px_rgba(0,0,0,0.2)]">
+			<table class="w-full text-white text-sm border-separate border-spacing-0 rounded-xl overflow-hidden">
+				<thead>
+					<tr>
+						<th class="py-3 px-2 bg-amber/80 text-dark-bg font-semibold uppercase tracking-wider sticky top-0">Point</th>
+						<th class="py-3 px-2 bg-amber/80 text-dark-bg font-semibold uppercase tracking-wider sticky top-0">X</th>
+						<th class="py-3 px-2 bg-amber/80 text-dark-bg font-semibold uppercase tracking-wider sticky top-0">Y</th>
+						<th class="py-3 px-2 bg-amber/80 text-dark-bg font-semibold uppercase tracking-wider sticky top-0">Temp ({unitSymbol})</th>
+					</tr>
+				</thead>
+				<tbody>
+					{#each temperatureData.slice(0, 10) as point, i}
+						<tr class="even:bg-white/[0.03] hover:bg-amber/15 transition-colors">
+							<td class="py-2.5 px-2 border-b border-white/5 font-bold text-amber">{i + 1}</td>
+							<td class="py-2.5 px-2 border-b border-white/5">{parseFloat(point.x || point.longitude || 0).toFixed(4)}</td>
+							<td class="py-2.5 px-2 border-b border-white/5">{parseFloat(point.y || point.latitude || 0).toFixed(4)}</td>
+							<td class="py-2.5 px-2 border-b border-white/5">{convertTemp(parseFloat(point.LST_filter || point.temperature || 0)).toFixed(2)}</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+			<button 
+				class="w-full bg-blue-500/80 hover:bg-blue-500 text-white border-none py-2 px-3 rounded-md font-bold cursor-pointer transition-colors duration-300 mt-2.5"
+				onclick={() => goto(`/archive/${featureId}`)}
+			>
+				Download All Data
+			</button>
+		</div>
+	</div>
+</div>
