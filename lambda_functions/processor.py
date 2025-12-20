@@ -137,13 +137,21 @@ def log_job_to_d1(
         return None
 
 
-def insert_metadata_to_d1(feature_id: str, date: str, metadata: Dict):
+def insert_metadata_to_d1(
+    feature_id: str,
+    date: str,
+    metadata: Dict,
+    csv_r2_key: str,
+    tif_r2_key: str,
+    png_r2_keys: Dict[str, str],
+):
     """Insert only metadata into D1 (temperature data stays in R2)"""
     try:
-        # Construct R2 file paths
-        csv_path = f"{feature_id}/csv/{date}.csv"
-        tif_path = f"{feature_id}/tif/{date}.tif"
-        png_path = f"{feature_id}/png/{date}.png"
+        # Use actual R2 paths from upload
+        csv_path = csv_r2_key
+        tif_path = tif_r2_key
+        # Use relative scale PNG (main PNG)
+        png_path = png_r2_keys.get("relative", png_r2_keys.get("fixed", ""))
 
         # Insert metadata with file paths
         meta_sql = """
@@ -190,7 +198,7 @@ def insert_metadata_to_d1(feature_id: str, date: str, metadata: Dict):
         feature_params = [feature_id, name, location, date, int(time.time())]
         query_d1(feature_sql, feature_params)
 
-        print(f"✓ Inserted {len(data_rows)} temperature points to D1")
+        print(f"✓ Inserted metadata to D1 with R2 paths")
 
     except Exception as e:
         print(f"Error inserting to D1: {e}")
@@ -390,6 +398,7 @@ def process_rasters(
     upload_to_r2(s3_client, bucket_name, csv_key, filter_csv_path, "text/csv")
 
     # PNGs for all scales
+    png_r2_keys = {}
     for scale in ["relative", "fixed", "gray"]:
         try:
             png_bytes = tif_to_png(filter_tif_path, color_scale=scale)
@@ -398,6 +407,7 @@ def process_rasters(
                 f.write(png_bytes.getvalue())
             png_key = f"ECO/{name}/{location}/{base_name}_{scale}.png"
             upload_to_r2(s3_client, bucket_name, png_key, png_path, "image/png")
+            png_r2_keys[scale] = png_key
         except Exception as e:
             print(f"PNG generation failed for {scale}: {e}")
 
@@ -419,9 +429,9 @@ def process_rasters(
     meta_key = f"ECO/{name}/{location}/metadata/{base_name}_metadata.json"
     upload_to_r2(s3_client, bucket_name, meta_key, metadata_path, "application/json")
 
-    # Insert metadata into D1 (CSV data already uploaded to R2)
+    # Insert metadata into D1 with actual R2 paths
     feature_id = f"{name}/{location}" if location != "lake" else name
-    insert_metadata_to_d1(feature_id, date, metadata)
+    insert_metadata_to_d1(feature_id, date, metadata, csv_key, tif_key, png_r2_keys)
 
     # Update index (keep for backward compatibility during transition)
     index_key = f"ECO/{name}/{location}/index.json"
@@ -514,6 +524,7 @@ def handler(event, context):
             endpoint_url=r2_endpoint,
             aws_access_key_id=r2_key,
             aws_secret_access_key=r2_secret,
+            region_name="auto",
         )
 
         for (aid, date), files in files_by_aid_date.items():
