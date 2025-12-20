@@ -168,7 +168,26 @@ def insert_metadata_to_d1(
         # Use relative scale PNG (main PNG)
         png_path = png_r2_keys.get("relative", png_r2_keys.get("fixed", ""))
 
-        # Insert metadata with file paths
+        # Insert/update feature record FIRST (to satisfy foreign key constraint)
+        name, location = (
+            feature_id.split("/") if "/" in feature_id else (feature_id, "lake")
+        )
+        feature_sql = """
+        INSERT INTO features (id, name, location, latest_date, last_updated)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            latest_date = CASE
+                WHEN excluded.latest_date > latest_date THEN excluded.latest_date
+                ELSE latest_date
+            END,
+            last_updated = excluded.last_updated
+        """
+        import time
+
+        feature_params = [feature_id, name, location, date, int(time.time())]
+        query_d1(feature_sql, feature_params)
+
+        # Now insert metadata with file paths (after feature exists)
         meta_sql = """
         INSERT OR REPLACE INTO temperature_metadata 
         (feature_id, date, min_temp, max_temp, mean_temp, median_temp, std_dev,
@@ -193,25 +212,6 @@ def insert_metadata_to_d1(
             png_path,
         ]
         query_d1(meta_sql, meta_params)
-
-        # Update feature record
-        name, location = (
-            feature_id.split("/") if "/" in feature_id else (feature_id, "lake")
-        )
-        feature_sql = """
-        INSERT INTO features (id, name, location, latest_date, last_updated)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-            latest_date = CASE
-                WHEN excluded.latest_date > latest_date THEN excluded.latest_date
-                ELSE latest_date
-            END,
-            last_updated = excluded.last_updated
-        """
-        import time
-
-        feature_params = [feature_id, name, location, date, int(time.time())]
-        query_d1(feature_sql, feature_params)
 
         print(f"✓ Inserted metadata to D1 with R2 paths")
 
