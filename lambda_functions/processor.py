@@ -69,7 +69,18 @@ def query_d1(sql: str, params: List = None) -> Dict:
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
-        return response.json()
+        result = response.json()
+        # D1 API returns result in a specific format
+        # {"success": true, "result": [{"success": true, "meta": {...}, "results": [...]}]}
+        return result
+    except requests.exceptions.HTTPError as e:
+        # Log the full error response for debugging
+        try:
+            error_details = e.response.json()
+            print(f"D1 query error: {e}, Details: {error_details}")
+        except:
+            print(f"D1 query error: {e}")
+        return {"success": False, "error": str(e)}
     except Exception as e:
         print(f"D1 query error: {e}")
         return {"success": False, "error": str(e)}
@@ -106,12 +117,16 @@ def log_job_to_d1(
             ]
             result = query_d1(sql, params)
 
-            # Return the job ID (if available in response)
-            if result.get("success") is not False:
-                # Get last insert ID
-                last_id_result = query_d1("SELECT last_insert_rowid() as id")
-                if last_id_result.get("results"):
-                    return last_id_result["results"][0].get("id")
+            # D1 API returns the last_row_id in the meta object
+            # Response format: {"success": true, "result": [{"meta": {"last_row_id": N}}]}
+            if result.get("success") and result.get("result"):
+                first_result = (
+                    result["result"][0]
+                    if isinstance(result["result"], list)
+                    else result["result"]
+                )
+                if first_result and "meta" in first_result:
+                    return first_result["meta"].get("last_row_id")
         else:
             # Update existing job
             sql = """
