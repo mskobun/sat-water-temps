@@ -1,6 +1,7 @@
 // Hybrid architecture: D1 for metadata, R2 for temperature data
 
 import type { D1Database, R2Bucket } from '@cloudflare/workers-types';
+import Papa from 'papaparse';
 
 export const BUCKET_PREFIX = "ECO";
 
@@ -12,27 +13,22 @@ export function buildFeaturePath(featureId: string, suffix: string): string {
  * Parse CSV text into temperature data array
  */
 function parseCSV(csvText: string): Array<{ x: number; y: number; temperature: number }> {
-  const lines = csvText.trim().split('\n');
-  if (lines.length < 2) return [];
+  const result = Papa.parse(csvText, {
+    header: true,
+    skipEmptyLines: true,
+    transformHeader: (header: string) => header.trim(),
+    transform: (value: string) => value.trim()
+  });
 
-  const headers = lines[0].split(',').map(h => h.trim());
-  const data = [];
-
-  for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split(',');
-    const row: any = {};
-    headers.forEach((header, idx) => {
-      row[header] = values[idx]?.trim();
-    });
-    
-    data.push({
-      x: parseFloat(row.x || 0),
-      y: parseFloat(row.y || 0),
-      temperature: parseFloat(row.LST_filter || row.temperature || 0)
-    });
+  if (result.errors.length > 0) {
+    console.warn('CSV parsing errors:', result.errors);
   }
 
-  return data;
+  return result.data.map((row: any) => ({
+    x: parseFloat(row.x || 0),
+    y: parseFloat(row.y || 0),
+    temperature: parseFloat(row.LST_filter || row.temperature || 0)
+  }));
 }
 
 /**
@@ -62,8 +58,13 @@ export async function queryTemperatureData(
       return null;
     }
 
+    if (!r2) {
+      console.error(`R2 bucket not available`);
+      return null;
+    }
+
     // Fetch CSV from R2 using the path stored in D1
-    const csvPath = metaResult.csv_path;
+    const csvPath = String(metaResult.csv_path);
     const csvObject = await r2.get(csvPath);
     
     if (!csvObject) {
