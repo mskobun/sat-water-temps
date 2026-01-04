@@ -31,3 +31,4 @@ test.txt
 node_modules/
 .wrangler/
 .svelte-kit/
+.DS_Store
