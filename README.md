@@ -1,119 +1,142 @@
-# Satellite-Based Water Temperature Monitoring Platform
-Prepared by **Group 14**:
+# Satellite Water Temperature Monitoring
 
+A web platform for monitoring water temperature data from ECOSTRESS satellites. Visualizes temperature trends across water bodies in Southeast Asia with interactive maps, charts, and historical data.
 
+## Architecture
 
-| Name | Student ID | Email |
-| ----------- | ----------- | ----------- |
-| Abdullah Usmani | 20615297 | hcyau1@nottingham.edu.my |
-| Darren Raj Manuel Raj | 20491070 | hydm2@nottingham.edu.my |
-| Jeptha Ashter Tandri | 20600677 | hcyjt6@nottingham.edu.my |
-| Muhammad Ahmad Suhail | 20607733 | hcyms5@nottingham.edu.my |
-| Muhammad Syukran Shabaruddin | 20512078 | hcyms4@nottingham.edu.my |
+- **Frontend**: SvelteKit deployed on Cloudflare Pages
+- **Backend Processing**: AWS Lambda functions orchestrated by Step Functions
+- **Storage**: Cloudflare R2 (object storage) + D1 (database)
+- **Data Source**: NASA AppEEARS API (ECOSTRESS LST data)
 
+The system automatically processes daily satellite data:
+1. CloudWatch triggers Initiator Lambda daily
+2. Initiator submits task to AppEEARS API
+3. Step Function polls for completion
+4. Manifest Processor extracts file lists
+5. Processor Lambda downloads, processes, and stores data in R2/D1
 
-This project is a web-based platform for monitoring real-time water temperature data from Ecostress and Sentinel 2 satellites. The platform visualizes temperature trends across major water bodies in Southeast Asia, allowing users to track water temperature, view historical data, and see predictions for various locations.
+See [DAILY_PROCESSING_OVERVIEW.md](./DAILY_PROCESSING_OVERVIEW.md) for detailed pipeline documentation.
 
-## Features
+## Tech Stack
 
-- Real-time temperature monitoring: View water temperature data for dams and rivers in Southeast Asia.
-- Interactive Charts: Line charts for historical temperature data and doughnut charts for future temperature predictions.
-- Location-Based Data: Select from various water body locations (e.g., Baleh Dam, Murum Dam, Bakun Dam) and see relevant data.
-- Map Visualization: Interactive map displaying dam locations with hoverable markers showing dam names.
+- **Frontend**: SvelteKit, TypeScript, Tailwind CSS, Leaflet
+- **Backend**: AWS Lambda (Python), Step Functions, SQS
+- **Storage**: Cloudflare D1 (SQLite), Cloudflare R2 (S3-compatible)
+- **Infrastructure**: Terraform, Cloudflare Pages
 
-## Running
-Ensure all required libraries are installed before running the code:
+## Local Development
 
-***Python***
-pip install rasterio
-pip install geopandas
-pip install pandas
-pip install numpy
-pip install python-dotenv
-pip install requests
+### Prerequisites
 
-***R***
-install.packages("terra", dependencies = TRUE)
-install.packages("sf", dependencies = TRUE)
-install.packages("mgcv", dependencies = TRUE)
+- Node.js 20+
+- npm
+- Wrangler CLI (installed via npm)
+- Cloudflare account with D1 and R2 access
 
-The folder of this program should have the following structure
-```shell
-│   Shape_to_GeoJSON.py
-│   GAM4water_0.0.4.R
-│   ECO_Converted.py
-│   ...
-├───polygon
-│   │   testbed.qgz
-│   ├───test
-│   │       site_full_ext_Test.shp
-│   │       ...
-│   └───corrected
-│           site_full_ext_corrected.shp
-│           ...
-├───tests
-│       test_local.py
-│       test_script.py
-├───ECO
-└────ECOraw
+### Setup
+
+```bash
+# Install dependencies
+npm install
+
+# Authenticate with Cloudflare
+npx wrangler login
+
+# Run dev server (frontend only, no bindings)
+npm run dev
+
+# Or run with full Cloudflare bindings (D1 + R2)
+npm run build
+npm run wrangler:dev
 ```
 
-## User Manual
-Before the script can be run, user credentials must be entered. Open the core processing script (ECO_Converted.py) and do the following:
-- Navigate to code line 22 and ensure all directory paths are correct
-``` shell
-roi_test_path = os.path.join(base_dir, "polygon/test/site_full_ext_Test.shp")
-raw_path = os.path.join(base_dir, "ECOraw")
-filtered_path = os.path.join(base_dir, "ECO")
-roi_path = os.path.join(base_dir, "polygon/corrected/site_full_ext_corrected.shp")
-log_path = os.path.join(base_dir, "logs")
-R_path = os.path.join(base_dir, "GAM4water_0.0.4.R")
-```
-- Navigate to code line 63 and enter EarthData login credentials
-``` shell
-# Define Earthdata login credentials (Replace with your actual credentials)
-user = ''
-password = ''
-```
-- (Optional) Navigate to code line 76 & 83 to change time frame of data download
-``` shell
-# Get Today Date As End Date
-print("Setting Dates")
-today_date = datetime.now()
-today_date_str = today_date.strftime("%m-%d-%Y")
-ed = today_date_str
-# ed = "04-01-2025"
+The app runs at:
+- `http://localhost:5173` (Vite dev server, no bindings)
+- `http://localhost:8788` (Wrangler dev, with bindings)
 
+### Database Migrations
 
-# Get Yesterday Date as Start Date
-yesterday_date = today_date - timedelta(days=1)
-yesterday_date_str = yesterday_date.strftime("%m-%d-%Y")
-sd = yesterday_date_str
-# sd = "03-26-2025"
+```bash
+# Apply migrations to remote database
+npx wrangler d1 migrations apply sat-water-temps-db --remote
+
+# Apply migrations to local database
+npx wrangler d1 migrations apply sat-water-temps-db --local
 ```
 
+See [LOCAL_DEVELOPMENT.md](./LOCAL_DEVELOPMENT.md) for detailed development guide.
 
-## Website Functionality:
-Live URL:  https://sat-water-temps-c4590981374e.herokuapp.com
+## Deployment
 
+### Frontend (Cloudflare Pages)
 
-**To find temperature data for a specific lake:**
-1. Scroll down in the home page to the world map
-2. Pan through the map to the location of specified lake by holding left click and dragging
-3. As you hover the cursor above the lake it should highlight green, click it once
-4. It will now direct you to the lake page
+```bash
+npm run deploy
+```
 
+Or connect your GitHub repo to Cloudflare Pages for automatic deployments.
 
-**Features of the lake page:**
-- Temperature statistics & distribution shown on the bottom left
-    - To alternate graphs simply use the drop down selector on the top left of the graph tab
-    - To alternate temperature units between Kelvin, Celsius, and Fahrenheit click either of the three buttons on the top right of the screen
-- Temperature Visualization shown across the water body
-    - To alternate color spaces between Relative, Fixed, and Grayscale use the drop down selector in the color scale tab
-- Temperature Data across multiple dates
-    - To alternate dates of data observation, use the drop down selector on the top center of the screen
-- Archive Data, to access the archive data screen simply click the blue “Download All Data” button
+### Backend (AWS Lambda)
 
-**Features of the Archive Page:**
-- There is an archive page for each lake containing all temperature data held in our system
-- To download data for a certain date, navigate to it’s record and simply click the “Download TIF” or “Download CSV” file depending on the format you would like to use
+Infrastructure is managed with Terraform:
+
+```bash
+cd terraform
+terraform init
+terraform plan
+terraform apply
+```
+
+Lambda functions are deployed as Docker images to ECR. See `terraform/` directory for infrastructure definitions.
+
+## Configuration
+
+### Wrangler (`wrangler.toml`)
+
+- D1 database: `sat-water-temps-db`
+- R2 bucket: `multitifs`
+- Database ID: Update after Terraform creates D1 database
+
+### Environment Variables
+
+**Lambda Functions:**
+- `APPEEARS_USER` / `APPEEARS_PASS`: NASA AppEEARS credentials
+- `STATE_MACHINE_ARN`: Step Function ARN
+- `SQS_QUEUE_URL`: SQS queue URL
+- `R2_ENDPOINT`, `R2_BUCKET_NAME`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`: Cloudflare R2
+- `D1_DATABASE_ID`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`: Cloudflare D1
+
+Set via Terraform or AWS Lambda environment variables.
+
+## Project Structure
+
+```
+.
+├── src/                    # SvelteKit frontend
+│   ├── routes/            # Pages and API routes
+│   └── lib/               # Shared utilities
+├── lambda_functions/      # AWS Lambda handlers
+│   ├── initiator.py       # Submits AppEEARS tasks
+│   ├── status_checker.py  # Polls task status
+│   ├── manifest_processor.py  # Processes file manifests
+│   └── processor.py       # Downloads and processes data
+├── terraform/             # Infrastructure as code
+├── migrations/            # D1 database migrations
+└── static/                # Static assets (GeoJSON polygons)
+```
+
+## API Endpoints
+
+- `GET /api/polygons` - Get GeoJSON polygons for all features
+- `GET /api/feature/[id]/get_dates` - Get available dates for a feature
+- `GET /api/feature/[id]/temperature` - Get temperature data (metadata + CSV)
+- `GET /api/feature/[id]/tif/[doy]/[scale]` - Get temperature visualization
+- `GET /api/latest_lst_tif/[id]` - Get latest temperature image
+- `GET /api/admin/jobs` - Admin job tracking dashboard
+
+## Documentation
+
+- [DAILY_PROCESSING_OVERVIEW.md](./DAILY_PROCESSING_OVERVIEW.md) - Data processing pipeline
+- [LOCAL_DEVELOPMENT.md](./LOCAL_DEVELOPMENT.md) - Development setup guide
+- [D1_SCHEMA_DOCUMENTATION.sql](./D1_SCHEMA_DOCUMENTATION.sql) - Database schema
