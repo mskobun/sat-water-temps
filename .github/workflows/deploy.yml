@@ -35,6 +35,9 @@ jobs:
   deploy-infrastructure:
     name: Deploy Infrastructure & Lambdas
     runs-on: ubuntu-latest
+    concurrency:
+      group: terraform-apply
+      cancel-in-progress: false
     permissions:
       id-token: write
       contents: read
