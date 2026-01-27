@@ -14,6 +14,8 @@ venv/
 *.tfvars
 .terraform/
 .terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
 
 # Static & test data
 static/
