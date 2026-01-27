@@ -28,6 +28,21 @@ npx wrangler d1 migrations apply sat-water-temps-db --local
 cd terraform && terraform apply
 ```
 
+## Verifying Display Changes
+
+When making frontend/UI changes, verify them using the Cursor browser extension (if available):
+
+1. **Visit the development server** (assume it's already running):
+   - Try http://localhost:5173 (frontend-only, `npm run dev`)
+   - Or http://localhost:8788 (full stack with Cloudflare bindings, `npm run wrangler:dev`)
+
+2. **Use Cursor browser extension**:
+   - The cursor-browser-extension MCP server provides tools to navigate and interact with web pages
+   - Navigate to the local development URL and verify visual changes, test interactions, and check responsive behavior
+   - This is especially useful for testing UI components, styling changes, and user interactions without leaving the editor
+
+3. **Alternative**: Open the development URL in your regular browser if the Cursor browser extension is not available
+
 ## Architecture Overview
 
 This is a satellite water temperature monitoring platform with a split architecture:
