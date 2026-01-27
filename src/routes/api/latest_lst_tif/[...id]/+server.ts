@@ -1,4 +1,4 @@
-import { getLatestDate, buildFeaturePath } from '$lib/db';
+import { getLatestDate } from '$lib/db';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params, platform }) => {
@@ -17,11 +17,16 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 		return new Response('Not found', { status: 404 });
 	}
 
-	// Extract name and location from featureId (format: "name/location" or just "name")
-	const [name, location = 'lake'] = featureId.split('/');
-	const pngKey = buildFeaturePath(featureId, `${name}_${location}_${latestDate}_filter_relative.png`);
+	// Get the stored png_path directly from database
+	const meta = await db.prepare(
+		"SELECT png_path FROM temperature_metadata WHERE feature_id = ? AND date = ?"
+	).bind(featureId, latestDate).first();
+	
+	if (!meta?.png_path) {
+		return new Response('Not found', { status: 404 });
+	}
 
-	const obj = await r2.get(pngKey);
+	const obj = await r2.get(String(meta.png_path));
 	if (!obj) {
 		return new Response('Not found', { status: 404 });
 	}

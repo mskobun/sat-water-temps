@@ -4,6 +4,8 @@
 	import { goto } from '$app/navigation';
 
 	const featureId = $page.params.id;
+	// Parse name and location from featureId (format: "name/location" or just "name")
+	const [featureName, featureLocation = 'lake'] = featureId.split('/');
 	
 	let mapElement: HTMLDivElement;
 	let chartElement: HTMLCanvasElement;
@@ -81,7 +83,12 @@
 		try {
 			const response = await fetch('/api/polygons');
 			const geojson = await response.json();
-			const feature = geojson.features.find((f: any) => f.properties && f.properties.name === featureId);
+			// Find feature by both name AND location to avoid matching wrong feature
+			const feature = geojson.features.find((f: any) => 
+				f.properties && 
+				f.properties.name === featureName && 
+				(f.properties.location || 'lake') === featureLocation
+			);
 			
 			if (!feature) {
 				alert('Feature not found');
@@ -156,7 +163,8 @@
 		try {
 			const response = await fetch(`/api/feature/${featureId}/check_wtoff/${selectedDate}`);
 			const data = await response.json();
-			showWaterOffAlert = data.wtoff || false;
+			// Show warning when wtoff=true (water not detected, data may be empty/unreliable)
+			showWaterOffAlert = Boolean(data.wtoff);
 		} catch (err) {
 			console.error('Error checking water off:', err);
 		}
@@ -306,6 +314,8 @@
 			loadDates(),
 			loadTemperatureData()
 		]);
+		// Check wtoff after all initialization completes
+		checkWaterOff();
 	});
 </script>
 
@@ -341,8 +351,8 @@
 
 	<!-- Water Off Alert -->
 	{#if showWaterOffAlert}
-		<div class="absolute top-[70px] left-1/2 -translate-x-1/2 bg-red-500 text-white px-5 py-2.5 rounded-md shadow-lg z-[1001] font-semibold">
-			<p class="m-0">Water Mask is off!</p>
+		<div class="absolute top-[70px] left-1/2 -translate-x-1/2 bg-amber-500 text-dark-bg px-5 py-2.5 rounded-md shadow-lg z-[1001] font-semibold">
+			<p class="m-0">Water not detected - data may include land pixels</p>
 		</div>
 	{/if}
 

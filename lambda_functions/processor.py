@@ -361,7 +361,7 @@ def process_rasters(
         }
     )
 
-    # Filter
+    # Filter by QC and cloud first
     water_mask_flag = df["wt"].isin([1]).any()
 
     for col in ["LST", "LST_err", "QC", "EmisWB", "height"]:
@@ -371,7 +371,8 @@ def process_rasters(
         df[f"{col}_filter"] = np.where(df["cloud"] == 1, np.nan, df[f"{col}_filter"])
 
     suffix = ""
-    if not water_mask_flag:
+    if water_mask_flag:
+        # Water detected - filter to keep only water pixels
         for col in [
             "LST_filter",
             "LST_err_filter",
@@ -380,6 +381,8 @@ def process_rasters(
             "height_filter",
         ]:
             df[f"{col}"] = np.where(df["wt"] == 0, np.nan, df[col])
+    else:
+        # No water detected - keep all data but flag as unreliable
         suffix = "_wtoff"
 
     # Create filtered raster

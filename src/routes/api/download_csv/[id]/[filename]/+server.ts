@@ -1,10 +1,5 @@
 import type { RequestHandler } from './$types';
-
-const BUCKET_PREFIX = "ECO";
-
-function buildFeaturePath(featureId: string, suffix: string): string {
-	return `${BUCKET_PREFIX}/${featureId}/lake/${suffix}`;
-}
+import { buildFeaturePath } from '$lib/db';
 
 export const GET: RequestHandler = async ({ params, platform }) => {
 	const r2 = platform?.env?.R2_DATA;

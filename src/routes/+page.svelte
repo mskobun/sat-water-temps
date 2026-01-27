@@ -37,8 +37,11 @@
 						mouseover: () => layer.setStyle({ color: '#00ff00' }),
 						mouseout: () => layer.setStyle({ color: '#8abbff' }),
 						click: () => {
-							const featureId = feature.properties.name;
-							if (featureId) {
+							const name = feature.properties.name;
+							const location = feature.properties.location || 'lake';
+							// Lakes use just name, rivers use name/location
+							const featureId = location === 'lake' ? name : `${name}/${location}`;
+							if (name) {
 								goto(`/feature/${featureId}`);
 							}
 						}

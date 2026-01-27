@@ -1,29 +1,43 @@
 import type { RequestHandler } from './$types';
 
-const BUCKET_PREFIX = "ECO";
-
-function buildFeaturePath(featureId: string, suffix: string): string {
-	return `${BUCKET_PREFIX}/${featureId}/lake/${suffix}`;
-}
-
 export const GET: RequestHandler = async ({ params, platform }) => {
+	const db = platform?.env?.DB;
 	const r2 = platform?.env?.R2_DATA;
 	
-	if (!r2) {
-		return new Response(JSON.stringify({ error: 'R2 storage not available' }), { 
+	if (!db || !r2) {
+		return new Response(JSON.stringify({ error: 'Service not available' }), { 
 			status: 500,
 			headers: { 'content-type': 'application/json' }
 		});
 	}
 
-	// Join the array from rest parameter back into a string
 	const featureId = params.id;
 	const doy = params.doy;
 	const scale = params.scale;
 	
-	// Extract name and location from featureId (format: "name/location" or just "name")
-	const [name, location = "lake"] = featureId.split("/");
-	const pngKey = buildFeaturePath(featureId, `${name}_${location}_${doy}_filter_${scale}.png`);
+	// Get the stored png_path from database and replace scale suffix
+	let pngKey = "";
+	try {
+		const meta = await db.prepare(
+			"SELECT png_path FROM temperature_metadata WHERE feature_id = ? AND date = ?"
+		).bind(featureId, doy).first();
+		
+		if (!meta?.png_path) {
+			return new Response(JSON.stringify({ error: 'Metadata not found' }), { 
+				status: 404,
+				headers: { 'content-type': 'application/json' }
+			});
+		}
+		
+		// Replace the scale suffix (stored path uses 'relative')
+		pngKey = String(meta.png_path).replace('_relative.png', `_${scale}.png`);
+	} catch (err) {
+		console.error('Error fetching metadata:', err);
+		return new Response(JSON.stringify({ error: 'Database error' }), { 
+			status: 500,
+			headers: { 'content-type': 'application/json' }
+		});
+	}
 	
 	try {
 		const obj = await r2.get(pngKey);
