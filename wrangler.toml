@@ -3,7 +3,7 @@ pages_build_output_dir = ".svelte-kit/cloudflare"
 compatibility_date = "2025-12-11"
 
 # R2 bindings for Pages Functions
-# Using production bucket for both dev and prod for now
+# Using production bucket for both dev and prod (read-only for local dev)
 [[r2_buckets]]
 binding = "R2_DATA"
 bucket_name = "multitifs"
@@ -11,10 +11,10 @@ preview_bucket_name = "multitifs"
 remote = true
 
 # D1 database for temperature data and job tracking
+# Local dev uses .wrangler/state/v3/d1/ - seed with `npm run db:seed`
 # Note: database_id will be populated after terraform apply
 # Run: terraform -chdir=terraform output -raw d1_database_id
 [[d1_databases]]
 binding = "DB"
 database_name = "sat-water-temps-db"
 database_id = "6fbaa491-9631-4afa-9c8f-0e7b4c133fd5"
-remote = true

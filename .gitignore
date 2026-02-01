@@ -34,3 +34,6 @@ node_modules/
 .wrangler/
 .svelte-kit/
 .DS_Store
+
+# Local D1 seed data (exported from prod)
+seed.sql

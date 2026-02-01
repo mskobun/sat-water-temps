@@ -10,7 +10,12 @@
     "deploy": "npm run build && wrangler pages deploy .svelte-kit/cloudflare",
     "lint": "tsc --noEmit --project functions/tsconfig.json",
     "wrangler:dev": "npm run build && wrangler pages dev .svelte-kit/cloudflare --compatibility-date=2025-12-11",
-    "wrangler:dev:local": "npm run build && wrangler pages dev .svelte-kit/cloudflare --local --compatibility-date=2025-12-11"
+    "wrangler:dev:remote": "npm run build && wrangler pages dev .svelte-kit/cloudflare --remote --compatibility-date=2025-12-11",
+    "db:export": "wrangler d1 export sat-water-temps-db --remote --output=seed.sql",
+    "db:reset": "rm -rf .wrangler/state/v3/d1",
+    "db:seed": "npm run db:reset && wrangler d1 execute sat-water-temps-db --local --file=seed.sql",
+    "db:migrate:local": "wrangler d1 migrations apply sat-water-temps-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply sat-water-temps-db --remote"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240512.0",

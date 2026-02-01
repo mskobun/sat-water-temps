@@ -11,8 +11,11 @@ npm install
 # Development (frontend only, no D1/R2 bindings)
 npm run dev                    # Runs at http://localhost:5173
 
-# Development with Cloudflare bindings (D1 + R2)
-npm run build && npm run wrangler:dev   # Runs at http://localhost:8788
+# Development with Cloudflare bindings (local D1 + remote R2)
+npm run wrangler:dev           # Runs at http://localhost:8788
+
+# Development with full remote bindings (prod D1 + prod R2)
+npm run wrangler:dev:remote    # Runs at http://localhost:8788
 
 # Type checking
 npm run lint                   # tsc --noEmit on functions/
@@ -20,13 +23,33 @@ npm run lint                   # tsc --noEmit on functions/
 # Deploy frontend to Cloudflare Pages
 npm run deploy
 
-# Database migrations
-npx wrangler d1 migrations apply sat-water-temps-db --remote
-npx wrangler d1 migrations apply sat-water-temps-db --local
-
 # Deploy Lambda functions (requires AWS credentials)
 cd terraform && terraform apply
 ```
+
+## Local Database Staging
+
+Local development uses a local D1 database (stored in `.wrangler/state/v3/d1/`) with remote R2 for file access. This allows testing schema changes without affecting production.
+
+```bash
+# First-time setup: export prod data and seed locally
+npm run db:export              # Export prod D1 → seed.sql (full dump)
+npm run db:reset               # Clear local D1 state
+npm run db:seed                # Reset local D1 + apply seed.sql (no migrations; export is source of truth)
+
+# Database migrations (for schema changes; not used when seeding from export)
+npm run db:migrate:local       # Test migrations locally first
+npm run db:migrate:remote      # Deploy to prod when ready
+
+# Refresh local data from prod
+npm run db:export && npm run db:seed
+```
+
+**Workflow for schema changes:** (migrations apply to remote; local can be a prod clone via export/seed)
+1. Create migration file in `migrations/`
+2. `npm run db:migrate:local` — test locally (optional; use a fresh DB or reset first)
+3. `npm run wrangler:dev` — verify with frontend
+4. `npm run db:migrate:remote` — deploy to prod
 
 ## Verifying Display Changes
 

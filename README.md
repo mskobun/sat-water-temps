@@ -1,142 +1,66 @@
-# Satellite Water Temperature Monitoring
+# Satellite Water Temperatures
 
-A web platform for monitoring water temperature data from ECOSTRESS satellites. Visualizes temperature trends across water bodies in Southeast Asia with interactive maps, charts, and historical data.
+Satellite water temperature monitoring platform using ECOSTRESS data.
 
-## Architecture
-
-- **Frontend**: SvelteKit deployed on Cloudflare Pages
-- **Backend Processing**: AWS Lambda functions orchestrated by Step Functions
-- **Storage**: Cloudflare R2 (object storage) + D1 (database)
-- **Data Source**: NASA AppEEARS API (ECOSTRESS LST data)
-
-The system automatically processes daily satellite data:
-1. CloudWatch triggers Initiator Lambda daily
-2. Initiator submits task to AppEEARS API
-3. Step Function polls for completion
-4. Manifest Processor extracts file lists
-5. Processor Lambda downloads, processes, and stores data in R2/D1
-
-See [DAILY_PROCESSING_OVERVIEW.md](./DAILY_PROCESSING_OVERVIEW.md) for detailed pipeline documentation.
-
-## Tech Stack
-
-- **Frontend**: SvelteKit, TypeScript, Tailwind CSS, Leaflet
-- **Backend**: AWS Lambda (Python), Step Functions, SQS
-- **Storage**: Cloudflare D1 (SQLite), Cloudflare R2 (S3-compatible)
-- **Infrastructure**: Terraform, Cloudflare Pages
-
-## Local Development
-
-### Prerequisites
-
-- Node.js 20+
-- npm
-- Wrangler CLI (installed via npm)
-- Cloudflare account with D1 and R2 access
-
-### Setup
+## Quick Start
 
 ```bash
-# Install dependencies
 npm install
 
-# Authenticate with Cloudflare
-npx wrangler login
+# First-time setup: seed local database from prod
+npm run db:export
+npm run db:seed
 
-# Run dev server (frontend only, no bindings)
-npm run dev
-
-# Or run with full Cloudflare bindings (D1 + R2)
-npm run build
-npm run wrangler:dev
+# Start development server (local D1 + remote R2)
+npm run wrangler:dev    # http://localhost:8788
 ```
 
-The app runs at:
-- `http://localhost:5173` (Vite dev server, no bindings)
-- `http://localhost:8788` (Wrangler dev, with bindings)
+## Development
 
-### Database Migrations
+### Local Database Staging
+
+Local development uses a local D1 database with remote R2 for file access. This allows testing schema changes without affecting production.
+
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Frontend only (no D1/R2) at :5173 |
+| `npm run wrangler:dev` | Local D1 + remote R2 at :8788 |
+| `npm run wrangler:dev:remote` | Full prod (remote D1 + R2) at :8788 |
+
+### Database Commands
+
+| Command | Description |
+|---------|-------------|
+| `npm run db:export` | Export prod D1 → `seed.sql` |
+| `npm run db:seed` | Apply migrations + seed to local D1 |
+| `npm run db:migrate:local` | Apply migrations locally |
+| `npm run db:migrate:remote` | Apply migrations to prod |
+
+### Schema Change Workflow
+
+1. Create migration file in `migrations/`
+2. `npm run db:migrate:local` — test locally
+3. `npm run wrangler:dev` — verify with frontend
+4. `npm run db:migrate:remote` — deploy to prod
+
+### Refresh Local Data
 
 ```bash
-# Apply migrations to remote database
-npx wrangler d1 migrations apply sat-water-temps-db --remote
-
-# Apply migrations to local database
-npx wrangler d1 migrations apply sat-water-temps-db --local
+npm run db:export && npm run db:seed
 ```
-
-See [LOCAL_DEVELOPMENT.md](./LOCAL_DEVELOPMENT.md) for detailed development guide.
 
 ## Deployment
 
-### Frontend (Cloudflare Pages)
-
 ```bash
+# Frontend (Cloudflare Pages)
 npm run deploy
+
+# Backend (AWS Lambda)
+cd terraform && terraform apply
 ```
 
-Or connect your GitHub repo to Cloudflare Pages for automatic deployments.
+## Architecture
 
-### Backend (AWS Lambda)
-
-Infrastructure is managed with Terraform:
-
-```bash
-cd terraform
-terraform init
-terraform plan
-terraform apply
-```
-
-Lambda functions are deployed as Docker images to ECR. See `terraform/` directory for infrastructure definitions.
-
-## Configuration
-
-### Wrangler (`wrangler.toml`)
-
-- D1 database: `sat-water-temps-db`
-- R2 bucket: `multitifs`
-- Database ID: Update after Terraform creates D1 database
-
-### Environment Variables
-
-**Lambda Functions:**
-- `APPEEARS_USER` / `APPEEARS_PASS`: NASA AppEEARS credentials
-- `STATE_MACHINE_ARN`: Step Function ARN
-- `SQS_QUEUE_URL`: SQS queue URL
-- `R2_ENDPOINT`, `R2_BUCKET_NAME`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`: Cloudflare R2
-- `D1_DATABASE_ID`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`: Cloudflare D1
-
-Set via Terraform or AWS Lambda environment variables.
-
-## Project Structure
-
-```
-.
-├── src/                    # SvelteKit frontend
-│   ├── routes/            # Pages and API routes
-│   └── lib/               # Shared utilities
-├── lambda_functions/      # AWS Lambda handlers
-│   ├── initiator.py       # Submits AppEEARS tasks
-│   ├── status_checker.py  # Polls task status
-│   ├── manifest_processor.py  # Processes file manifests
-│   └── processor.py       # Downloads and processes data
-├── terraform/             # Infrastructure as code
-├── migrations/            # D1 database migrations
-└── static/                # Static assets (GeoJSON polygons)
-```
-
-## API Endpoints
-
-- `GET /api/polygons` - Get GeoJSON polygons for all features
-- `GET /api/feature/[id]/get_dates` - Get available dates for a feature
-- `GET /api/feature/[id]/temperature` - Get temperature data (metadata + CSV)
-- `GET /api/feature/[id]/tif/[doy]/[scale]` - Get temperature visualization
-- `GET /api/latest_lst_tif/[id]` - Get latest temperature image
-- `GET /api/admin/jobs` - Admin job tracking dashboard
-
-## Documentation
-
-- [DAILY_PROCESSING_OVERVIEW.md](./DAILY_PROCESSING_OVERVIEW.md) - Data processing pipeline
-- [LOCAL_DEVELOPMENT.md](./LOCAL_DEVELOPMENT.md) - Development setup guide
-- [D1_SCHEMA_DOCUMENTATION.sql](./D1_SCHEMA_DOCUMENTATION.sql) - Database schema
+- **Frontend**: SvelteKit on Cloudflare Pages
+- **Database**: Cloudflare D1 (metadata) + R2 (CSV/TIF/PNG files)
+- **Backend**: AWS Lambda + Step Functions for ECOSTRESS data processing
