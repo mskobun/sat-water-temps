@@ -73,8 +73,9 @@
 		const currentMap = untrack(() => map);
 		const currentSavedView = untrack(() => savedMapView);
 
+		// Don't update previousFeatureId when map isn't ready — so when we landed
+		// on /feature/<id> directly, we still run "Opening" (fitBounds) once the map loads.
 		if (!mapReady || !currentMap) {
-			previousFeatureId = currentFeatureId;
 			return;
 		}
 
@@ -88,9 +89,9 @@
 			if (bounds) {
 				currentMap.fitBounds(bounds, { padding: 20 });
 			}
-			// Reset local UI state
-			selectedDate = '';
-			selectedColorScale = 'relative';
+			// Don't clear selectedDate/selectedColorScale here — sidebar sets them when it
+			// runs loadDates(). Clearing here would overwrite the date on direct navigation
+			// when the map becomes ready after the sidebar has already loaded.
 		} else if (!currentFeatureId && previousFeatureId) {
 			// Closing: restore view
 			if (currentSavedView) {
@@ -343,13 +344,6 @@
 				</MapLibre>
 			</div>
 
-			<!-- Footer -->
-			<footer class="py-3 text-center text-sm text-muted-foreground">
-				<p class="m-0">&copy; 2025 Satellite Water Temperature Monitoring. All rights reserved.</p>
-				<a href="/admin/jobs" class="text-primary underline-offset-4 hover:underline mt-1 inline-block font-medium">
-					Admin Dashboard
-				</a>
-			</footer>
 		</main>
 	</div>
 
