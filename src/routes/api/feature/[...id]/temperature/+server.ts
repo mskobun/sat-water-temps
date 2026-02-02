@@ -11,10 +11,10 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 	}
 
 	// Join the array from rest parameter back into a string
-	const featureId = params.id;
+	const featureId: string = Array.isArray(params.id) ? params.id.join('/') : (params.id as string);
 
 	// Get latest date for this feature
-	const latestDate = await getLatestDate(db, featureId);
+	const latestDate: string | null = await getLatestDate(db, featureId);
 	if (!latestDate) {
 		return json({ error: 'Feature not found' }, { status: 404 });
 	}

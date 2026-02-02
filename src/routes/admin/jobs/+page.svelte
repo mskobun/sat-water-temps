@@ -26,7 +26,7 @@
 		try {
 			const statusParam = filter !== 'all' ? `?status=${filter}` : '';
 			const response = await fetch(`/api/admin/jobs${statusParam}`);
-			const data = await response.json();
+			const data = await response.json() as { jobs?: Job[] };
 			jobs = data.jobs || [];
 			error = '';
 		} catch (e) {
@@ -97,8 +97,9 @@
 		<!-- Filters and Actions -->
 		<div class="bg-dark-surface rounded-lg shadow-lg p-4 mb-6 flex flex-wrap items-center justify-between gap-4">
 			<div class="flex items-center gap-4">
-				<label class="text-sm font-medium text-gray-300">Filter:</label>
+				<label for="filter-select" class="text-sm font-medium text-gray-300">Filter:</label>
 				<select
+					id="filter-select"
 					bind:value={filter}
 					class="bg-dark-card border border-gray-600 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan"
 				>

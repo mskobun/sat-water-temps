@@ -106,7 +106,7 @@
 				: `/api/feature/${featureId}/temperature`;
 			
 			const response = await fetch(url);
-			const data = await response.json();
+			const data = await response.json() as { error?: string; data?: Array<{ x: number; y: number; temperature: number }>; min_max?: [number, number] };
 			
 			if (data.error) {
 				console.error('Error:', data.error);
@@ -130,7 +130,7 @@
 		
 		try {
 			const response = await fetch(`/api/feature/${featureId}/check_wtoff/${selectedDate}`);
-			const data = await response.json();
+			const data = await response.json() as { wtoff?: boolean };
 			showWaterOffAlert = Boolean(data.wtoff);
 		} catch (err) {
 			console.error('Error checking water off:', err);

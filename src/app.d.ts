@@ -7,8 +7,8 @@ declare global {
 		// interface PageData {}
 		interface Platform {
 			env: {
-				R2_DATA: R2Bucket;
-				DB: D1Database;
+				R2_DATA: import('@cloudflare/workers-types').R2Bucket;
+				DB: import('@cloudflare/workers-types').D1Database;
 			};
 			context: {
 				waitUntil(promise: Promise<any>): void;

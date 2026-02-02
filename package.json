@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "npm run build && wrangler pages deploy .svelte-kit/cloudflare",
-    "lint": "tsc --noEmit --project functions/tsconfig.json",
+    "lint": "svelte-check --threshold error",
     "wrangler:dev": "npm run build && wrangler pages dev .svelte-kit/cloudflare --compatibility-date=2025-12-11",
     "wrangler:dev:remote": "npm run build && wrangler pages dev .svelte-kit/cloudflare --remote --compatibility-date=2025-12-11",
     "db:export": "wrangler d1 export sat-water-temps-db --remote --output=seed.sql",
@@ -19,6 +19,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240512.0",
+    "@types/node": "^22.10.0",
     "@sveltejs/adapter-cloudflare": "^7.2.4",
     "@sveltejs/kit": "^2.49.2",
     "@tailwindcss/postcss": "^4.1.18",
@@ -28,6 +29,7 @@
     "svelte": "^5.45.8",
     "tailwindcss": "^4.1.18",
     "typescript": "^5.3.3",
+    "svelte-check": "^4.3.6",
     "vite": "^7.2.7",
     "wrangler": "^4.53.0"
   },

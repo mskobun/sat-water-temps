@@ -23,7 +23,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 			});
 		}
 
-		return new Response(obj.body, {
+		return new Response(obj.body as BodyInit, {
 			headers: {
 				'content-type': 'application/octet-stream',
 				'content-disposition': `attachment; filename="${params.filename}"`,

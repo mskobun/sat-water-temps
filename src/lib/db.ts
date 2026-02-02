@@ -106,14 +106,15 @@ export async function getFeatureDates(db: D1Database, featureId: string) {
   }
 }
 
-export async function getLatestDate(db: D1Database, featureId: string) {
+export async function getLatestDate(db: D1Database, featureId: string): Promise<string | null> {
   try {
     const result = await db
       .prepare("SELECT latest_date FROM features WHERE id = ?")
       .bind(featureId)
       .first();
 
-    return result?.latest_date || null;
+    const latest = result?.latest_date;
+    return latest != null ? String(latest) : null;
   } catch (err) {
     console.error("D1 query error:", err);
     return null;

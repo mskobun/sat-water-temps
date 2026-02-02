@@ -49,7 +49,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 			});
 		}
 
-		return new Response(obj.body, {
+		return new Response(obj.body as BodyInit, {
 			headers: {
 				'content-type': 'image/png',
 				'cache-control': 'public, max-age=300'
