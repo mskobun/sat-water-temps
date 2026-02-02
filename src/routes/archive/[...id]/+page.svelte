@@ -40,14 +40,8 @@
 
 <div class="min-h-screen bg-dark-bg font-poppins text-white">
 	<!-- Header -->
-	<header class="bg-gradient-to-r from-[#0b3d91] to-cyan py-5 px-6 text-2xl font-bold uppercase flex items-center gap-4">
-		<button 
-			class="bg-blue-600 hover:bg-blue-800 text-white px-6 py-3 rounded-xl border-none cursor-pointer text-base font-bold transition-colors duration-300 shrink-0"
-			onclick={() => window.history.back()}
-		>
-			Back
-		</button>
-		<span>{featureId} Archive</span>
+	<header class="bg-gradient-to-r from-[#0b3d91] to-cyan py-5 px-6 text-2xl font-bold uppercase">
+		{featureId} Archive
 	</header>
 
 	<!-- Content -->
