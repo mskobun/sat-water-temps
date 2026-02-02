@@ -32,10 +32,9 @@
     "wrangler": "^4.53.0"
   },
   "dependencies": {
-    "@luomus/leaflet-smooth-wheel-zoom": "^1.0.0",
-    "@types/leaflet": "^1.9.21",
     "chart.js": "^4.5.1",
-    "leaflet": "^1.9.4",
-    "papaparse": "^5.5.3"
+    "maplibre-gl": "^5.0.1",
+    "papaparse": "^5.5.3",
+    "svelte-maplibre-gl": "^1.0.2"
   }
 }
