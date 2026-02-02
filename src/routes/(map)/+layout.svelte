@@ -162,6 +162,7 @@
 	// All user interactions just change the URL
 	function handleMapClick(e: MapMouseEvent) {
 		if (!map) return;
+		if (!map.getLayer('polygons-fill')) return;
 
 		const features = map.queryRenderedFeatures(e.point, { layers: ['polygons-fill'] });
 
@@ -185,6 +186,7 @@
 
 	function handleMouseMove(e: MapMouseEvent) {
 		if (!map) return;
+		if (!map.getLayer('polygons-fill')) return;
 
 		const features = map.queryRenderedFeatures(e.point, { layers: ['polygons-fill'] });
 
