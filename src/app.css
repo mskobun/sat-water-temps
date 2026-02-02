@@ -30,11 +30,6 @@
 	}
 }
 
-/* Leaflet map fix - ensure it displays properly */
-.leaflet-container {
-	z-index: 1;
-}
-
 /* Color scale gradients for temperature visualization */
 .color-scale-rainbow {
 	background: linear-gradient(to right, #000080, #0000ff, #00ffff, #00ff00, #ffff00, #ff0000, #800000);
