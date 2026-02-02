@@ -117,12 +117,10 @@
 		previousFeatureId = currentFeatureId;
 	});
 
-	// Overlay URL for temperature image
+	// Overlay URL for temperature image (only when a date is selected)
 	let overlayUrl = $derived(
-		selectedFeature
-			? selectedDate
-				? `/api/feature/${selectedFeature.id}/tif/${selectedDate}/${selectedColorScale}`
-				: `/api/latest_lst_tif/${selectedFeature.id}`
+		selectedFeature && selectedDate
+			? `/api/feature/${selectedFeature.id}/tif/${selectedDate}/${selectedColorScale}`
 			: null
 	);
 
