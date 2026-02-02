@@ -3,10 +3,13 @@
 import type { D1Database, R2Bucket } from '@cloudflare/workers-types';
 import Papa from 'papaparse';
 
+type GeoPoint = { lng: number; lat: number; temperature: number };
+
 /**
- * Parse CSV text into temperature data array
+ * Parse CSV text into geographic coordinate array
+ * CSV now contains longitude, latitude directly (no pixel coordinate conversion needed)
  */
-function parseCSV(csvText: string): Array<{ x: number; y: number; temperature: number }> {
+function parseCSV(csvText: string): GeoPoint[] {
   const result = Papa.parse(csvText, {
     header: true,
     skipEmptyLines: true,
@@ -19,14 +22,51 @@ function parseCSV(csvText: string): Array<{ x: number; y: number; temperature: n
   }
 
   return result.data.map((row: any) => ({
-    x: parseFloat(row.x || 0),
-    y: parseFloat(row.y || 0),
+    lng: parseFloat(row.longitude || row.x || 0),
+    lat: parseFloat(row.latitude || row.y || 0),
     temperature: parseFloat(row.LST_filter || row.temperature || 0)
   }));
 }
 
 /**
+ * Build GeoJSON FeatureCollection from geo points
+ */
+function buildGeoJSON(points: GeoPoint[]) {
+  return {
+    type: 'FeatureCollection' as const,
+    features: points.map(p => ({
+      type: 'Feature' as const,
+      geometry: { type: 'Point' as const, coordinates: [p.lng, p.lat] },
+      properties: { temperature: p.temperature }
+    }))
+  };
+}
+
+/**
+ * Compute histogram bins from temperature data
+ */
+function computeHistogram(temps: number[], numBins = 6): Array<{ range: string; count: number }> {
+  if (!temps.length) return [];
+  
+  const min = Math.min(...temps);
+  const max = Math.max(...temps);
+  const binWidth = (max - min) / numBins;
+  
+  const bins = new Array(numBins).fill(0);
+  for (const t of temps) {
+    const idx = Math.min(Math.floor((t - min) / binWidth), numBins - 1);
+    bins[idx]++;
+  }
+  
+  return bins.map((count, i) => ({
+    range: (min + i * binWidth).toFixed(1),
+    count
+  }));
+}
+
+/**
  * Query temperature data: metadata from D1, CSV data from R2
+ * Returns GeoJSON ready for MapLibre (CSV contains lon/lat directly)
  */
 export async function queryTemperatureData(
   db: D1Database,
@@ -35,7 +75,7 @@ export async function queryTemperatureData(
   date: string
 ) {
   try {
-    // Get metadata and CSV path from D1
+    // Get metadata from D1
     const metaResult = await db
       .prepare(
         "SELECT min_temp, max_temp, wtoff, csv_path FROM temperature_metadata WHERE feature_id = ? AND date = ?"
@@ -67,11 +107,14 @@ export async function queryTemperatureData(
     }
 
     const csvText = await csvObject.text();
-    const data = parseCSV(csvText);
-
+    const geoPoints = parseCSV(csvText);
+    const temps = geoPoints.map(p => p.temperature);
+    
     return {
-      data,
+      geojson: buildGeoJSON(geoPoints),
       min_max: [metaResult.min_temp, metaResult.max_temp],
+      histogram: computeHistogram(temps),
+      avg: temps.length ? temps.reduce((a, b) => a + b, 0) / temps.length : 0,
       date: date,
       wtoff: Boolean(metaResult.wtoff),
     };

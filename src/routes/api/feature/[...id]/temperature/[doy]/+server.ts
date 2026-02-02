@@ -10,10 +10,10 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 		return json({ error: 'Database or storage not available' }, { status: 500 });
 	}
 
-	// Join the array from rest parameter back into a string
 	const featureId = params.id;
 	const doy = params.doy;
 	
+	// Raster bounds are now stored in D1, no need to pass from client
 	const result = await queryTemperatureData(db, r2, featureId, doy);
 
 	if (!result) {
@@ -26,4 +26,3 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 		}
 	});
 };
-

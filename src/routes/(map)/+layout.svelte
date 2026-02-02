@@ -2,8 +2,8 @@
 	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { MapLibre, GeoJSONSource, FillLayer, LineLayer, RasterLayer, ImageSource } from 'svelte-maplibre-gl';
-	import type { Map, MapMouseEvent, LngLatBoundsLike } from 'maplibre-gl';
+import { MapLibre, GeoJSONSource, FillLayer, LineLayer, CircleLayer } from 'svelte-maplibre-gl';
+import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } from 'maplibre-gl';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import { Button } from '$lib/components/ui/button';
 	import FeatureSidebar from '$lib/components/FeatureSidebar.svelte';
@@ -21,6 +21,15 @@
 	let selectedDate = $state('');
 	let selectedColorScale: 'relative' | 'fixed' | 'gray' = $state('relative');
 	let hoveredFeatureId: string | null = $state(null);
+
+	// Temperature data (fetched here so map can use it for heatmap)
+	let heatmapGeojson: { type: 'FeatureCollection'; features: any[] } | null = $state(null);
+	let relativeMin = $state(0);
+	let relativeMax = $state(0);
+	let avgTemp = $state(0);
+	let histogramData: Array<{ range: string; count: number }> = $state([]);
+	const globalMin = 273.15;
+	const globalMax = 308.15;
 
 	// Default map view (MapLibre uses [lng, lat])
 	const defaultCenter: [number, number] = [112.5, 2.5];
@@ -105,6 +114,11 @@
 			// Reset local UI state
 			selectedDate = '';
 			selectedColorScale = 'relative';
+			heatmapGeojson = null;
+			relativeMin = 0;
+			relativeMax = 0;
+			avgTemp = 0;
+			histogramData = [];
 		} else if (currentFeatureId && previousFeatureId && currentFeatureId !== previousFeatureId) {
 			// Switching features: just zoom to new feature
 			if (bounds) {
@@ -113,29 +127,54 @@
 			// Reset local UI state
 			selectedDate = '';
 			selectedColorScale = 'relative';
+			heatmapGeojson = null;
+			relativeMin = 0;
+			relativeMax = 0;
+			avgTemp = 0;
+			histogramData = [];
 		}
 
 		previousFeatureId = currentFeatureId;
 	});
 
-	// Overlay URL for temperature image (only when a date is selected)
-	let overlayUrl = $derived(
-		selectedFeature && selectedDate
-			? `/api/feature/${selectedFeature.id}/tif/${selectedDate}/${selectedColorScale}`
-			: null
-	);
 
-	// Image source coordinates (4 corners: top-left, top-right, bottom-right, bottom-left)
-	let imageCoordinates = $derived.by(() => {
-		if (!selectedFeature?.bounds) return null;
-		const bounds = selectedFeature.bounds as [[number, number], [number, number]];
-		const [[minLng, minLat], [maxLng, maxLat]] = bounds;
-		return [
-			[minLng, maxLat], // top-left
-			[maxLng, maxLat], // top-right
-			[maxLng, minLat], // bottom-right
-			[minLng, minLat] // bottom-left
-		] as [[number, number], [number, number], [number, number], [number, number]];
+	// Circle paint properties based on color scale - colors each point by its temperature
+	let circlePaint = $derived.by(() => {
+		let minTemp = selectedColorScale === 'relative' ? relativeMin : globalMin;
+		let maxTemp = selectedColorScale === 'relative' ? relativeMax : globalMax;
+		
+		// Ensure valid range for interpolation
+		if (minTemp >= maxTemp) {
+			minTemp = globalMin;
+			maxTemp = globalMax;
+		}
+		
+		// Color ramp based on scale type - interpolates temperature to color
+		const colorExpr = selectedColorScale === 'gray'
+			? [
+				'interpolate',
+				['linear'],
+				['get', 'temperature'],
+				minTemp, 'rgb(40,40,40)',
+				maxTemp, 'rgb(255,255,255)'
+			]
+			: [
+				'interpolate',
+				['linear'],
+				['get', 'temperature'],
+				minTemp, 'rgb(0,0,255)',
+				minTemp + (maxTemp - minTemp) * 0.25, 'rgb(0,255,255)',
+				minTemp + (maxTemp - minTemp) * 0.5, 'rgb(0,255,0)',
+				minTemp + (maxTemp - minTemp) * 0.75, 'rgb(255,255,0)',
+				maxTemp, 'rgb(255,0,0)'
+			];
+		
+		return {
+			'circle-radius': 12,
+			'circle-color': colorExpr,
+			'circle-opacity': 0.6,
+			'circle-blur': 0.8
+		} as unknown as CircleLayerSpecification['paint'];
 	});
 
 	// MapLibre style with Esri World Imagery tiles
@@ -206,8 +245,45 @@
 		}
 	}
 
+	async function loadTemperatureData(featureId: string, date: string) {
+		// Clear previous data first
+		heatmapGeojson = null;
+		relativeMin = 0;
+		relativeMax = 0;
+		avgTemp = 0;
+		histogramData = [];
+		
+		if (!featureId || !date) return;
+		
+		try {
+			const response = await fetch(`/api/feature/${featureId}/temperature/${date}`);
+			if (!response.ok) return;
+			
+			const data = (await response.json()) as {
+				error?: string;
+				geojson?: { type: 'FeatureCollection'; features: any[] };
+				min_max?: [number, number];
+				histogram?: Array<{ range: string; count: number }>;
+				avg?: number;
+			};
+			if (data.error || !data.geojson) return;
+			
+			// Server returns ready-to-use GeoJSON and pre-computed stats
+			heatmapGeojson = data.geojson;
+			relativeMin = data.min_max?.[0] || 0;
+			relativeMax = data.min_max?.[1] || 0;
+			avgTemp = data.avg || 0;
+			histogramData = data.histogram || [];
+		} catch (err) {
+			console.error('Error loading temperature data:', err);
+		}
+	}
+
 	function handleDateChange(event: CustomEvent<string>) {
 		selectedDate = event.detail;
+		if (selectedFeature) {
+			loadTemperatureData(selectedFeature.id, event.detail);
+		}
 	}
 
 	function handleColorScaleChange(event: CustomEvent<'relative' | 'fixed' | 'gray'>) {
@@ -263,6 +339,10 @@
 						isOpen={true}
 						bind:selectedDate
 						bind:selectedColorScale
+						{relativeMin}
+						{relativeMax}
+						{avgTemp}
+						{histogramData}
 						on:close={handleSidebarClose}
 						on:dateChange={handleDateChange}
 						on:colorScaleChange={handleColorScaleChange}
@@ -334,11 +414,13 @@
 						</GeoJSONSource>
 					{/if}
 
-					{#if selectedFeature && overlayUrl && imageCoordinates}
-						<!-- Temperature overlay image -->
-						<ImageSource id="temperature-overlay" url={overlayUrl} coordinates={imageCoordinates}>
-							<RasterLayer id="temperature-layer" />
-						</ImageSource>
+					{#if heatmapGeojson}
+						<!-- Temperature points - each colored by its temperature value -->
+						{#key selectedDate}
+							<GeoJSONSource id="temperature-points" data={heatmapGeojson}>
+								<CircleLayer id="temperature-layer" paint={circlePaint} />
+							</GeoJSONSource>
+						{/key}
 					{/if}
 				</MapLibre>
 				<!-- Floating intro card (bottom left) -->

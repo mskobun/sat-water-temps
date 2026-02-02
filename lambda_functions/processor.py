@@ -351,12 +351,19 @@ def process_rasters(
 
     # Processing logic (simplified adaptation from original)
     rows, cols = arrays["LST"].shape
-    x, y = np.meshgrid(np.arange(cols), np.arange(rows))
+    
+    # Create pixel coordinate grids
+    col_idx, row_idx = np.meshgrid(np.arange(cols), np.arange(rows))
+    
+    # Convert pixel coordinates to geographic coordinates using raster transform
+    transform = LST.transform
+    # rasterio.transform.xy returns (x, y) = (longitude, latitude) for each pixel
+    lons, lats = rasterio.transform.xy(transform, row_idx.flatten(), col_idx.flatten())
 
     df = pd.DataFrame(
         {
-            "x": x.flatten(),
-            "y": y.flatten(),
+            "longitude": lons,
+            "latitude": lats,
             **{key: arr.flatten() for key, arr in arrays.items()},
         }
     )

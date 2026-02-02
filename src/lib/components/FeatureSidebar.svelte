@@ -3,7 +3,6 @@
 	import { goto } from '$app/navigation';
 	import * as Select from '$lib/components/ui/select';
 	import { Button } from '$lib/components/ui/button';
-	import * as Table from '$lib/components/ui/table';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Spinner } from '$lib/components/ui/spinner';
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
@@ -13,17 +12,19 @@
 	import PaletteIcon from '@lucide/svelte/icons/palette';
 	import BarChart3Icon from '@lucide/svelte/icons/bar-chart-3';
 	import DownloadIcon from '@lucide/svelte/icons/download';
-	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
-	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import { BarChart } from 'layerchart';
 	import { scaleBand } from 'd3-scale';
-	import { bin } from 'd3-array';
 
 	export let featureId: string;
 	export let featureName: string = '';
 	export let isOpen: boolean = false;
 	export let selectedDate: string = '';
 	export let selectedColorScale: 'relative' | 'fixed' | 'gray' = 'relative';
+	// Pre-computed stats from server (in Kelvin)
+	export let relativeMin: number = 0;
+	export let relativeMax: number = 0;
+	export let avgTemp: number = 0;
+	export let histogramData: Array<{ range: string; count: number }> = [];
 
 	const dispatch = createEventDispatcher<{
 		close: void;
@@ -32,25 +33,17 @@
 	}>();
 
 	let currentUnit: 'Kelvin' | 'Celsius' | 'Fahrenheit' = 'Celsius';
-	let temperatureData: any[] = [];
 	let dates: string[] = [];
 	let showWaterOffAlert = false;
 	let loading = false;
-	let tableExpanded = false;
 
-	let relativeMin = 0;
-	let relativeMax = 0;
 	const globalMin = 273.15;
 	const globalMax = 308.15;
 
 	function resetState() {
 		dates = [];
-		temperatureData = [];
 		selectedDate = '';
 		showWaterOffAlert = false;
-		relativeMin = 0;
-		relativeMax = 0;
-		tableExpanded = false;
 	}
 
 	$: unitSymbol = currentUnit === 'Kelvin' ? 'K' : currentUnit === 'Celsius' ? '°C' : '°F';
@@ -61,20 +54,12 @@
 		return kelvin;
 	}
 
-	$: convertedTemperatureData = temperatureData.map((point) => {
-		const kelvin = parseFloat(point.LST_filter || point.temperature || 0);
-		return { ...point, convertedTemp: convertTemp(kelvin, currentUnit) };
-	});
-
-	$: stats = (() => {
-		if (convertedTemperatureData.length === 0) return null;
-		const temps = convertedTemperatureData.map((p) => p.convertedTemp);
-		return {
-			min: Math.min(...temps),
-			max: Math.max(...temps),
-			avg: temps.reduce((a, b) => a + b, 0) / temps.length
-		};
-	})();
+	// Use server-provided stats (already in Kelvin)
+	$: stats = relativeMin && relativeMax ? {
+		min: convertTemp(relativeMin, currentUnit),
+		max: convertTemp(relativeMax, currentUnit),
+		avg: convertTemp(avgTemp, currentUnit)
+	} : null;
 
 	function formatDateTime(date: string): string {
 		const year = date.substring(0, 4);
@@ -107,34 +92,13 @@
 			if (dates.length > 0) {
 				selectedDate = dates[0];
 				dispatch('dateChange', selectedDate);
-				await loadTemperatureData(selectedDate);
+				// Temperature data is loaded by parent via handleDateChange
 			}
 		} catch (err) {
 			console.error('Error loading dates:', err);
 			dates = [];
 		} finally {
 			loading = false;
-		}
-	}
-
-	async function loadTemperatureData(date?: string) {
-		if (!featureId) return;
-		try {
-			const url = date
-				? `/api/feature/${featureId}/temperature/${date}`
-				: `/api/feature/${featureId}/temperature`;
-			const response = await fetch(url);
-			const data = (await response.json()) as {
-				error?: string;
-				data?: Array<{ x: number; y: number; temperature: number }>;
-				min_max?: [number, number];
-			};
-			if (data.error) return;
-			temperatureData = data.data || [];
-			relativeMin = data.min_max?.[0] || 0;
-			relativeMax = data.min_max?.[1] || 0;
-		} catch (err) {
-			console.error('Error loading temperature data:', err);
 		}
 	}
 
@@ -149,24 +113,16 @@
 		}
 	}
 
-	$: histogramData = (() => {
-		if (temperatureData.length === 0) return [];
-		const temps = temperatureData.map((p) => parseFloat(p.LST_filter || p.temperature || 0));
-		const convertedTemps = temps.map((t) => convertTemp(t, currentUnit));
-		
-		const histogram = bin().thresholds(5);
-		const bins = histogram(convertedTemps);
-		
-		return bins.map((b) => ({
-			range: `${(b.x0 ?? 0).toFixed(1)}`,
-			count: b.length
-		}));
-	})();
+	// Convert server histogram ranges to current unit
+	$: convertedHistogram = histogramData.map(bin => ({
+		range: convertTemp(parseFloat(bin.range), currentUnit).toFixed(1),
+		count: bin.count
+	}));
 
 	function handleDateChange(value: string) {
 		selectedDate = value;
 		dispatch('dateChange', selectedDate);
-		loadTemperatureData(selectedDate);
+		// Temperature data is loaded by parent via handleDateChange
 		checkWaterOff();
 	}
 
@@ -340,9 +296,9 @@
 					</h3>
 					<div class="overflow-hidden">
 						<div class="h-[200px] p-2">
-							{#if histogramData.length > 0}
+							{#if convertedHistogram.length > 0}
 								<BarChart
-									data={histogramData}
+									data={convertedHistogram}
 									x="range"
 									xScale={scaleBand().padding(0.2)}
 									y="count"
@@ -364,48 +320,6 @@
 						</div>
 					</div>
 				</div>
-
-				<!-- Sample points (collapsible) -->
-				{#if convertedTemperatureData.length > 0}
-					<div class="space-y-2">
-						<button
-							type="button"
-							class="flex items-center gap-2 w-full text-left text-sm text-muted-foreground hover:text-foreground transition-colors"
-							onclick={() => (tableExpanded = !tableExpanded)}
-						>
-							{#if tableExpanded}
-								<ChevronDownIcon class="size-4 shrink-0" />
-							{:else}
-								<ChevronRightIcon class="size-4 shrink-0" />
-							{/if}
-							Sample points ({Math.min(10, convertedTemperatureData.length)})
-						</button>
-						{#if tableExpanded}
-							<div class="rounded-lg border overflow-hidden">
-								<Table.Root>
-									<Table.Header>
-										<Table.Row>
-											<Table.Head class="w-12">#</Table.Head>
-											<Table.Head>X</Table.Head>
-											<Table.Head>Y</Table.Head>
-											<Table.Head class="text-right">Temp</Table.Head>
-										</Table.Row>
-									</Table.Header>
-									<Table.Body>
-										{#each convertedTemperatureData.slice(0, 10) as point, i}
-											<Table.Row>
-												<Table.Cell class="font-medium text-muted-foreground">{i + 1}</Table.Cell>
-												<Table.Cell class="font-mono text-xs">{parseFloat(point.x || point.longitude || 0).toFixed(4)}</Table.Cell>
-												<Table.Cell class="font-mono text-xs">{parseFloat(point.y || point.latitude || 0).toFixed(4)}</Table.Cell>
-												<Table.Cell class="text-right tabular-nums">{point.convertedTemp.toFixed(2)}{unitSymbol}</Table.Cell>
-											</Table.Row>
-										{/each}
-									</Table.Body>
-								</Table.Root>
-							</div>
-						{/if}
-					</div>
-				{/if}
 
 				<Separator />
 
