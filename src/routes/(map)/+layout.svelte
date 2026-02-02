@@ -23,6 +23,10 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 	let hoveredFeatureId: string | null = $state(null);
 	let currentUnit: 'Kelvin' | 'Celsius' | 'Fahrenheit' = $state('Celsius');
 	
+	// Temperature filter state (in Kelvin)
+	let tempFilterMin: number | null = $state(null);
+	let tempFilterMax: number | null = $state(null);
+	
 	// Temperature hover tooltip
 	let hoveredTemp: number | null = $state(null);
 	let tooltipX = $state(0);
@@ -125,6 +129,8 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 			relativeMax = 0;
 			avgTemp = 0;
 			histogramData = [];
+			tempFilterMin = null;
+			tempFilterMax = null;
 		} else if (currentFeatureId && previousFeatureId && currentFeatureId !== previousFeatureId) {
 			// Switching features: just zoom to new feature
 			if (bounds) {
@@ -138,6 +144,8 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 			relativeMax = 0;
 			avgTemp = 0;
 			histogramData = [];
+			tempFilterMin = null;
+			tempFilterMax = null;
 		}
 
 		previousFeatureId = currentFeatureId;
@@ -314,6 +322,23 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 		selectedColorScale = event.detail;
 	}
 
+	function handleTempFilterChange(event: CustomEvent<{ min: number | null; max: number | null }>) {
+		tempFilterMin = event.detail.min;
+		tempFilterMax = event.detail.max;
+	}
+
+	// MapLibre filter expression for temperature filtering (GPU-accelerated)
+	let tempLayerFilter = $derived.by(() => {
+		if (tempFilterMin === null || tempFilterMax === null) {
+			return undefined; // No filter - show all points
+		}
+		return [
+			'all',
+			['>=', ['get', 'temperature'], tempFilterMin],
+			['<=', ['get', 'temperature'], tempFilterMax]
+		];
+	});
+
 	function handleSidebarClose() {
 		// Just change the URL - state will update automatically
 		goto('/', { replaceState: false, keepFocus: true, noScroll: true });
@@ -388,6 +413,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 						on:close={handleSidebarClose}
 						on:dateChange={handleDateChange}
 						on:colorScaleChange={handleColorScaleChange}
+						on:tempFilterChange={handleTempFilterChange}
 					/>
 				</Sidebar.Content>
 			</Sidebar.Sidebar>
@@ -460,7 +486,11 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 						<!-- Temperature points - each colored by its temperature value -->
 						{#key selectedDate}
 							<GeoJSONSource id="temperature-points" data={heatmapGeojson}>
-								<CircleLayer id="temperature-layer" paint={circlePaint} />
+								<CircleLayer 
+									id="temperature-layer" 
+									paint={circlePaint} 
+									filter={tempLayerFilter}
+								/>
 							</GeoJSONSource>
 						{/key}
 					{/if}
