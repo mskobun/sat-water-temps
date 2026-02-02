@@ -1,82 +1,107 @@
 <script lang="ts">
 	import { createEventDispatcher, tick } from 'svelte';
 	import { goto } from '$app/navigation';
-	
+	import * as Select from '$lib/components/ui/select';
+	import { Button } from '$lib/components/ui/button';
+	import * as Table from '$lib/components/ui/table';
+	import { Alert, AlertDescription } from '$lib/components/ui/alert';
+	import { Spinner } from '$lib/components/ui/spinner';
+	import { ScrollArea } from '$lib/components/ui/scroll-area';
+	import { Separator } from '$lib/components/ui/separator';
+	import { cn } from '$lib/utils.js';
+	import ThermometerIcon from '@lucide/svelte/icons/thermometer';
+	import PaletteIcon from '@lucide/svelte/icons/palette';
+	import BarChart3Icon from '@lucide/svelte/icons/bar-chart-3';
+	import DownloadIcon from '@lucide/svelte/icons/download';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
+	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+
 	export let featureId: string;
+	export let featureName: string = '';
 	export let isOpen: boolean = false;
 	export let selectedDate: string = '';
 	export let selectedColorScale: 'relative' | 'fixed' | 'gray' = 'relative';
-	
+
 	const dispatch = createEventDispatcher<{
 		close: void;
 		dateChange: string;
 		colorScaleChange: 'relative' | 'fixed' | 'gray';
 	}>();
-	
+
 	let chartElement: HTMLCanvasElement;
 	let chart: any = null;
-	
-	let currentUnit: 'Kelvin' | 'Celsius' | 'Fahrenheit' = 'Kelvin';
+
+	let currentUnit: 'Kelvin' | 'Celsius' | 'Fahrenheit' = 'Celsius';
 	let temperatureData: any[] = [];
 	let dates: string[] = [];
-	let selectedGraphType: 'summary' | 'histogram' | 'line' | 'scatter' = 'summary';
+	let selectedGraphType: 'histogram' | 'line' | 'scatter' = 'line';
 	let showWaterOffAlert = false;
 	let loading = false;
-	
+	let tableExpanded = false;
+
 	let relativeMin = 0;
 	let relativeMax = 0;
 	const globalMin = 273.15;
 	const globalMax = 308.15;
-	
+
 	function resetState() {
-		// Clear all data
 		dates = [];
 		temperatureData = [];
 		selectedDate = '';
 		showWaterOffAlert = false;
 		relativeMin = 0;
 		relativeMax = 0;
-		
-		// Destroy chart if exists
+		tableExpanded = false;
 		if (chart) {
 			chart.destroy();
 			chart = null;
 		}
 	}
-	
+
 	$: unitSymbol = currentUnit === 'Kelvin' ? 'K' : currentUnit === 'Celsius' ? '°C' : '°F';
-	
-	// Convert temperature based on unit
+
 	function convertTemp(kelvin: number, unit: 'Kelvin' | 'Celsius' | 'Fahrenheit'): number {
 		if (unit === 'Celsius') return kelvin - 273.15;
-		if (unit === 'Fahrenheit') return (kelvin - 273.15) * 9/5 + 32;
+		if (unit === 'Fahrenheit') return (kelvin - 273.15) * 9 / 5 + 32;
 		return kelvin;
 	}
-	
-	$: convertedTemperatureData = temperatureData.map(point => {
+
+	$: convertedTemperatureData = temperatureData.map((point) => {
 		const kelvin = parseFloat(point.LST_filter || point.temperature || 0);
-		return {
-			...point,
-			convertedTemp: convertTemp(kelvin, currentUnit)
-		};
+		return { ...point, convertedTemp: convertTemp(kelvin, currentUnit) };
 	});
-	
+
+	$: stats = (() => {
+		if (convertedTemperatureData.length === 0) return null;
+		const temps = convertedTemperatureData.map((p) => p.convertedTemp);
+		return {
+			min: Math.min(...temps),
+			max: Math.max(...temps),
+			avg: temps.reduce((a, b) => a + b, 0) / temps.length
+		};
+	})();
+
 	function formatDateTime(date: string): string {
 		const year = date.substring(0, 4);
 		const doy = parseInt(date.substring(4, 7), 10);
 		const hours = date.substring(7, 9);
 		const minutes = date.substring(9, 11);
 		const seconds = date.substring(11, 13);
-		
 		const dateObj = new Date(parseInt(year), 0);
 		dateObj.setDate(doy);
-		
 		const day = String(dateObj.getDate()).padStart(2, '0');
 		const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-		
 		return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
 	}
-	
+
+	function formatShortDate(date: string): string {
+		const year = date.substring(0, 4);
+		const doy = parseInt(date.substring(4, 7), 10);
+		const dateObj = new Date(parseInt(year), 0);
+		dateObj.setDate(doy);
+		return dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+	}
+
 	async function loadDates() {
 		if (!featureId) return;
 		loading = true;
@@ -84,7 +109,6 @@
 			const response = await fetch(`/api/feature/${featureId}/get_dates`);
 			const fetchedDates = await response.json();
 			dates = Array.isArray(fetchedDates) ? fetchedDates : [];
-			
 			if (dates.length > 0) {
 				selectedDate = dates[0];
 				dispatch('dateChange', selectedDate);
@@ -97,63 +121,51 @@
 			loading = false;
 		}
 	}
-	
+
 	async function loadTemperatureData(date?: string) {
 		if (!featureId) return;
 		try {
-			const url = date 
+			const url = date
 				? `/api/feature/${featureId}/temperature/${date}`
 				: `/api/feature/${featureId}/temperature`;
-			
 			const response = await fetch(url);
-			const data = await response.json() as { error?: string; data?: Array<{ x: number; y: number; temperature: number }>; min_max?: [number, number] };
-			
-			if (data.error) {
-				console.error('Error:', data.error);
-				return;
-			}
-			
+			const data = (await response.json()) as {
+				error?: string;
+				data?: Array<{ x: number; y: number; temperature: number }>;
+				min_max?: [number, number];
+			};
+			if (data.error) return;
 			temperatureData = data.data || [];
 			relativeMin = data.min_max?.[0] || 0;
 			relativeMax = data.min_max?.[1] || 0;
-			
-			// Wait for DOM to update (canvas to be rendered) before updating chart
 			await tick();
 			updateChart();
 		} catch (err) {
 			console.error('Error loading temperature data:', err);
 		}
 	}
-	
+
 	async function checkWaterOff() {
 		if (!selectedDate || !featureId) return;
-		
 		try {
 			const response = await fetch(`/api/feature/${featureId}/check_wtoff/${selectedDate}`);
-			const data = await response.json() as { wtoff?: boolean };
+			const data = (await response.json()) as { wtoff?: boolean };
 			showWaterOffAlert = Boolean(data.wtoff);
 		} catch (err) {
 			console.error('Error checking water off:', err);
 		}
 	}
-	
+
 	async function updateChart() {
 		if (!chartElement || temperatureData.length === 0) return;
-		
 		const Chart = (await import('chart.js/auto')).default;
-		
-		if (chart) {
-			chart.destroy();
-		}
-		
+		if (chart) chart.destroy();
 		const ctx = chartElement.getContext('2d');
 		if (!ctx) return;
-		
-		const temps = temperatureData.map(p => parseFloat(p.LST_filter || p.temperature || 0));
-		const convertedTemps = temps.map(t => convertTemp(t, currentUnit));
+		const temps = temperatureData.map((p) => parseFloat(p.LST_filter || p.temperature || 0));
+		const convertedTemps = temps.map((t) => convertTemp(t, currentUnit));
 		const labels = temperatureData.map((_, i) => `Point ${i + 1}`);
-		const latitudes = temperatureData.map(p => parseFloat(p.y || p.latitude || 0));
-		
+		const latitudes = temperatureData.map((p) => parseFloat(p.y || p.latitude || 0));
 		let config: any = {
 			type: 'line',
 			data: { labels, datasets: [] },
@@ -166,267 +178,308 @@
 				}
 			}
 		};
-		
 		switch (selectedGraphType) {
-			case 'summary':
-				config.type = 'bar';
-				config.data.labels = ['Min', 'Max', 'Avg'];
-				config.data.datasets.push({
-					label: 'Statistics',
-					data: [
-						Math.min(...convertedTemps),
-						Math.max(...convertedTemps),
-						convertedTemps.reduce((a, b) => a + b, 0) / convertedTemps.length
-					],
-					backgroundColor: ['#4CAF50', '#F44336', '#2196F3']
-				});
-				break;
-				
-			case 'histogram':
+			case 'histogram': {
 				config.type = 'bar';
 				const histData = createHistogram(convertedTemps, 5);
 				config.data.labels = histData.labels;
 				config.data.datasets.push({
 					label: 'Temperature Distribution',
 					data: histData.values,
-					backgroundColor: '#9C27B0'
+					backgroundColor: '#8b5cf6'
 				});
 				break;
-				
+			}
 			case 'line':
 				config.data.datasets.push({
 					label: `Temperature (${unitSymbol})`,
 					data: convertedTemps,
-					borderColor: '#ff7f0e',
-					backgroundColor: 'rgba(255, 127, 14, 0.2)',
+					borderColor: '#f59e0b',
+					backgroundColor: 'rgba(245, 158, 11, 0.15)',
 					borderWidth: 2,
 					fill: true
 				});
 				break;
-				
 			case 'scatter':
 				config.type = 'scatter';
 				config.data.datasets.push({
 					label: 'Temperature vs Latitude',
 					data: latitudes.map((lat, i) => ({ x: lat, y: convertedTemps[i] })),
-					backgroundColor: '#00BCD4',
+					backgroundColor: '#06b6d4',
 					pointRadius: 5
 				});
 				config.options.scales.x.title.text = 'Latitude';
 				break;
 		}
-		
 		chart = new Chart(ctx, config);
 	}
-	
+
 	function createHistogram(values: number[], binCount: number) {
 		const min = Math.min(...values);
 		const max = Math.max(...values);
 		const binSize = (max - min) / binCount;
-		
 		const bins = Array(binCount).fill(0);
-		const labels = [];
-		
+		const labels: string[] = [];
 		for (let i = 0; i < binCount; i++) {
 			const binStart = min + i * binSize;
 			const binEnd = binStart + binSize;
 			labels.push(`${binStart.toFixed(1)} - ${binEnd.toFixed(1)}`);
 		}
-		
-		values.forEach(value => {
+		values.forEach((value) => {
 			let binIndex = Math.floor((value - min) / binSize);
 			binIndex = Math.min(binIndex, binCount - 1);
 			bins[binIndex]++;
 		});
-		
 		return { labels, values: bins };
 	}
-	
-	function handleDateChange(e: Event) {
-		const target = e.target as HTMLSelectElement;
-		selectedDate = target.value;
+
+	function handleDateChange(value: string) {
+		selectedDate = value;
 		dispatch('dateChange', selectedDate);
 		loadTemperatureData(selectedDate);
 		checkWaterOff();
 	}
-	
-	function handleColorScaleChange(e: Event) {
-		const target = e.target as HTMLSelectElement;
-		selectedColorScale = target.value as 'relative' | 'fixed' | 'gray';
+
+	function handleColorScaleChange(value: 'relative' | 'fixed' | 'gray') {
+		selectedColorScale = value;
 		dispatch('colorScaleChange', selectedColorScale);
 	}
-	
-	function handleClose() {
-		dispatch('close');
-	}
-	
-	// Reactive updates when graph type or unit changes
+
 	$: if ((selectedGraphType || currentUnit) && chartElement && temperatureData.length > 0) {
 		updateChart();
 	}
-	
-	// Load data when featureId changes
 	$: if (featureId && isOpen) {
 		resetState();
 		loadDates();
 	}
-	
-	// Check water off when date changes
 	$: if (selectedDate && featureId) {
 		checkWaterOff();
 	}
 </script>
 
-<div 
-	class="fixed top-0 right-0 h-screen w-[400px] bg-dark-surface/95 shadow-[-4px_0_20px_rgba(0,0,0,0.5)] z-[1000] transform transition-transform duration-300 ease-in-out backdrop-blur-md overflow-y-auto {isOpen ? 'translate-x-0' : 'translate-x-full'}"
->
-	<!-- Close Button -->
-	<button 
-		class="absolute top-4 left-4 w-8 h-8 bg-red-500 hover:bg-red-600 text-white rounded-full border-none cursor-pointer text-xl font-bold transition-colors duration-200 flex items-center justify-center z-10"
-		onclick={handleClose}
-		aria-label="Close sidebar"
-	>
-		×
-	</button>
-
-	<div class="p-5 pt-14">
-		<!-- Header -->
-		<h2 class="text-center mb-4 text-lg font-semibold text-white">
-			Temperature Data for <span class="text-cyan">{featureId}</span>
-		</h2>
-
-		{#if loading}
-			<!-- Loading State -->
-			<div class="flex flex-col items-center justify-center py-12">
-				<div class="w-8 h-8 border-4 border-cyan border-t-transparent rounded-full animate-spin mb-4"></div>
-				<p class="text-gray-400">Loading data...</p>
+<div class="flex flex-col h-full">
+	{#if loading}
+		<div class="flex flex-col items-center justify-center py-16 gap-4">
+			<Spinner class="size-8 text-muted-foreground" />
+			<p class="text-sm text-muted-foreground">Loading data...</p>
+		</div>
+	{:else if dates.length === 0}
+		<div class="flex flex-col items-center justify-center py-16 text-center px-4">
+			<div class="rounded-full bg-muted p-4 mb-4">
+				<ThermometerIcon class="size-8 text-muted-foreground" />
 			</div>
-		{:else if dates.length === 0}
-			<!-- No Data State -->
-			<div class="flex flex-col items-center justify-center py-12 text-center">
-				<div class="text-4xl mb-4">📊</div>
-				<p class="text-gray-400 text-lg mb-2">No data available</p>
-				<p class="text-gray-500 text-sm">This lake doesn't have any temperature data yet.</p>
-			</div>
-		{:else}
-			<!-- Water Off Alert -->
-			{#if showWaterOffAlert}
-				<div class="bg-amber-500 text-dark-bg px-4 py-2.5 rounded-md shadow-lg font-semibold mb-4 text-center text-sm">
-					Water not detected - data may include land pixels
+			<p class="font-medium text-foreground mb-1">No data yet</p>
+			<p class="text-sm text-muted-foreground">
+				{featureName ? `${featureName} doesn't have temperature observations yet.` : 'This water body has no temperature observations.'}
+			</p>
+		</div>
+	{:else}
+		<ScrollArea class="flex-1">
+			<div class="p-4 space-y-6">
+				<!-- Summary line -->
+				<p class="text-sm text-muted-foreground">
+					{dates.length} observation{dates.length === 1 ? '' : 's'}
+					{#if selectedDate}
+						· {formatShortDate(selectedDate)}
+					{/if}
+				</p>
+
+				{#if showWaterOffAlert}
+					<Alert variant="destructive" class="py-2">
+						<AlertDescription class="text-sm">Water not detected — data may include land pixels.</AlertDescription>
+					</Alert>
+				{/if}
+
+				<!-- Map overlay -->
+				<div class="space-y-3">
+					<h3 class="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+						<PaletteIcon class="size-3.5" />
+						Map overlay
+					</h3>
+					<div class="grid gap-3">
+						<div>
+							<label for="date-select" class="text-xs text-muted-foreground mb-1.5 block">Date</label>
+							<Select.Root type="single" value={selectedDate} onValueChange={(v) => v != null && handleDateChange(v)}>
+								<Select.Trigger id="date-select" class="w-full h-9">
+									<span class="truncate">{selectedDate ? formatDateTime(selectedDate) : 'Pick date'}</span>
+								</Select.Trigger>
+								<Select.Content>
+									{#each dates as date}
+										<Select.Item value={date} label={formatDateTime(date)}>
+											{formatDateTime(date)}
+										</Select.Item>
+									{/each}
+								</Select.Content>
+							</Select.Root>
+						</div>
+						<div>
+							<label for="scale-select" class="text-xs text-muted-foreground mb-1.5 block">Color scale</label>
+							<Select.Root type="single" value={selectedColorScale} onValueChange={(v) => v != null && handleColorScaleChange(v as 'relative' | 'fixed' | 'gray')}>
+								<Select.Trigger id="scale-select" class="w-full h-9">
+									{selectedColorScale}
+								</Select.Trigger>
+								<Select.Content>
+									<Select.Item value="relative" label="Relative">Relative</Select.Item>
+									<Select.Item value="fixed" label="Fixed">Fixed</Select.Item>
+									<Select.Item value="gray" label="Grayscale">Grayscale</Select.Item>
+								</Select.Content>
+							</Select.Root>
+							<div
+								class={cn(
+									'mt-2 w-full h-2 rounded-full',
+									selectedColorScale === 'gray' ? 'color-scale-gray' : 'color-scale-rainbow'
+								)}
+							></div>
+							<div class="flex justify-between text-[10px] text-muted-foreground mt-1">
+								<span>
+									{selectedColorScale === 'relative'
+										? convertTemp(relativeMin, currentUnit).toFixed(1)
+										: convertTemp(globalMin, currentUnit).toFixed(0)}
+								</span>
+								<span>{unitSymbol}</span>
+								<span>
+									{selectedColorScale === 'relative'
+										? convertTemp(relativeMax, currentUnit).toFixed(1)
+										: convertTemp(globalMax, currentUnit).toFixed(0)}
+								</span>
+							</div>
+						</div>
+					</div>
 				</div>
-			{/if}
 
-			<!-- Date Selector -->
-			<div class="bg-dark-card/80 p-3 rounded-lg mb-4">
-				<label for="date-selector" class="text-white text-sm block mb-2">Select Date:</label>
-				<select 
-					id="date-selector" 
-					value={selectedDate}
-					onchange={handleDateChange}
-					class="w-full py-2 px-3 rounded-md border-none bg-amber text-dark-bg font-bold cursor-pointer"
-				>
-					{#each dates as date}
-						<option value={date}>{formatDateTime(date)}</option>
-					{/each}
-				</select>
-			</div>
+				<Separator />
 
-			<!-- Color Scale Selector -->
-			<div class="bg-dark-card/80 p-3 rounded-lg mb-4">
-				<label for="color-selector" class="text-white text-sm block mb-2">Color Scale:</label>
-				<select 
-					id="color-selector" 
-					value={selectedColorScale}
-					onchange={handleColorScaleChange}
-					class="w-full py-2 px-3 rounded-md border-none bg-amber text-dark-bg font-bold cursor-pointer"
-				>
-					<option value="relative">Relative</option>
-					<option value="fixed">Fixed</option>
-					<option value="gray">Grayscale</option>
-				</select>
-				<div class="mt-2.5 w-full h-5 rounded-md relative {selectedColorScale === 'gray' ? 'color-scale-gray' : 'color-scale-rainbow'}">
-					<span class="absolute top-6 left-0 text-xs text-white">
-						{selectedColorScale === 'relative' ? convertTemp(relativeMin, currentUnit).toFixed(2) : convertTemp(globalMin, currentUnit).toFixed(2)}
-					</span>
-					<span class="absolute top-6 left-1/2 -translate-x-1/2 text-xs text-white">{unitSymbol}</span>
-					<span class="absolute top-6 right-0 text-xs text-white">
-						{selectedColorScale === 'relative' ? convertTemp(relativeMax, currentUnit).toFixed(2) : convertTemp(globalMax, currentUnit).toFixed(2)}
-					</span>
+				<!-- Temperature snapshot -->
+				<div class="space-y-3">
+					<h3 class="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+						<ThermometerIcon class="size-3.5" />
+						Temperature
+					</h3>
+					{#if stats}
+						<div class="grid grid-cols-3 gap-2">
+							<div class="rounded-lg border bg-muted/40 px-3 py-2 text-center">
+								<p class="text-[10px] text-muted-foreground uppercase tracking-wider">Min</p>
+								<p class="text-sm font-semibold tabular-nums">{stats.min.toFixed(1)}{unitSymbol}</p>
+							</div>
+							<div class="rounded-lg border bg-muted/40 px-3 py-2 text-center">
+								<p class="text-[10px] text-muted-foreground uppercase tracking-wider">Avg</p>
+								<p class="text-sm font-semibold tabular-nums">{stats.avg.toFixed(1)}{unitSymbol}</p>
+							</div>
+							<div class="rounded-lg border bg-muted/40 px-3 py-2 text-center">
+								<p class="text-[10px] text-muted-foreground uppercase tracking-wider">Max</p>
+								<p class="text-sm font-semibold tabular-nums">{stats.max.toFixed(1)}{unitSymbol}</p>
+							</div>
+						</div>
+					{/if}
+					<div class="flex items-center gap-1 p-1 rounded-md bg-muted/50 w-fit">
+						<button
+							type="button"
+							class={cn(
+								'px-2.5 py-1 text-xs font-medium rounded transition-colors',
+								currentUnit === 'Kelvin' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+							)}
+							onclick={() => (currentUnit = 'Kelvin')}
+						>
+							K
+						</button>
+						<button
+							type="button"
+							class={cn(
+								'px-2.5 py-1 text-xs font-medium rounded transition-colors',
+								currentUnit === 'Celsius' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+							)}
+							onclick={() => (currentUnit = 'Celsius')}
+						>
+							°C
+						</button>
+						<button
+							type="button"
+							class={cn(
+								'px-2.5 py-1 text-xs font-medium rounded transition-colors',
+								currentUnit === 'Fahrenheit' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+							)}
+							onclick={() => (currentUnit = 'Fahrenheit')}
+						>
+							°F
+						</button>
+					</div>
 				</div>
-			</div>
 
-			<!-- Unit Selector -->
-			<div class="flex gap-2 justify-center mb-4">
-				<button 
-					class="px-3 py-2 border-none rounded-md font-bold cursor-pointer transition-colors duration-300 text-sm {currentUnit === 'Kelvin' ? 'bg-blue-600 text-white' : 'bg-amber text-dark-bg'}"
-					onclick={() => currentUnit = 'Kelvin'}
-				>
-					Kelvin
-				</button>
-				<button 
-					class="px-3 py-2 border-none rounded-md font-bold cursor-pointer transition-colors duration-300 text-sm {currentUnit === 'Celsius' ? 'bg-blue-600 text-white' : 'bg-amber text-dark-bg'}"
-					onclick={() => currentUnit = 'Celsius'}
-				>
-					Celsius
-				</button>
-				<button 
-					class="px-3 py-2 border-none rounded-md font-bold cursor-pointer transition-colors duration-300 text-sm {currentUnit === 'Fahrenheit' ? 'bg-blue-600 text-white' : 'bg-amber text-dark-bg'}"
-					onclick={() => currentUnit = 'Fahrenheit'}
-				>
-					Fahrenheit
-				</button>
-			</div>
-
-			<!-- Graph Container -->
-			<div class="bg-dark-card/80 rounded-xl p-3 mb-4">
-				<div class="flex justify-between items-center mb-2">
-					<span class="text-white text-sm font-semibold">Chart</span>
-					<select 
-						bind:value={selectedGraphType} 
-						class="py-1.5 px-2 rounded-md bg-amber text-dark-bg border-none font-bold cursor-pointer text-sm"
-					>
-						<option value="summary">Statistics</option>
-						<option value="histogram">Distribution</option>
-						<option value="line">Temperatures</option>
-						<option value="scatter">Latitude</option>
-					</select>
+				<!-- Chart -->
+				<div class="space-y-3">
+					<div class="flex items-center justify-between">
+						<h3 class="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+							<BarChart3Icon class="size-3.5" />
+							Chart
+						</h3>
+						<Select.Root type="single" value={selectedGraphType} onValueChange={(v) => v != null && (selectedGraphType = v as 'histogram' | 'line' | 'scatter')}>
+							<Select.Trigger class="h-7 text-xs w-[120px]">
+								{selectedGraphType === 'histogram' ? 'Distribution' : selectedGraphType === 'line' ? 'Temperatures' : 'Latitude'}
+							</Select.Trigger>
+							<Select.Content>
+								<Select.Item value="line" label="Temperatures">Temperatures</Select.Item>
+								<Select.Item value="histogram" label="Distribution">Distribution</Select.Item>
+								<Select.Item value="scatter" label="Latitude">Latitude</Select.Item>
+							</Select.Content>
+						</Select.Root>
+					</div>
+					<div class="rounded-lg border bg-muted/20 overflow-hidden">
+						<div class="h-[200px] p-2">
+							<canvas bind:this={chartElement} class="w-full h-full"></canvas>
+						</div>
+					</div>
 				</div>
-				<div class="h-[250px]">
-					<canvas bind:this={chartElement} class="w-full h-full"></canvas>
-				</div>
-			</div>
 
-			<!-- Temperature Table -->
-			<div class="w-full overflow-x-auto rounded-xl bg-white/5 shadow-[0_4px_15px_rgba(0,0,0,0.2)] mb-4">
-				<table class="w-full text-white text-xs border-separate border-spacing-0 rounded-xl overflow-hidden">
-					<thead>
-						<tr>
-							<th class="py-2.5 px-2 bg-amber/80 text-dark-bg font-semibold uppercase tracking-wider sticky top-0">Point</th>
-							<th class="py-2.5 px-2 bg-amber/80 text-dark-bg font-semibold uppercase tracking-wider sticky top-0">X</th>
-							<th class="py-2.5 px-2 bg-amber/80 text-dark-bg font-semibold uppercase tracking-wider sticky top-0">Y</th>
-							<th class="py-2.5 px-2 bg-amber/80 text-dark-bg font-semibold uppercase tracking-wider sticky top-0">Temp ({unitSymbol})</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each convertedTemperatureData.slice(0, 10) as point, i}
-							<tr class="even:bg-white/[0.03] hover:bg-amber/15 transition-colors">
-								<td class="py-2 px-2 border-b border-white/5 font-bold text-amber">{i + 1}</td>
-								<td class="py-2 px-2 border-b border-white/5">{parseFloat(point.x || point.longitude || 0).toFixed(4)}</td>
-								<td class="py-2 px-2 border-b border-white/5">{parseFloat(point.y || point.latitude || 0).toFixed(4)}</td>
-								<td class="py-2 px-2 border-b border-white/5">{point.convertedTemp.toFixed(2)}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</div>
+				<!-- Sample points (collapsible) -->
+				{#if convertedTemperatureData.length > 0}
+					<div class="space-y-2">
+						<button
+							type="button"
+							class="flex items-center gap-2 w-full text-left text-sm text-muted-foreground hover:text-foreground transition-colors"
+							onclick={() => (tableExpanded = !tableExpanded)}
+						>
+							{#if tableExpanded}
+								<ChevronDownIcon class="size-4 shrink-0" />
+							{:else}
+								<ChevronRightIcon class="size-4 shrink-0" />
+							{/if}
+							Sample points ({Math.min(10, convertedTemperatureData.length)})
+						</button>
+						{#if tableExpanded}
+							<div class="rounded-lg border overflow-hidden">
+								<Table.Root>
+									<Table.Header>
+										<Table.Row>
+											<Table.Head class="w-12">#</Table.Head>
+											<Table.Head>X</Table.Head>
+											<Table.Head>Y</Table.Head>
+											<Table.Head class="text-right">Temp</Table.Head>
+										</Table.Row>
+									</Table.Header>
+									<Table.Body>
+										{#each convertedTemperatureData.slice(0, 10) as point, i}
+											<Table.Row>
+												<Table.Cell class="font-medium text-muted-foreground">{i + 1}</Table.Cell>
+												<Table.Cell class="font-mono text-xs">{parseFloat(point.x || point.longitude || 0).toFixed(4)}</Table.Cell>
+												<Table.Cell class="font-mono text-xs">{parseFloat(point.y || point.latitude || 0).toFixed(4)}</Table.Cell>
+												<Table.Cell class="text-right tabular-nums">{point.convertedTemp.toFixed(2)}{unitSymbol}</Table.Cell>
+											</Table.Row>
+										{/each}
+									</Table.Body>
+								</Table.Root>
+							</div>
+						{/if}
+					</div>
+				{/if}
 
-			<!-- Archive Button -->
-			<button 
-				class="w-full bg-blue-500/80 hover:bg-blue-500 text-white border-none py-3 px-4 rounded-lg font-bold cursor-pointer transition-colors duration-300"
-				onclick={() => goto(`/archive/${featureId}`)}
-			>
-				Download All Data
-			</button>
-		{/if}
-	</div>
+				<Separator />
+
+				<!-- Primary CTA -->
+				<Button class="w-full" variant="default" onclick={() => goto(`/archive/${featureId}`)}>
+					<DownloadIcon class="size-4 mr-2" />
+					View archive &amp; download
+				</Button>
+			</div>
+		</ScrollArea>
+	{/if}
 </div>

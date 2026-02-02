@@ -4,8 +4,11 @@
 	import { page } from '$app/stores';
 	import { MapLibre, GeoJSONSource, FillLayer, LineLayer, RasterLayer, ImageSource } from 'svelte-maplibre-gl';
 	import type { Map, MapMouseEvent, LngLatBoundsLike } from 'maplibre-gl';
+	import * as Sidebar from '$lib/components/ui/sidebar';
+	import { Button } from '$lib/components/ui/button';
 	import FeatureSidebar from '$lib/components/FeatureSidebar.svelte';
 	import type { Snippet } from 'svelte';
+	import XIcon from '@lucide/svelte/icons/x';
 
 	let { children }: { children: Snippet } = $props();
 
@@ -239,101 +242,119 @@
 	<title>Satellite Water Temperature Monitoring</title>
 </svelte:head>
 
-<div class="h-screen bg-dark-bg font-poppins text-white flex flex-col">
-	<!-- Map Container -->
-	<div class="flex-1 relative w-full">
-		<MapLibre
-			bind:map
-			class="h-full w-full"
-			style={mapStyle}
-			center={defaultCenter}
-			zoom={defaultZoom}
-			minZoom={2}
-			maxZoom={19}
-			onclick={handleMapClick}
-			onmousemove={handleMouseMove}
-			onload={handleMapLoad}
-		>
-			{#if geojsonData}
-				<!-- GeoJSON Source for polygons -->
-				<GeoJSONSource id="polygons" data={geojsonData}>
-					<!-- Fill layer for hover/selection detection -->
-					<FillLayer
-						id="polygons-fill"
-						paint={{
-							'fill-color': [
-								'case',
-								['==', ['get', 'name'], getFeatureExpression(selectedFeature?.name)],
-								'#00ff00',
-								['==', ['get', 'name'], getFeatureExpression(hoveredFeatureId?.split('/')[0])],
-								'#00ff00',
-								'transparent'
-							],
-							'fill-opacity': 0.1
-						}}
+<Sidebar.Provider open={sidebarOpen} onOpenChange={(open) => { if (!open) handleSidebarClose(); }}>
+	<div class="flex h-screen w-full flex-row-reverse">
+		<!-- Feature Sidebar (right side) – only in DOM when a feature is selected -->
+		{#if selectedFeature}
+			<Sidebar.Sidebar side="right" collapsible="offcanvas" class="border-l w-full sm:max-w-md">
+				<Sidebar.Header class="flex flex-row items-center justify-between gap-2 px-4 py-3 border-b shrink-0">
+					<span class="font-semibold text-foreground truncate">
+						{selectedFeature.name ?? selectedFeature.id ?? 'Water body'}
+					</span>
+					<Button variant="ghost" size="icon-sm" onclick={handleSidebarClose} class="shrink-0">
+						<XIcon class="size-4" />
+						<span class="sr-only">Close</span>
+					</Button>
+				</Sidebar.Header>
+				<Sidebar.Content class="flex flex-col min-h-0">
+					<FeatureSidebar
+						featureId={selectedFeature.id}
+						featureName={selectedFeature.name ?? ''}
+						isOpen={true}
+						bind:selectedDate
+						bind:selectedColorScale
+						on:close={handleSidebarClose}
+						on:dateChange={handleDateChange}
+						on:colorScaleChange={handleColorScaleChange}
 					/>
-					<!-- Line layer for borders -->
-					<LineLayer
-						id="polygons-line"
-						paint={{
-							'line-color': [
-								'case',
-								['==', ['get', 'name'], getFeatureExpression(selectedFeature?.name)],
-								'#00ff00',
-								['==', ['get', 'name'], getFeatureExpression(hoveredFeatureId?.split('/')[0])],
-								'#00ff00',
-								'#8abbff'
-							],
-							'line-width': [
-								'case',
-								['==', ['get', 'name'], getFeatureExpression(selectedFeature?.name)],
-								3,
-								2
-							],
-							'line-opacity': [
-								'case',
-								['==', ['get', 'name'], getFeatureExpression(selectedFeature?.name)],
-								0.3,
-								1
-							]
-						}}
-					/>
-				</GeoJSONSource>
-			{/if}
+				</Sidebar.Content>
+			</Sidebar.Sidebar>
+		{/if}
 
-			{#if selectedFeature && overlayUrl && imageCoordinates}
-				<!-- Temperature overlay image -->
-				<ImageSource id="temperature-overlay" url={overlayUrl} coordinates={imageCoordinates}>
-					<RasterLayer id="temperature-layer" />
-				</ImageSource>
-			{/if}
-		</MapLibre>
+		<!-- Main content (map + footer) -->
+		<main class="flex-1 flex flex-col min-w-0">
+			<!-- Map Container -->
+			<div class="flex-1 relative w-full">
+				<MapLibre
+					bind:map
+					class="h-full w-full"
+					style={mapStyle}
+					center={defaultCenter}
+					zoom={defaultZoom}
+					minZoom={2}
+					maxZoom={19}
+					onclick={handleMapClick}
+					onmousemove={handleMouseMove}
+					onload={handleMapLoad}
+				>
+					{#if geojsonData}
+						<!-- GeoJSON Source for polygons -->
+						<GeoJSONSource id="polygons" data={geojsonData}>
+							<!-- Fill layer for hover/selection detection -->
+							<FillLayer
+								id="polygons-fill"
+								paint={{
+									'fill-color': [
+										'case',
+										['==', ['get', 'name'], getFeatureExpression(selectedFeature?.name)],
+										'#00ff00',
+										['==', ['get', 'name'], getFeatureExpression(hoveredFeatureId?.split('/')[0])],
+										'#00ff00',
+										'transparent'
+									],
+									'fill-opacity': 0.1
+								}}
+							/>
+							<!-- Line layer for borders -->
+							<LineLayer
+								id="polygons-line"
+								paint={{
+									'line-color': [
+										'case',
+										['==', ['get', 'name'], getFeatureExpression(selectedFeature?.name)],
+										'#00ff00',
+										['==', ['get', 'name'], getFeatureExpression(hoveredFeatureId?.split('/')[0])],
+										'#00ff00',
+										'#8abbff'
+									],
+									'line-width': [
+										'case',
+										['==', ['get', 'name'], getFeatureExpression(selectedFeature?.name)],
+										3,
+										2
+									],
+									'line-opacity': [
+										'case',
+										['==', ['get', 'name'], getFeatureExpression(selectedFeature?.name)],
+										0.3,
+										1
+									]
+								}}
+							/>
+						</GeoJSONSource>
+					{/if}
+
+					{#if selectedFeature && overlayUrl && imageCoordinates}
+						<!-- Temperature overlay image -->
+						<ImageSource id="temperature-overlay" url={overlayUrl} coordinates={imageCoordinates}>
+							<RasterLayer id="temperature-layer" />
+						</ImageSource>
+					{/if}
+				</MapLibre>
+			</div>
+
+			<!-- Footer -->
+			<footer class="py-3 text-center text-sm text-muted-foreground">
+				<p class="m-0">&copy; 2025 Satellite Water Temperature Monitoring. All rights reserved.</p>
+				<a href="/admin/jobs" class="text-primary underline-offset-4 hover:underline mt-1 inline-block font-medium">
+					Admin Dashboard
+				</a>
+			</footer>
+		</main>
 	</div>
 
-	<!-- Footer -->
-	<footer class="bg-dark-surface text-white py-3 text-center text-sm">
-		<p class="m-0">&copy; 2025 Satellite Water Temperature Monitoring. All rights reserved.</p>
-		<a
-			href="/admin/jobs"
-			class="text-cyan hover:text-white transition-colors duration-300 mt-1 inline-block font-medium"
-		>
-			Admin Dashboard
-		</a>
-	</footer>
-</div>
-
-<!-- Feature Sidebar -->
-<FeatureSidebar
-	featureId={selectedFeature?.id || ''}
-	isOpen={sidebarOpen}
-	bind:selectedDate
-	bind:selectedColorScale
-	on:close={handleSidebarClose}
-	on:dateChange={handleDateChange}
-	on:colorScaleChange={handleColorScaleChange}
-/>
-
-<!-- Hidden slot for child pages (they don't render anything) -->
-<div class="hidden">
-	{@render children()}
-</div>
+	<!-- Hidden slot for child pages (they don't render anything) -->
+	<div class="hidden">
+		{@render children()}
+	</div>
+</Sidebar.Provider>
