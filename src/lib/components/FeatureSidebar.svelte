@@ -29,6 +29,11 @@
 		close: void;
 		dateChange: string;
 		colorScaleChange: 'relative' | 'fixed' | 'gray';
+		temperatureDataChange: {
+			points: Array<{ x: number; y: number; temperature: number }>;
+			minTemp: number;
+			maxTemp: number;
+		} | null;
 	}>();
 
 	let currentUnit: 'Kelvin' | 'Celsius' | 'Fahrenheit' = 'Celsius';
@@ -51,6 +56,7 @@
 		relativeMin = 0;
 		relativeMax = 0;
 		tableExpanded = false;
+		dispatch('temperatureDataChange', null);
 	}
 
 	$: unitSymbol = currentUnit === 'Kelvin' ? 'K' : currentUnit === 'Celsius' ? '°C' : '°F';
@@ -129,12 +135,23 @@
 				data?: Array<{ x: number; y: number; temperature: number }>;
 				min_max?: [number, number];
 			};
-			if (data.error) return;
+			if (data.error) {
+				dispatch('temperatureDataChange', null);
+				return;
+			}
 			temperatureData = data.data || [];
 			relativeMin = data.min_max?.[0] || 0;
 			relativeMax = data.min_max?.[1] || 0;
+			
+			// Dispatch temperature points for client-side heatmap rendering
+			dispatch('temperatureDataChange', {
+				points: temperatureData,
+				minTemp: relativeMin,
+				maxTemp: relativeMax
+			});
 		} catch (err) {
 			console.error('Error loading temperature data:', err);
+			dispatch('temperatureDataChange', null);
 		}
 	}
 

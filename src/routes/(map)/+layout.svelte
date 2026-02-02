@@ -2,7 +2,7 @@
 	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { MapLibre, GeoJSONSource, FillLayer, LineLayer, RasterLayer, ImageSource } from 'svelte-maplibre-gl';
+	import { MapLibre, GeoJSONSource, FillLayer, LineLayer, HeatmapLayer } from 'svelte-maplibre-gl';
 	import type { Map, MapMouseEvent, LngLatBoundsLike } from 'maplibre-gl';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import { Button } from '$lib/components/ui/button';
@@ -21,6 +21,10 @@
 	let selectedDate = $state('');
 	let selectedColorScale: 'relative' | 'fixed' | 'gray' = $state('relative');
 	let hoveredFeatureId: string | null = $state(null);
+	
+	// Temperature points data for client-side heatmap rendering
+	let temperaturePoints: Array<{ x: number; y: number; temperature: number }> = $state([]);
+	let tempMinMax: { min: number; max: number } = $state({ min: 273.15, max: 308.15 });
 
 	// Default map view (MapLibre uses [lng, lat])
 	const defaultCenter: [number, number] = [112.5, 2.5];
@@ -105,6 +109,8 @@
 			// Reset local UI state
 			selectedDate = '';
 			selectedColorScale = 'relative';
+			temperaturePoints = [];
+			tempMinMax = { min: 273.15, max: 308.15 };
 		} else if (currentFeatureId && previousFeatureId && currentFeatureId !== previousFeatureId) {
 			// Switching features: just zoom to new feature
 			if (bounds) {
@@ -113,29 +119,86 @@
 			// Reset local UI state
 			selectedDate = '';
 			selectedColorScale = 'relative';
+			temperaturePoints = [];
+			tempMinMax = { min: 273.15, max: 308.15 };
 		}
 
 		previousFeatureId = currentFeatureId;
 	});
 
-	// Overlay URL for temperature image (only when a date is selected)
-	let overlayUrl = $derived(
-		selectedFeature && selectedDate
-			? `/api/feature/${selectedFeature.id}/tif/${selectedDate}/${selectedColorScale}`
-			: null
-	);
+	// Convert temperature points to GeoJSON for client-side heatmap
+	let heatmapGeoJSON = $derived.by(() => {
+		if (temperaturePoints.length === 0) return null;
+		
+		return {
+			type: 'FeatureCollection' as const,
+			features: temperaturePoints.map(point => ({
+				type: 'Feature' as const,
+				geometry: {
+					type: 'Point' as const,
+					coordinates: [point.x, point.y]
+				},
+				properties: {
+					temperature: point.temperature
+				}
+			}))
+		};
+	});
 
-	// Image source coordinates (4 corners: top-left, top-right, bottom-right, bottom-left)
-	let imageCoordinates = $derived.by(() => {
-		if (!selectedFeature?.bounds) return null;
-		const bounds = selectedFeature.bounds as [[number, number], [number, number]];
-		const [[minLng, minLat], [maxLng, maxLat]] = bounds;
+	// Global temperature range for fixed scale (0°C to 35°C in Kelvin)
+	const globalTempRange = { min: 273.15, max: 308.15 };
+
+	// Calculate heatmap weight based on temperature and color scale
+	// The weight normalizes temperature to 0-1 range for heatmap intensity
+	let heatmapWeightExpression = $derived.by(() => {
+		const minTemp = selectedColorScale === 'relative' ? tempMinMax.min : globalTempRange.min;
+		const maxTemp = selectedColorScale === 'relative' ? tempMinMax.max : globalTempRange.max;
+		const range = maxTemp - minTemp;
+		
+		if (range <= 0) return 0.5;
+		
+		// Normalize temperature to 0-1 range: (temp - min) / (max - min)
 		return [
-			[minLng, maxLat], // top-left
-			[maxLng, maxLat], // top-right
-			[maxLng, minLat], // bottom-right
-			[minLng, minLat] // bottom-left
-		] as [[number, number], [number, number], [number, number], [number, number]];
+			'/',
+			['-', ['get', 'temperature'], minTemp],
+			range
+		] as any;
+	});
+
+	// Heatmap color ramp based on selected color scale
+	let heatmapColorExpression = $derived.by(() => {
+		if (selectedColorScale === 'gray') {
+			// Grayscale: density maps to gray shades
+			return [
+				'interpolate',
+				['linear'],
+				['heatmap-density'],
+				0, 'rgba(0,0,0,0)',
+				0.1, 'rgba(50,50,50,0.4)',
+				0.3, 'rgba(100,100,100,0.6)',
+				0.5, 'rgba(150,150,150,0.8)',
+				0.7, 'rgba(200,200,200,0.9)',
+				1, 'rgba(255,255,255,1)'
+			] as any;
+		}
+		
+		// Rainbow/thermal color scale for relative and fixed modes
+		return [
+			'interpolate',
+			['linear'],
+			['heatmap-density'],
+			0, 'rgba(0,0,255,0)',
+			0.1, 'rgba(0,0,255,0.4)',
+			0.2, 'rgba(0,128,255,0.6)',
+			0.3, 'rgba(0,255,255,0.7)',
+			0.4, 'rgba(0,255,128,0.8)',
+			0.5, 'rgba(0,255,0,0.85)',
+			0.6, 'rgba(128,255,0,0.9)',
+			0.7, 'rgba(255,255,0,0.95)',
+			0.8, 'rgba(255,128,0,1)',
+			0.9, 'rgba(255,64,0,1)',
+			1, 'rgba(255,0,0,1)'
+		] as any;
 	});
 
 	// MapLibre style with Esri World Imagery tiles
@@ -214,6 +277,20 @@
 		selectedColorScale = event.detail;
 	}
 
+	function handleTemperatureDataChange(event: CustomEvent<{
+		points: Array<{ x: number; y: number; temperature: number }>;
+		minTemp: number;
+		maxTemp: number;
+	} | null>) {
+		if (event.detail) {
+			temperaturePoints = event.detail.points;
+			tempMinMax = { min: event.detail.minTemp, max: event.detail.maxTemp };
+		} else {
+			temperaturePoints = [];
+			tempMinMax = { min: 273.15, max: 308.15 };
+		}
+	}
+
 	function handleSidebarClose() {
 		// Just change the URL - state will update automatically
 		goto('/', { replaceState: false, keepFocus: true, noScroll: true });
@@ -266,6 +343,7 @@
 						on:close={handleSidebarClose}
 						on:dateChange={handleDateChange}
 						on:colorScaleChange={handleColorScaleChange}
+						on:temperatureDataChange={handleTemperatureDataChange}
 					/>
 				</Sidebar.Content>
 			</Sidebar.Sidebar>
@@ -334,11 +412,27 @@
 						</GeoJSONSource>
 					{/if}
 
-					{#if selectedFeature && overlayUrl && imageCoordinates}
-						<!-- Temperature overlay image -->
-						<ImageSource id="temperature-overlay" url={overlayUrl} coordinates={imageCoordinates}>
-							<RasterLayer id="temperature-layer" />
-						</ImageSource>
+					{#if heatmapGeoJSON && temperaturePoints.length > 0}
+						<!-- Client-side heatmap from temperature points -->
+						<GeoJSONSource id="temperature-heatmap" data={heatmapGeoJSON}>
+							<HeatmapLayer
+								id="temperature-heatmap-layer"
+								paint={{
+									'heatmap-weight': heatmapWeightExpression,
+									'heatmap-intensity': 1,
+									'heatmap-color': heatmapColorExpression,
+									'heatmap-radius': [
+										'interpolate',
+										['linear'],
+										['zoom'],
+										8, 15,
+										12, 25,
+										16, 40
+									],
+									'heatmap-opacity': 0.8
+								}}
+							/>
+						</GeoJSONSource>
 					{/if}
 				</MapLibre>
 				<!-- Floating intro card (bottom left) -->
