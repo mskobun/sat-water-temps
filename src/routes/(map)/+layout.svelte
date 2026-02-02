@@ -38,6 +38,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 	let relativeMax = $state(0);
 	let avgTemp = $state(0);
 	let histogramData: Array<{ range: string; count: number }> = $state([]);
+	let waterOff = $state(false);
 	const globalMin = 273.15;
 	const globalMax = 308.15;
 
@@ -284,6 +285,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 		relativeMax = 0;
 		avgTemp = 0;
 		histogramData = [];
+		waterOff = false;
 		
 		if (!featureId || !date) return;
 		
@@ -297,6 +299,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 				min_max?: [number, number];
 				histogram?: Array<{ range: string; count: number }>;
 				avg?: number;
+				wtoff?: boolean;
 			};
 			if (data.error || !data.geojson) return;
 			
@@ -306,6 +309,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 			relativeMax = data.min_max?.[1] || 0;
 			avgTemp = data.avg || 0;
 			histogramData = data.histogram || [];
+			waterOff = data.wtoff || false;
 		} catch (err) {
 			console.error('Error loading temperature data:', err);
 		}
@@ -410,6 +414,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 						{relativeMax}
 						{avgTemp}
 						{histogramData}
+						{waterOff}
 						on:close={handleSidebarClose}
 						on:dateChange={handleDateChange}
 						on:colorScaleChange={handleColorScaleChange}

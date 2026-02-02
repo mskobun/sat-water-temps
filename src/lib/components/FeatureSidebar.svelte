@@ -29,6 +29,8 @@
 	export let histogramData: Array<{ range: string; count: number }> = [];
 	// Temperature unit (shared with parent for tooltip)
 	export let currentUnit: 'Kelvin' | 'Celsius' | 'Fahrenheit' = 'Celsius';
+	// Water off status (passed from parent, fetched with temperature data)
+	export let waterOff: boolean = false;
 
 	const dispatch = createEventDispatcher<{
 		close: void;
@@ -37,7 +39,6 @@
 		tempFilterChange: { min: number | null; max: number | null };
 	}>();
 	let dates: string[] = [];
-	let showWaterOffAlert = false;
 	let loading = false;
 	let filterRange: number[] = [0, 100]; // Percentage values (0-100)
 
@@ -48,7 +49,6 @@
 	function resetState() {
 		dates = [];
 		selectedDate = '';
-		showWaterOffAlert = false;
 		filterRange = [0, 100];
 		dispatch('tempFilterChange', { min: null, max: null });
 	}
@@ -109,17 +109,6 @@
 		}
 	}
 
-	async function checkWaterOff() {
-		if (!selectedDate || !featureId) return;
-		try {
-			const response = await fetch(`/api/feature/${featureId}/check_wtoff/${selectedDate}`);
-			const data = (await response.json()) as { wtoff?: boolean };
-			showWaterOffAlert = Boolean(data.wtoff);
-		} catch (err) {
-			console.error('Error checking water off:', err);
-		}
-	}
-
 	// Convert server histogram ranges to current unit
 	$: convertedHistogram = histogramData.map(bin => ({
 		range: convertTemp(parseFloat(bin.range), currentUnit).toFixed(1),
@@ -129,8 +118,7 @@
 	function handleDateChange(value: string) {
 		selectedDate = value;
 		dispatch('dateChange', selectedDate);
-		// Temperature data is loaded by parent via handleDateChange
-		checkWaterOff();
+		// Temperature data (including waterOff) is loaded by parent via handleDateChange
 	}
 
 	function handleColorScaleChange(value: 'relative' | 'fixed' | 'gray') {
@@ -213,9 +201,6 @@
 		resetState();
 		loadDates();
 	}
-	$: if (selectedDate && featureId) {
-		checkWaterOff();
-	}
 </script>
 
 <div class="flex flex-col h-full">
@@ -245,11 +230,11 @@
 					{/if}
 				</p>
 
-				{#if showWaterOffAlert}
-					<Alert variant="destructive" class="py-2">
-						<AlertDescription class="text-sm">Water not detected — data may include land pixels.</AlertDescription>
-					</Alert>
-				{/if}
+			{#if waterOff}
+				<Alert variant="destructive" class="py-2">
+					<AlertDescription class="text-sm">Water not detected — data may include land pixels.</AlertDescription>
+				</Alert>
+			{/if}
 
 				<!-- Map overlay -->
 				<div class="space-y-3">
