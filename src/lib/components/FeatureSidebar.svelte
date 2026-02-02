@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { createEventDispatcher, tick } from 'svelte';
+	import { createEventDispatcher } from 'svelte';
 	import { goto } from '$app/navigation';
 	import * as Select from '$lib/components/ui/select';
 	import { Button } from '$lib/components/ui/button';
@@ -15,6 +15,9 @@
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
+	import { BarChart } from 'layerchart';
+	import { scaleBand } from 'd3-scale';
+	import { bin } from 'd3-array';
 
 	export let featureId: string;
 	export let featureName: string = '';
@@ -27,9 +30,6 @@
 		dateChange: string;
 		colorScaleChange: 'relative' | 'fixed' | 'gray';
 	}>();
-
-	let chartElement: HTMLCanvasElement;
-	let chart: any = null;
 
 	let currentUnit: 'Kelvin' | 'Celsius' | 'Fahrenheit' = 'Celsius';
 	let temperatureData: any[] = [];
@@ -51,10 +51,6 @@
 		relativeMin = 0;
 		relativeMax = 0;
 		tableExpanded = false;
-		if (chart) {
-			chart.destroy();
-			chart = null;
-		}
 	}
 
 	$: unitSymbol = currentUnit === 'Kelvin' ? 'K' : currentUnit === 'Celsius' ? '°C' : '°F';
@@ -137,8 +133,6 @@
 			temperatureData = data.data || [];
 			relativeMin = data.min_max?.[0] || 0;
 			relativeMax = data.min_max?.[1] || 0;
-			await tick();
-			updateChart();
 		} catch (err) {
 			console.error('Error loading temperature data:', err);
 		}
@@ -155,55 +149,19 @@
 		}
 	}
 
-	async function updateChart() {
-		if (!chartElement || temperatureData.length === 0) return;
-		const Chart = (await import('chart.js/auto')).default;
-		if (chart) chart.destroy();
-		const ctx = chartElement.getContext('2d');
-		if (!ctx) return;
+	$: histogramData = (() => {
+		if (temperatureData.length === 0) return [];
 		const temps = temperatureData.map((p) => parseFloat(p.LST_filter || p.temperature || 0));
 		const convertedTemps = temps.map((t) => convertTemp(t, currentUnit));
-		const histData = createHistogram(convertedTemps, 5);
-		const config = {
-			type: 'bar' as const,
-			data: {
-				labels: histData.labels,
-				datasets: [{
-					label: 'Temperature Distribution',
-					data: histData.values,
-					backgroundColor: '#8b5cf6'
-				}]
-			},
-			options: {
-				responsive: true,
-				maintainAspectRatio: false,
-				scales: {
-					x: { title: { display: true, text: `Temperature (${unitSymbol})` } },
-					y: { title: { display: true, text: 'Count' } }
-				}
-			}
-		};
-		chart = new Chart(ctx, config);
-	}
-
-	function createHistogram(values: number[], binCount: number) {
-		const min = Math.min(...values);
-		const max = Math.max(...values);
-		const binSize = (max - min) / binCount;
-		const bins = Array(binCount).fill(0);
-		const labels: string[] = [];
-		for (let i = 0; i < binCount; i++) {
-			const binStart = min + i * binSize;
-			const binEnd = binStart + binSize;
-			labels.push(`${binStart.toFixed(1)} - ${binEnd.toFixed(1)}`);
-		}
-		values.forEach((value) => {
-			let binIndex = Math.floor((value - min) / binSize);
-			binIndex = Math.min(binIndex, binCount - 1);
-			bins[binIndex]++;
-		});
-		return { labels, values: bins };
-	}
+		
+		const histogram = bin().thresholds(5);
+		const bins = histogram(convertedTemps);
+		
+		return bins.map((b) => ({
+			range: `${(b.x0 ?? 0).toFixed(1)}`,
+			count: b.length
+		}));
+	})();
 
 	function handleDateChange(value: string) {
 		selectedDate = value;
@@ -217,9 +175,6 @@
 		dispatch('colorScaleChange', selectedColorScale);
 	}
 
-	$: if (currentUnit && chartElement && temperatureData.length > 0) {
-		updateChart();
-	}
 	$: if (featureId && isOpen) {
 		resetState();
 		loadDates();
@@ -383,9 +338,29 @@
 						<BarChart3Icon class="size-3.5" />
 						Distribution
 					</h3>
-					<div class="rounded-lg border bg-muted/20 overflow-hidden">
+					<div class="overflow-hidden">
 						<div class="h-[200px] p-2">
-							<canvas bind:this={chartElement} class="w-full h-full"></canvas>
+							{#if histogramData.length > 0}
+								<BarChart
+									data={histogramData}
+									x="range"
+									xScale={scaleBand().padding(0.2)}
+									y="count"
+									yNice
+									series={[{ key: 'count', color: 'var(--chart-1)' }]}
+									props={{
+										xAxis: { format: (d) => d },
+										yAxis: { ticks: 4 },
+										bars: {
+											stroke: "none",
+										}
+									}}
+								/>
+							{:else}
+								<div class="h-full flex items-center justify-center text-muted-foreground text-sm">
+									No data available
+								</div>
+							{/if}
 						</div>
 					</div>
 				</div>
