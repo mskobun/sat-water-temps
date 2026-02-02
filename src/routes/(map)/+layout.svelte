@@ -7,6 +7,7 @@
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import { Button } from '$lib/components/ui/button';
 	import FeatureSidebar from '$lib/components/FeatureSidebar.svelte';
+	import IntroCard from '$lib/components/IntroCard.svelte';
 	import type { Snippet } from 'svelte';
 	import XIcon from '@lucide/svelte/icons/x';
 
@@ -340,6 +341,8 @@
 						</ImageSource>
 					{/if}
 				</MapLibre>
+				<!-- Floating intro card (bottom left) -->
+				<IntroCard />
 			</div>
 
 		</main>
