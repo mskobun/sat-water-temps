@@ -43,6 +43,7 @@
 
 	const globalMin = 273.15;
 	const globalMax = 308.15;
+	const colorScaleLabels = { relative: 'Relative', fixed: 'Fixed', gray: 'Grayscale' } as const;
 
 	function resetState() {
 		dates = [];
@@ -276,12 +277,12 @@
 							<label for="scale-select" class="text-xs text-muted-foreground mb-1.5 block">Color scale</label>
 							<Select.Root type="single" value={selectedColorScale} onValueChange={(v) => v != null && handleColorScaleChange(v as 'relative' | 'fixed' | 'gray')}>
 								<Select.Trigger id="scale-select" class="w-full h-9">
-									{selectedColorScale}
+									{colorScaleLabels[selectedColorScale]}
 								</Select.Trigger>
 								<Select.Content>
-									<Select.Item value="relative" label="Relative">Relative</Select.Item>
-									<Select.Item value="fixed" label="Fixed">Fixed</Select.Item>
-									<Select.Item value="gray" label="Grayscale">Grayscale</Select.Item>
+									{#each Object.entries(colorScaleLabels) as [value, label]}
+										<Select.Item {value} {label}>{label}</Select.Item>
+									{/each}
 								</Select.Content>
 							</Select.Root>
 						</div>
