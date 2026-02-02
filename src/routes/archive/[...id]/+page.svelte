@@ -77,7 +77,7 @@
 										variant="link"
 										size="sm"
 										class="h-auto p-0 justify-start font-semibold"
-										href={`/api/download_tif/${featureId}/${date}_filter_relative.tif`}
+										href={`/api/feature/${featureId}/tif/${date}/file`}
 										download
 									>
 										Download TIF
@@ -86,7 +86,7 @@
 										variant="link"
 										size="sm"
 										class="h-auto p-0 justify-start font-semibold"
-										href={`/api/download_csv/${featureId}/${date}_filter_relative.csv`}
+										href={`/api/download_csv/${featureId}/${date}`}
 										download
 									>
 										Download CSV

@@ -3,15 +3,6 @@
 import type { D1Database, R2Bucket } from '@cloudflare/workers-types';
 import Papa from 'papaparse';
 
-export const BUCKET_PREFIX = "ECO";
-
-export function buildFeaturePath(featureId: string, suffix: string): string {
-  // Parse location from featureId (format: "name/location" or just "name")
-  // Lakes use just "name", rivers use "name/river"
-  const [name, location = "lake"] = featureId.split("/");
-  return `${BUCKET_PREFIX}/${name}/${location}/${suffix}`;
-}
-
 /**
  * Parse CSV text into temperature data array
  */
