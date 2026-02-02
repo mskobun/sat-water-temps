@@ -34,7 +34,6 @@
 	let currentUnit: 'Kelvin' | 'Celsius' | 'Fahrenheit' = 'Celsius';
 	let temperatureData: any[] = [];
 	let dates: string[] = [];
-	let selectedGraphType: 'histogram' | 'line' | 'scatter' = 'line';
 	let showWaterOffAlert = false;
 	let loading = false;
 	let tableExpanded = false;
@@ -164,53 +163,26 @@
 		if (!ctx) return;
 		const temps = temperatureData.map((p) => parseFloat(p.LST_filter || p.temperature || 0));
 		const convertedTemps = temps.map((t) => convertTemp(t, currentUnit));
-		const labels = temperatureData.map((_, i) => `Point ${i + 1}`);
-		const latitudes = temperatureData.map((p) => parseFloat(p.y || p.latitude || 0));
-		let config: any = {
-			type: 'line',
-			data: { labels, datasets: [] },
+		const histData = createHistogram(convertedTemps, 5);
+		const config = {
+			type: 'bar' as const,
+			data: {
+				labels: histData.labels,
+				datasets: [{
+					label: 'Temperature Distribution',
+					data: histData.values,
+					backgroundColor: '#8b5cf6'
+				}]
+			},
 			options: {
 				responsive: true,
 				maintainAspectRatio: false,
 				scales: {
-					x: { title: { display: true, text: 'Data Points' } },
-					y: { title: { display: true, text: `Temperature (${unitSymbol})` } }
+					x: { title: { display: true, text: `Temperature (${unitSymbol})` } },
+					y: { title: { display: true, text: 'Count' } }
 				}
 			}
 		};
-		switch (selectedGraphType) {
-			case 'histogram': {
-				config.type = 'bar';
-				const histData = createHistogram(convertedTemps, 5);
-				config.data.labels = histData.labels;
-				config.data.datasets.push({
-					label: 'Temperature Distribution',
-					data: histData.values,
-					backgroundColor: '#8b5cf6'
-				});
-				break;
-			}
-			case 'line':
-				config.data.datasets.push({
-					label: `Temperature (${unitSymbol})`,
-					data: convertedTemps,
-					borderColor: '#f59e0b',
-					backgroundColor: 'rgba(245, 158, 11, 0.15)',
-					borderWidth: 2,
-					fill: true
-				});
-				break;
-			case 'scatter':
-				config.type = 'scatter';
-				config.data.datasets.push({
-					label: 'Temperature vs Latitude',
-					data: latitudes.map((lat, i) => ({ x: lat, y: convertedTemps[i] })),
-					backgroundColor: '#06b6d4',
-					pointRadius: 5
-				});
-				config.options.scales.x.title.text = 'Latitude';
-				break;
-		}
 		chart = new Chart(ctx, config);
 	}
 
@@ -245,7 +217,7 @@
 		dispatch('colorScaleChange', selectedColorScale);
 	}
 
-	$: if ((selectedGraphType || currentUnit) && chartElement && temperatureData.length > 0) {
+	$: if (currentUnit && chartElement && temperatureData.length > 0) {
 		updateChart();
 	}
 	$: if (featureId && isOpen) {
@@ -405,24 +377,12 @@
 					</div>
 				</div>
 
-				<!-- Chart -->
+				<!-- Distribution -->
 				<div class="space-y-3">
-					<div class="flex items-center justify-between">
-						<h3 class="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-							<BarChart3Icon class="size-3.5" />
-							Chart
-						</h3>
-						<Select.Root type="single" value={selectedGraphType} onValueChange={(v) => v != null && (selectedGraphType = v as 'histogram' | 'line' | 'scatter')}>
-							<Select.Trigger class="h-7 text-xs w-[120px]">
-								{selectedGraphType === 'histogram' ? 'Distribution' : selectedGraphType === 'line' ? 'Temperatures' : 'Latitude'}
-							</Select.Trigger>
-							<Select.Content>
-								<Select.Item value="line" label="Temperatures">Temperatures</Select.Item>
-								<Select.Item value="histogram" label="Distribution">Distribution</Select.Item>
-								<Select.Item value="scatter" label="Latitude">Latitude</Select.Item>
-							</Select.Content>
-						</Select.Root>
-					</div>
+					<h3 class="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+						<BarChart3Icon class="size-3.5" />
+						Distribution
+					</h3>
 					<div class="rounded-lg border bg-muted/20 overflow-hidden">
 						<div class="h-[200px] p-2">
 							<canvas bind:this={chartElement} class="w-full h-full"></canvas>
