@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { MapLibre, GeoJSONSource, FillLayer, LineLayer, RasterLayer, ImageSource } from 'svelte-maplibre-gl';
@@ -13,9 +13,7 @@
 	let geojsonData: any = $state(null);
 	let mapReady = $state(false);
 
-	// Selected feature state
-	let selectedFeature: { id: string; name: string; location: string; bounds: LngLatBoundsLike } | null = $state(null);
-	let sidebarOpen = $state(false);
+	// Local UI state (not URL-driven)
 	let selectedDate = $state('');
 	let selectedColorScale: 'relative' | 'fixed' | 'gray' = $state('relative');
 	let hoveredFeatureId: string | null = $state(null);
@@ -26,16 +24,93 @@
 
 	// Saved map position (to restore when closing sidebar)
 	let savedMapView: { center: [number, number]; zoom: number } | null = $state(null);
-	let isProgrammaticMove = false;
 
-	// URL params
-	let urlFeatureId = $derived($page.params.id ? $page.params.id : null);
+	// URL is the single source of truth
+	let urlFeatureId = $derived($page.params.id ?? null);
 
-	// React to URL changes
+	// Derive selected feature FROM the URL
+	let selectedFeature = $derived.by(() => {
+		if (!urlFeatureId || !geojsonData) return null;
+
+		const feature = geojsonData.features.find((f: any) => {
+			const loc = f.properties.location || 'lake';
+			const id = loc === 'lake' ? f.properties.name : `${f.properties.name}/${loc}`;
+			return id === urlFeatureId;
+		});
+
+		if (!feature) return null;
+
+		const name = feature.properties.name;
+		const location = feature.properties.location || 'lake';
+
+		// Calculate bounds from geometry
+		const coords = feature.geometry.coordinates[0];
+		const lngs = coords.map((c: number[]) => c[0]);
+		const lats = coords.map((c: number[]) => c[1]);
+		const bounds: LngLatBoundsLike = [
+			[Math.min(...lngs), Math.min(...lats)],
+			[Math.max(...lngs), Math.max(...lats)]
+		];
+
+		return { id: urlFeatureId, name, location, bounds };
+	});
+
+	// Sidebar is open when there's a selected feature
+	let sidebarOpen = $derived(!!selectedFeature);
+
+	// Track previous feature ID to detect transitions
+	let previousFeatureId: string | null = null;
+
+	// Effect handles map zoom as a SIDE EFFECT of state changes
 	$effect(() => {
-		if (mapReady) {
-			handleUrlChange(urlFeatureId);
+		const currentFeatureId = selectedFeature?.id ?? null;
+		const bounds = selectedFeature?.bounds;
+
+		// Read map and savedMapView without creating dependencies
+		const currentMap = untrack(() => map);
+		const currentSavedView = untrack(() => savedMapView);
+
+		if (!mapReady || !currentMap) {
+			previousFeatureId = currentFeatureId;
+			return;
 		}
+
+		if (currentFeatureId && !previousFeatureId) {
+			// Opening: save view, zoom to feature
+			const center = currentMap.getCenter();
+			savedMapView = {
+				center: [center.lng, center.lat],
+				zoom: currentMap.getZoom()
+			};
+			if (bounds) {
+				currentMap.fitBounds(bounds, { padding: 20 });
+			}
+			// Reset local UI state
+			selectedDate = '';
+			selectedColorScale = 'relative';
+		} else if (!currentFeatureId && previousFeatureId) {
+			// Closing: restore view
+			if (currentSavedView) {
+				currentMap.easeTo({
+					center: currentSavedView.center,
+					zoom: currentSavedView.zoom
+				});
+			}
+			savedMapView = null;
+			// Reset local UI state
+			selectedDate = '';
+			selectedColorScale = 'relative';
+		} else if (currentFeatureId && previousFeatureId && currentFeatureId !== previousFeatureId) {
+			// Switching features: just zoom to new feature
+			if (bounds) {
+				currentMap.fitBounds(bounds, { padding: 20 });
+			}
+			// Reset local UI state
+			selectedDate = '';
+			selectedColorScale = 'relative';
+		}
+
+		previousFeatureId = currentFeatureId;
 	});
 
 	// Overlay URL for temperature image
@@ -84,108 +159,7 @@
 		]
 	};
 
-	function handleUrlChange(featureId: string | null) {
-		if (featureId) {
-			if (selectedFeature?.id !== featureId) {
-				selectFeatureById(featureId);
-			}
-		} else if (selectedFeature) {
-			clearSelection(false);
-		}
-	}
-
-	function updateUrl(featureId: string | null) {
-		if (featureId) {
-			goto(`/feature/${encodeURIComponent(featureId)}`, {
-				replaceState: false,
-				keepFocus: true,
-				noScroll: true
-			});
-		} else {
-			goto('/', { replaceState: false, keepFocus: true, noScroll: true });
-		}
-	}
-
-	function selectFeatureById(featureId: string) {
-		if (!geojsonData) return false;
-
-		const feature = geojsonData.features.find((f: any) => {
-			const loc = f.properties.location || 'lake';
-			const id = loc === 'lake' ? f.properties.name : `${f.properties.name}/${loc}`;
-			return id === featureId;
-		});
-
-		if (feature) {
-			selectFeatureInternal(feature, false);
-			return true;
-		}
-		return false;
-	}
-
-	function clearSelection(shouldUpdateUrl = true) {
-		sidebarOpen = false;
-		selectedFeature = null;
-		selectedDate = '';
-		selectedColorScale = 'relative';
-
-		// Restore saved map view
-		if (savedMapView && map) {
-			isProgrammaticMove = true;
-			map.easeTo({
-				center: savedMapView.center,
-				zoom: savedMapView.zoom
-			});
-			savedMapView = null;
-		}
-
-		if (shouldUpdateUrl) {
-			updateUrl(null);
-		}
-	}
-
-	function selectFeatureInternal(feature: any, shouldUpdateUrl = true) {
-		const name = feature.properties.name;
-		const location = feature.properties.location || 'lake';
-		const featureId = location === 'lake' ? name : `${name}/${location}`;
-
-		if (!name) return;
-		if (selectedFeature?.id === featureId) return;
-
-		// Calculate bounds from geometry
-		const coords = feature.geometry.coordinates[0];
-		const lngs = coords.map((c: number[]) => c[0]);
-		const lats = coords.map((c: number[]) => c[1]);
-		const bounds: LngLatBoundsLike = [
-			[Math.min(...lngs), Math.min(...lats)],
-			[Math.max(...lngs), Math.max(...lats)]
-		];
-
-		selectedFeature = { id: featureId, name, location, bounds };
-		selectedDate = '';
-		selectedColorScale = 'relative';
-
-		// Save current view before zooming
-		if (!savedMapView && map) {
-			const center = map.getCenter();
-			savedMapView = {
-				center: [center.lng, center.lat],
-				zoom: map.getZoom()
-			};
-		}
-
-		// Fit to bounds
-		if (map) {
-			isProgrammaticMove = true;
-			map.fitBounds(bounds, { padding: 20 });
-		}
-
-		sidebarOpen = true;
-
-		if (shouldUpdateUrl) {
-			updateUrl(featureId);
-		}
-	}
-
+	// All user interactions just change the URL
 	function handleMapClick(e: MapMouseEvent) {
 		if (!map) return;
 
@@ -197,19 +171,15 @@
 			const featureId =
 				loc === 'lake' ? feature.properties?.name : `${feature.properties?.name}/${loc}`;
 
-			if (selectedFeature?.id !== featureId) {
-				// Find full feature from geojsonData for bounds calculation
-				const fullFeature = geojsonData.features.find((f: any) => {
-					const fLoc = f.properties.location || 'lake';
-					const fId = fLoc === 'lake' ? f.properties.name : `${f.properties.name}/${fLoc}`;
-					return fId === featureId;
-				});
-				if (fullFeature) {
-					selectFeatureInternal(fullFeature, true);
-				}
-			}
+			// Navigate to feature (URL change will trigger state updates)
+			goto(`/feature/${encodeURIComponent(featureId)}`, {
+				replaceState: false,
+				keepFocus: true,
+				noScroll: true
+			});
 		} else if (selectedFeature) {
-			clearSelection();
+			// Navigate to home (URL change will trigger state updates)
+			goto('/', { replaceState: false, keepFocus: true, noScroll: true });
 		}
 	}
 
@@ -231,16 +201,6 @@
 		}
 	}
 
-	function handleMoveEnd() {
-		if (isProgrammaticMove) {
-			isProgrammaticMove = false;
-			return;
-		}
-		if (savedMapView && selectedFeature) {
-			savedMapView = null;
-		}
-	}
-
 	function handleDateChange(event: CustomEvent<string>) {
 		selectedDate = event.detail;
 	}
@@ -250,7 +210,8 @@
 	}
 
 	function handleSidebarClose() {
-		clearSelection();
+		// Just change the URL - state will update automatically
+		goto('/', { replaceState: false, keepFocus: true, noScroll: true });
 	}
 
 	function handleMapLoad() {
@@ -289,7 +250,6 @@
 			maxZoom={19}
 			onclick={handleMapClick}
 			onmousemove={handleMouseMove}
-			onmoveend={handleMoveEnd}
 			onload={handleMapLoad}
 		>
 			{#if geojsonData}
@@ -366,9 +326,9 @@
 	isOpen={sidebarOpen}
 	bind:selectedDate
 	bind:selectedColorScale
-	onclose={handleSidebarClose}
-	ondateChange={handleDateChange}
-	oncolorScaleChange={handleColorScaleChange}
+	on:close={handleSidebarClose}
+	on:dateChange={handleDateChange}
+	on:colorScaleChange={handleColorScaleChange}
 />
 
 <!-- Hidden slot for child pages (they don't render anything) -->
