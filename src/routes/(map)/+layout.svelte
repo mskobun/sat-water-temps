@@ -21,6 +21,12 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 	let selectedDate = $state('');
 	let selectedColorScale: 'relative' | 'fixed' | 'gray' = $state('relative');
 	let hoveredFeatureId: string | null = $state(null);
+	let currentUnit: 'Kelvin' | 'Celsius' | 'Fahrenheit' = $state('Celsius');
+	
+	// Temperature hover tooltip
+	let hoveredTemp: number | null = $state(null);
+	let tooltipX = $state(0);
+	let tooltipY = $state(0);
 
 	// Temperature data (fetched here so map can use it for heatmap)
 	let heatmapGeojson: { type: 'FeatureCollection'; features: any[] } | null = $state(null);
@@ -228,6 +234,24 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 
 	function handleMouseMove(e: MapMouseEvent) {
 		if (!map) return;
+		
+		// Check temperature layer first
+		if (map.getLayer('temperature-layer')) {
+			const tempFeatures = map.queryRenderedFeatures(e.point, { layers: ['temperature-layer'] });
+			if (tempFeatures && tempFeatures.length > 0) {
+				const temp = tempFeatures[0].properties?.temperature;
+				if (temp != null) {
+					hoveredTemp = temp;
+					tooltipX = e.point.x;
+					tooltipY = e.point.y;
+					map.getCanvas().style.cursor = 'crosshair';
+					return;
+				}
+			}
+		}
+		hoveredTemp = null;
+		
+		// Check polygon layer
 		if (!map.getLayer('polygons-fill')) return;
 
 		const features = map.queryRenderedFeatures(e.point, { layers: ['polygons-fill'] });
@@ -312,6 +336,23 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 	function getFeatureExpression(featureId: string | null | undefined): string {
 		return featureId ?? '';
 	}
+	
+	// Format temperature for tooltip based on selected unit
+	function convertTemp(kelvin: number): number {
+		if (currentUnit === 'Celsius') return kelvin - 273.15;
+		if (currentUnit === 'Fahrenheit') return (kelvin - 273.15) * 9 / 5 + 32;
+		return kelvin;
+	}
+	
+	let unitSymbol = $derived.by(() => {
+		if (currentUnit === 'Kelvin') return 'K';
+		if (currentUnit === 'Celsius') return '°C';
+		return '°F';
+	});
+	
+	let tooltipTempDisplay = $derived(
+		hoveredTemp != null ? convertTemp(hoveredTemp).toFixed(1) + unitSymbol : ''
+	);
 </script>
 
 <svelte:head>
@@ -339,6 +380,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 						isOpen={true}
 						bind:selectedDate
 						bind:selectedColorScale
+						bind:currentUnit
 						{relativeMin}
 						{relativeMax}
 						{avgTemp}
@@ -425,6 +467,16 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 				</MapLibre>
 				<!-- Floating intro card (bottom left) -->
 				<IntroCard />
+				
+				<!-- Temperature hover tooltip (styled like shadcn tooltip) -->
+				{#if hoveredTemp != null}
+					<div 
+						class="absolute pointer-events-none z-50 px-3 py-1.5 text-xs font-medium bg-foreground text-background rounded-md shadow-md"
+						style="left: {tooltipX + 12}px; top: {tooltipY - 12}px;"
+					>
+						{tooltipTempDisplay}
+					</div>
+				{/if}
 			</div>
 
 		</main>

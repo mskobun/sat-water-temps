@@ -25,14 +25,14 @@
 	export let relativeMax: number = 0;
 	export let avgTemp: number = 0;
 	export let histogramData: Array<{ range: string; count: number }> = [];
+	// Temperature unit (shared with parent for tooltip)
+	export let currentUnit: 'Kelvin' | 'Celsius' | 'Fahrenheit' = 'Celsius';
 
 	const dispatch = createEventDispatcher<{
 		close: void;
 		dateChange: string;
 		colorScaleChange: 'relative' | 'fixed' | 'gray';
 	}>();
-
-	let currentUnit: 'Kelvin' | 'Celsius' | 'Fahrenheit' = 'Celsius';
 	let dates: string[] = [];
 	let showWaterOffAlert = false;
 	let loading = false;
