@@ -204,7 +204,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 				tileSize: 256,
 				attribution:
 					'Tiles &copy; Esri, Maxar, Earthstar Geographics, and the GIS User Community',
-				maxzoom: 19
+				maxzoom: 18
 			}
 		},
 		layers: [
