@@ -34,7 +34,7 @@
 			<Card.Header class="flex flex-row items-start gap-2 pb-0">
 				<div class="min-w-0 flex-1">
 					<Card.Title class="text-lg">Satellite Water Temperature Monitoring</Card.Title>
-					<Card.Description class="text-sm text-black mt-2">
+					<Card.Description class="text-sm text-primary mt-2">
 						This map shows water bodies monitored with ECOSTRESS satellite data. Click a
 						polygon to view temperature time series and thermal imagery. Data is updated
 						periodically from NASA AppEEARS.
