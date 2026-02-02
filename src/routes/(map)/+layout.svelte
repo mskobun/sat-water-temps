@@ -247,7 +247,7 @@
 		<!-- Feature Sidebar (right side) – only in DOM when a feature is selected -->
 		{#if selectedFeature}
 			<Sidebar.Sidebar side="right" collapsible="offcanvas" class="border-l w-full sm:max-w-md">
-				<Sidebar.Header class="flex flex-row items-center justify-between gap-2 px-4 py-3 border-b shrink-0">
+				<Sidebar.Header class="flex flex-row items-center justify-between gap-2 px-4 py-3 border-b shrink-0 bg-background">
 					<span class="font-semibold text-foreground truncate">
 						{selectedFeature.name ?? selectedFeature.id ?? 'Water body'}
 					</span>
@@ -256,7 +256,7 @@
 						<span class="sr-only">Close</span>
 					</Button>
 				</Sidebar.Header>
-				<Sidebar.Content class="flex flex-col min-h-0">
+				<Sidebar.Content class="flex flex-col min-h-0 bg-background">
 					<FeatureSidebar
 						featureId={selectedFeature.id}
 						featureName={selectedFeature.name ?? ''}
