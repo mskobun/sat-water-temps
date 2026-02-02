@@ -2,74 +2,121 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
+	import { MapLibre, GeoJSONSource, FillLayer, LineLayer, RasterLayer, ImageSource } from 'svelte-maplibre-gl';
+	import type { Map, MapMouseEvent, LngLatBoundsLike } from 'maplibre-gl';
 	import FeatureSidebar from '$lib/components/FeatureSidebar.svelte';
+	import type { Snippet } from 'svelte';
 
-	let mapElement: HTMLDivElement;
-	let map: any;
-	let L: any;
-	let geojsonLayer: any;
-	let geojsonData: any = null;
-	let layersByFeatureId: Map<string, any> = new Map();
-	let currentOverlay: any = null;
-	let currentPolygon: any = null;
-	let mapReady = false;
-	
+	let { children }: { children: Snippet } = $props();
+
+	let map: Map | undefined = $state();
+	let geojsonData: any = $state(null);
+	let mapReady = $state(false);
+
 	// Selected feature state
-	let selectedFeature: { id: string; name: string; location: string; bounds: any } | null = null;
-	let sidebarOpen = false;
-	let selectedDate = '';
-	let selectedColorScale: 'relative' | 'fixed' | 'gray' = 'relative';
-	
-	// Default map view
-	const defaultCenter: [number, number] = [2.5, 112.5];
+	let selectedFeature: { id: string; name: string; location: string; bounds: LngLatBoundsLike } | null = $state(null);
+	let sidebarOpen = $state(false);
+	let selectedDate = $state('');
+	let selectedColorScale: 'relative' | 'fixed' | 'gray' = $state('relative');
+	let hoveredFeatureId: string | null = $state(null);
+
+	// Default map view (MapLibre uses [lng, lat])
+	const defaultCenter: [number, number] = [112.5, 2.5];
 	const defaultZoom = 6;
-	
+
 	// Saved map position (to restore when closing sidebar)
-	let savedMapView: { center: [number, number]; zoom: number } | null = null;
-	let isProgrammaticMove = false; // Flag to ignore programmatic map movements
-	
-	// Get feature ID from URL path params (e.g., /feature/Magat or /feature/Magat/river)
-	$: urlFeatureId = $page.params.id ? $page.params.id : null;
-	
+	let savedMapView: { center: [number, number]; zoom: number } | null = $state(null);
+	let isProgrammaticMove = false;
+
+	// URL params
+	let urlFeatureId = $derived($page.params.id ? $page.params.id : null);
+
 	// React to URL changes
-	$: if (mapReady) {
-		handleUrlChange(urlFeatureId);
-	}
-	
+	$effect(() => {
+		if (mapReady) {
+			handleUrlChange(urlFeatureId);
+		}
+	});
+
+	// Overlay URL for temperature image
+	let overlayUrl = $derived(
+		selectedFeature
+			? selectedDate
+				? `/api/feature/${selectedFeature.id}/tif/${selectedDate}/${selectedColorScale}`
+				: `/api/latest_lst_tif/${selectedFeature.id}`
+			: null
+	);
+
+	// Image source coordinates (4 corners: top-left, top-right, bottom-right, bottom-left)
+	let imageCoordinates = $derived.by(() => {
+		if (!selectedFeature?.bounds) return null;
+		const bounds = selectedFeature.bounds as [[number, number], [number, number]];
+		const [[minLng, minLat], [maxLng, maxLat]] = bounds;
+		return [
+			[minLng, maxLat], // top-left
+			[maxLng, maxLat], // top-right
+			[maxLng, minLat], // bottom-right
+			[minLng, minLat] // bottom-left
+		] as [[number, number], [number, number], [number, number], [number, number]];
+	});
+
+	// MapLibre style with Esri World Imagery tiles
+	const mapStyle = {
+		version: 8 as const,
+		sources: {
+			'esri-imagery': {
+				type: 'raster' as const,
+				tiles: [
+					'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
+				],
+				tileSize: 256,
+				attribution:
+					'Tiles &copy; Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+				maxzoom: 19
+			}
+		},
+		layers: [
+			{
+				id: 'esri-imagery-layer',
+				type: 'raster' as const,
+				source: 'esri-imagery'
+			}
+		]
+	};
+
 	function handleUrlChange(featureId: string | null) {
 		if (featureId) {
-			// Select feature if different from current
 			if (selectedFeature?.id !== featureId) {
 				selectFeatureById(featureId);
 			}
 		} else if (selectedFeature) {
-			// Clear selection if URL has no feature
 			clearSelection(false);
 		}
 	}
-	
-	// Update URL when feature changes
+
 	function updateUrl(featureId: string | null) {
 		if (featureId) {
-			goto(`/feature/${encodeURIComponent(featureId)}`, { replaceState: false, keepFocus: true, noScroll: true });
+			goto(`/feature/${encodeURIComponent(featureId)}`, {
+				replaceState: false,
+				keepFocus: true,
+				noScroll: true
+			});
 		} else {
 			goto('/', { replaceState: false, keepFocus: true, noScroll: true });
 		}
 	}
-	
-	// Select feature by ID (for URL navigation)
+
 	function selectFeatureById(featureId: string) {
-		if (!geojsonData || !layersByFeatureId.has(featureId)) return false;
-		
-		const layer = layersByFeatureId.get(featureId);
+		if (!geojsonData) return false;
+
 		const feature = geojsonData.features.find((f: any) => {
 			const loc = f.properties.location || 'lake';
 			const id = loc === 'lake' ? f.properties.name : `${f.properties.name}/${loc}`;
 			return id === featureId;
 		});
-		
-		if (feature && layer) {
-			selectFeatureInternal(feature, layer, false);
+
+		if (feature) {
+			selectFeatureInternal(feature, false);
 			return true;
 		}
 		return false;
@@ -80,239 +127,149 @@
 		selectedFeature = null;
 		selectedDate = '';
 		selectedColorScale = 'relative';
-		
-		// Remove overlay
-		if (currentOverlay && map) {
-			map.removeLayer(currentOverlay);
-			currentOverlay = null;
-		}
-		
-		// Remove polygon highlight
-		if (currentPolygon && map) {
-			map.removeLayer(currentPolygon);
-			currentPolygon = null;
-		}
-		
-		// Reset layer styles
-		if (geojsonLayer) {
-			geojsonLayer.setStyle({ color: '#8abbff', weight: 2 });
-		}
-		
-		// Restore saved map view if available
+
+		// Restore saved map view
 		if (savedMapView && map) {
 			isProgrammaticMove = true;
-			map.setView(savedMapView.center, savedMapView.zoom);
+			map.easeTo({
+				center: savedMapView.center,
+				zoom: savedMapView.zoom
+			});
 			savedMapView = null;
 		}
-		
-		// Update URL
+
 		if (shouldUpdateUrl) {
 			updateUrl(null);
 		}
 	}
 
-	// Internal select function that optionally updates URL
-	function selectFeatureInternal(feature: any, layer: any, shouldUpdateUrl = true) {
+	function selectFeatureInternal(feature: any, shouldUpdateUrl = true) {
 		const name = feature.properties.name;
 		const location = feature.properties.location || 'lake';
 		const featureId = location === 'lake' ? name : `${name}/${location}`;
-		
+
 		if (!name) return;
-		
-		// If clicking the same feature, do nothing
 		if (selectedFeature?.id === featureId) return;
-		
-		// Remove previous overlay and polygon
-		if (currentOverlay) {
-			map.removeLayer(currentOverlay);
-			currentOverlay = null;
-		}
-		if (currentPolygon) {
-			map.removeLayer(currentPolygon);
-			currentPolygon = null;
-		}
-		
-		// Reset all layer styles first
-		geojsonLayer.setStyle({ color: '#8abbff', weight: 2 });
-		
-		// Get bounds from the layer
-		const bounds = layer.getBounds();
-		
-		// Create polygon overlay for the selected feature
-		const coords = feature.geometry.coordinates;
-		if (Array.isArray(coords) && Array.isArray(coords[0])) {
-			const latLngs = coords[0].map((coord: number[]) => [coord[1], coord[0]]);
-			currentPolygon = L.polygon(latLngs, {
-				color: '#00ff00',
-				opacity: 0.3,
-				weight: 3,
-				fillOpacity: 0.1
-			}).addTo(map);
-		}
-		
-		// Set selected feature
+
+		// Calculate bounds from geometry
+		const coords = feature.geometry.coordinates[0];
+		const lngs = coords.map((c: number[]) => c[0]);
+		const lats = coords.map((c: number[]) => c[1]);
+		const bounds: LngLatBoundsLike = [
+			[Math.min(...lngs), Math.min(...lats)],
+			[Math.max(...lngs), Math.max(...lats)]
+		];
+
 		selectedFeature = { id: featureId, name, location, bounds };
-		
-		// Reset date/colorScale for new feature
 		selectedDate = '';
 		selectedColorScale = 'relative';
-		
-		// Save current map view before zooming (only if not already saved)
-		if (!savedMapView) {
+
+		// Save current view before zooming
+		if (!savedMapView && map) {
+			const center = map.getCenter();
 			savedMapView = {
-				center: [map.getCenter().lat, map.getCenter().lng],
+				center: [center.lng, center.lat],
 				zoom: map.getZoom()
 			};
 		}
-		
-		// Zoom to feature (mark as programmatic to avoid clearing saved view)
-		isProgrammaticMove = true;
-		map.fitBounds(bounds, { padding: [20, 20] });
-		
-		// Add initial overlay (will be updated when sidebar loads dates)
-		updateOverlay();
-		
-		// Open sidebar
+
+		// Fit to bounds
+		if (map) {
+			isProgrammaticMove = true;
+			map.fitBounds(bounds, { padding: 20 });
+		}
+
 		sidebarOpen = true;
-		
-		// Update URL
+
 		if (shouldUpdateUrl) {
 			updateUrl(featureId);
 		}
 	}
 
-	// Public select function called from map clicks
-	function selectFeature(feature: any, layer: any) {
-		selectFeatureInternal(feature, layer, true);
+	function handleMapClick(e: MapMouseEvent) {
+		if (!map) return;
+
+		const features = map.queryRenderedFeatures(e.point, { layers: ['polygons-fill'] });
+
+		if (features && features.length > 0) {
+			const feature = features[0];
+			const loc = feature.properties?.location || 'lake';
+			const featureId =
+				loc === 'lake' ? feature.properties?.name : `${feature.properties?.name}/${loc}`;
+
+			if (selectedFeature?.id !== featureId) {
+				// Find full feature from geojsonData for bounds calculation
+				const fullFeature = geojsonData.features.find((f: any) => {
+					const fLoc = f.properties.location || 'lake';
+					const fId = fLoc === 'lake' ? f.properties.name : `${f.properties.name}/${fLoc}`;
+					return fId === featureId;
+				});
+				if (fullFeature) {
+					selectFeatureInternal(fullFeature, true);
+				}
+			}
+		} else if (selectedFeature) {
+			clearSelection();
+		}
 	}
 
-	function updateOverlay() {
-		if (!map || !selectedFeature || !currentPolygon) return;
-		
-		// Remove existing overlay
-		if (currentOverlay) {
-			map.removeLayer(currentOverlay);
-		}
-		
-		// Build overlay URL
-		const featureId = selectedFeature.id;
-		let overlayUrl: string;
-		
-		if (selectedDate) {
-			overlayUrl = `/api/feature/${featureId}/tif/${selectedDate}/${selectedColorScale}`;
+	function handleMouseMove(e: MapMouseEvent) {
+		if (!map) return;
+
+		const features = map.queryRenderedFeatures(e.point, { layers: ['polygons-fill'] });
+
+		if (features && features.length > 0) {
+			const loc = features[0].properties?.location || 'lake';
+			hoveredFeatureId =
+				loc === 'lake'
+					? features[0].properties?.name
+					: `${features[0].properties?.name}/${loc}`;
+			map.getCanvas().style.cursor = 'pointer';
 		} else {
-			// Use latest if no date selected
-			overlayUrl = `/api/latest_lst_tif/${featureId}`;
+			hoveredFeatureId = null;
+			map.getCanvas().style.cursor = '';
 		}
-		
-		// Add new overlay
-		currentOverlay = L.imageOverlay(overlayUrl, currentPolygon.getBounds()).addTo(map);
+	}
+
+	function handleMoveEnd() {
+		if (isProgrammaticMove) {
+			isProgrammaticMove = false;
+			return;
+		}
+		if (savedMapView && selectedFeature) {
+			savedMapView = null;
+		}
 	}
 
 	function handleDateChange(event: CustomEvent<string>) {
 		selectedDate = event.detail;
-		updateOverlay();
 	}
 
 	function handleColorScaleChange(event: CustomEvent<'relative' | 'fixed' | 'gray'>) {
 		selectedColorScale = event.detail;
-		updateOverlay();
 	}
 
 	function handleSidebarClose() {
 		clearSelection();
 	}
 
+	function handleMapLoad() {
+		mapReady = true;
+	}
+
 	onMount(async () => {
-		// Dynamically import Leaflet to avoid SSR issues
-		L = await import('leaflet');
-		// Import smooth wheel zoom plugin (Google Maps-like zooming)
-		await import('@luomus/leaflet-smooth-wheel-zoom');
-
-		map = L.map(mapElement, {
-			center: defaultCenter,
-			zoom: defaultZoom,
-			minZoom: 2,
-			maxZoom: 19,
-			// Enable smooth wheel zoom (Google Maps-like)
-			scrollWheelZoom: false,    // Disable default scroll zoom
-			smoothWheelZoom: true,     // Enable smooth zoom
-			smoothSensitivity: 1.5     // Zoom speed (1 = default, higher = faster)
-		});
-
-		L.tileLayer(
-			'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-			{
-				attribution:
-					'Tiles &copy; Esri, Maxar, Earthstar Geographics, and the GIS User Community',
-				maxZoom: 19,
-				// Keep more tiles in memory for smoother zoom transitions
-				keepBuffer: 4,
-				// Don't update tiles during zoom animation - show scaled old tiles instead
-				updateWhenZooming: false,
-				// Only load new tiles after map stops moving
-				updateWhenIdle: true
-			}
-		).addTo(map);
-
-		// Map click handler - clear selection when clicking outside features
-		map.on('click', () => {
-			if (selectedFeature) {
-				clearSelection();
-			}
-		});
-		
-		// Clear saved map view if user manually moves/zooms the map
-		map.on('moveend', () => {
-			if (isProgrammaticMove) {
-				isProgrammaticMove = false;
-				return;
-			}
-			// User moved the map manually - clear saved view
-			if (savedMapView && selectedFeature) {
-				savedMapView = null;
-			}
-		});
-
-		// Load GeoJSON features
 		try {
 			const response = await fetch('/api/polygons');
 			geojsonData = await response.json();
-
-			geojsonLayer = L.geoJSON(geojsonData, {
-				style: () => ({ color: '#8abbff', weight: 2 }),
-				onEachFeature: (feature: any, layer: any) => {
-					// Store layer reference by feature ID
-					const loc = feature.properties.location || 'lake';
-					const featureId = loc === 'lake' ? feature.properties.name : `${feature.properties.name}/${loc}`;
-					layersByFeatureId.set(featureId, layer);
-					
-					layer.on({
-						mouseover: () => {
-							if (selectedFeature?.id !== featureId) {
-								layer.setStyle({ color: '#00ff00' });
-							}
-						},
-						mouseout: () => {
-							if (selectedFeature?.id !== featureId) {
-								layer.setStyle({ color: '#8abbff' });
-							}
-						},
-						click: (e: any) => {
-							// Stop propagation to prevent map click handler
-							L.DomEvent.stopPropagation(e);
-							selectFeature(feature, layer);
-						}
-					});
-				}
-			}).addTo(map);
-			
-			// Mark map as ready - this will trigger URL check via reactive statement
-			mapReady = true;
 		} catch (err) {
 			console.error('Error loading polygons:', err);
 		}
 	});
+
+	// Helper to get feature ID for expressions
+	function getFeatureExpression(featureId: string | null | undefined): string {
+		return featureId ?? '';
+	}
 </script>
 
 <svelte:head>
@@ -322,14 +279,80 @@
 <div class="h-screen bg-dark-bg font-poppins text-white flex flex-col">
 	<!-- Map Container -->
 	<div class="flex-1 relative w-full">
-		<div bind:this={mapElement} class="h-full w-full"></div>
+		<MapLibre
+			bind:map
+			class="h-full w-full"
+			style={mapStyle}
+			center={defaultCenter}
+			zoom={defaultZoom}
+			minZoom={2}
+			maxZoom={19}
+			onclick={handleMapClick}
+			onmousemove={handleMouseMove}
+			onmoveend={handleMoveEnd}
+			onload={handleMapLoad}
+		>
+			{#if geojsonData}
+				<!-- GeoJSON Source for polygons -->
+				<GeoJSONSource id="polygons" data={geojsonData}>
+					<!-- Fill layer for hover/selection detection -->
+					<FillLayer
+						id="polygons-fill"
+						paint={{
+							'fill-color': [
+								'case',
+								['==', ['get', 'name'], getFeatureExpression(selectedFeature?.name)],
+								'#00ff00',
+								['==', ['get', 'name'], getFeatureExpression(hoveredFeatureId?.split('/')[0])],
+								'#00ff00',
+								'transparent'
+							],
+							'fill-opacity': 0.1
+						}}
+					/>
+					<!-- Line layer for borders -->
+					<LineLayer
+						id="polygons-line"
+						paint={{
+							'line-color': [
+								'case',
+								['==', ['get', 'name'], getFeatureExpression(selectedFeature?.name)],
+								'#00ff00',
+								['==', ['get', 'name'], getFeatureExpression(hoveredFeatureId?.split('/')[0])],
+								'#00ff00',
+								'#8abbff'
+							],
+							'line-width': [
+								'case',
+								['==', ['get', 'name'], getFeatureExpression(selectedFeature?.name)],
+								3,
+								2
+							],
+							'line-opacity': [
+								'case',
+								['==', ['get', 'name'], getFeatureExpression(selectedFeature?.name)],
+								0.3,
+								1
+							]
+						}}
+					/>
+				</GeoJSONSource>
+			{/if}
+
+			{#if selectedFeature && overlayUrl && imageCoordinates}
+				<!-- Temperature overlay image -->
+				<ImageSource id="temperature-overlay" url={overlayUrl} coordinates={imageCoordinates}>
+					<RasterLayer id="temperature-layer" />
+				</ImageSource>
+			{/if}
+		</MapLibre>
 	</div>
 
 	<!-- Footer -->
 	<footer class="bg-dark-surface text-white py-3 text-center text-sm">
 		<p class="m-0">&copy; 2025 Satellite Water Temperature Monitoring. All rights reserved.</p>
-		<a 
-			href="/admin/jobs" 
+		<a
+			href="/admin/jobs"
 			class="text-cyan hover:text-white transition-colors duration-300 mt-1 inline-block font-medium"
 		>
 			Admin Dashboard
@@ -338,17 +361,17 @@
 </div>
 
 <!-- Feature Sidebar -->
-<FeatureSidebar 
+<FeatureSidebar
 	featureId={selectedFeature?.id || ''}
 	isOpen={sidebarOpen}
 	bind:selectedDate
 	bind:selectedColorScale
-	on:close={handleSidebarClose}
-	on:dateChange={handleDateChange}
-	on:colorScaleChange={handleColorScaleChange}
+	onclose={handleSidebarClose}
+	ondateChange={handleDateChange}
+	oncolorScaleChange={handleColorScaleChange}
 />
 
 <!-- Hidden slot for child pages (they don't render anything) -->
 <div class="hidden">
-	<slot />
+	{@render children()}
 </div>
