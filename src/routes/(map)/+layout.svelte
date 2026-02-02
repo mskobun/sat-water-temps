@@ -226,12 +226,18 @@
 	onMount(async () => {
 		// Dynamically import Leaflet to avoid SSR issues
 		L = await import('leaflet');
+		// Import smooth wheel zoom plugin (Google Maps-like zooming)
+		await import('@luomus/leaflet-smooth-wheel-zoom');
 
 		map = L.map(mapElement, {
 			center: defaultCenter,
 			zoom: defaultZoom,
 			minZoom: 2,
-			maxZoom: 19
+			maxZoom: 19,
+			// Enable smooth wheel zoom (Google Maps-like)
+			scrollWheelZoom: false,    // Disable default scroll zoom
+			smoothWheelZoom: true,     // Enable smooth zoom
+			smoothSensitivity: 1.5     // Zoom speed (1 = default, higher = faster)
 		});
 
 		L.tileLayer(
@@ -239,7 +245,13 @@
 			{
 				attribution:
 					'Tiles &copy; Esri, Maxar, Earthstar Geographics, and the GIS User Community',
-				maxZoom: 19
+				maxZoom: 19,
+				// Keep more tiles in memory for smoother zoom transitions
+				keepBuffer: 4,
+				// Don't update tiles during zoom animation - show scaled old tiles instead
+				updateWhenZooming: false,
+				// Only load new tiles after map stops moving
+				updateWhenIdle: true
 			}
 		).addTo(map);
 
