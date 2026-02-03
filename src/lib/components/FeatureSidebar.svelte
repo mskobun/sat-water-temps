@@ -273,11 +273,17 @@
 						</div>
 						<!-- Temperature Filter -->
 						<div class="space-y-2">
-							<label class="text-xs text-muted-foreground flex items-center gap-1.5">
-								<FilterIcon class="size-3" />
+							<label class="text-xs text-muted-foreground flex items-baseline gap-1.5">
+								<FilterIcon class="size-3 relative top-px" />
 								Temperature filter
 								{#if isFiltering}
-									<span class="text-[10px] text-primary font-medium">(active)</span>
+									<button
+										type="button"
+										class="text-[10px] text-primary font-medium hover:underline"
+										onclick={() => { filterRange = [0, 100]; handleFilterRangeChange([0, 100]); }}
+									>
+										Reset
+									</button>
 								{/if}
 							</label>
 							<Slider
