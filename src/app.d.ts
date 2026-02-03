@@ -20,6 +20,11 @@ declare global {
 				COGNITO_REGION: string;
 				SESSION_SECRET: string;
 				AUTH_SECRET: string;
+				// AWS Lambda invocation (manual triggers from admin UI)
+				AWS_ACCESS_KEY_ID: string;
+				AWS_SECRET_ACCESS_KEY: string;
+				LAMBDA_INITIATOR_URL: string;
+				AWS_LAMBDA_REGION: string;
 			};
 			context: {
 				waitUntil(promise: Promise<any>): void;

@@ -21,6 +21,9 @@ USER_POOL_ID=$(terraform output -raw cognito_user_pool_id 2>/dev/null)
 CLIENT_ID=$(terraform output -raw cognito_client_id 2>/dev/null)
 CLIENT_SECRET=$(terraform output -raw cognito_client_secret 2>/dev/null)
 SESSION_SECRET=$(terraform output -raw session_secret 2>/dev/null)
+INVOKER_KEY_ID=$(terraform output -raw cloudflare_invoker_access_key_id 2>/dev/null || echo "")
+INVOKER_SECRET=$(terraform output -raw cloudflare_invoker_secret_access_key 2>/dev/null || echo "")
+INITIATOR_URL=$(terraform output -raw initiator_function_url 2>/dev/null || echo "")
 
 if [ -z "$USER_POOL_ID" ] || [ -z "$CLIENT_ID" ]; then
     echo "Error: Could not fetch Cognito outputs. Ensure Cognito resources are deployed."
@@ -40,6 +43,9 @@ COGNITO_CLIENT_SECRET=$CLIENT_SECRET
 COGNITO_REGION=ap-southeast-1
 SESSION_SECRET=$SESSION_SECRET
 AUTH_SECRET=$SESSION_SECRET
+AWS_ACCESS_KEY_ID=$INVOKER_KEY_ID
+AWS_SECRET_ACCESS_KEY=$INVOKER_SECRET
+LAMBDA_INITIATOR_URL=$INITIATOR_URL
 EOF
 
 echo "Created .dev.vars with Cognito credentials"

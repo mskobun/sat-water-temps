@@ -54,6 +54,22 @@ resource "cloudflare_pages_project" "static" {
           value = random_password.session_secret.result
           type  = "secret_text"
         }
+        AWS_ACCESS_KEY_ID = {
+          value = aws_iam_access_key.cloudflare_invoker_key.id
+          type  = "secret_text"
+        }
+        AWS_SECRET_ACCESS_KEY = {
+          value = aws_iam_access_key.cloudflare_invoker_key.secret
+          type  = "secret_text"
+        }
+        LAMBDA_INITIATOR_URL = {
+          value = aws_lambda_function_url.initiator_url.function_url
+          type  = "secret_text"
+        }
+        AWS_LAMBDA_REGION = {
+          value = var.aws_region
+          type  = "plain_text"
+        }
       }
 
       # D1 database binding
@@ -100,6 +116,22 @@ resource "cloudflare_pages_project" "static" {
         AUTH_SECRET = {
           value = random_password.session_secret.result
           type  = "secret_text"
+        }
+        AWS_ACCESS_KEY_ID = {
+          value = aws_iam_access_key.cloudflare_invoker_key.id
+          type  = "secret_text"
+        }
+        AWS_SECRET_ACCESS_KEY = {
+          value = aws_iam_access_key.cloudflare_invoker_key.secret
+          type  = "secret_text"
+        }
+        LAMBDA_INITIATOR_URL = {
+          value = aws_lambda_function_url.initiator_url.function_url
+          type  = "secret_text"
+        }
+        AWS_LAMBDA_REGION = {
+          value = var.aws_region
+          type  = "plain_text"
         }
       }
 

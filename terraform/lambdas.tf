@@ -75,6 +75,35 @@ resource "aws_lambda_function" "processor_lambda" {
   memory_size = 3008 # Increased memory for performance
 }
 
+# Lambda Function URL for manual triggers from admin UI
+resource "aws_lambda_function_url" "initiator_url" {
+  function_name      = aws_lambda_function.initiator_lambda.function_name
+  authorization_type = "AWS_IAM"
+}
+
+# IAM user for Cloudflare Workers to invoke the initiator Lambda
+resource "aws_iam_user" "cloudflare_invoker" {
+  name = "${var.project_name}-cf-invoker"
+}
+
+resource "aws_iam_user_policy" "cloudflare_invoker_policy" {
+  name = "${var.project_name}-cf-invoker-policy"
+  user = aws_iam_user.cloudflare_invoker.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "lambda:InvokeFunctionUrl"
+      Resource = aws_lambda_function.initiator_lambda.arn
+    }]
+  })
+}
+
+resource "aws_iam_access_key" "cloudflare_invoker_key" {
+  user = aws_iam_user.cloudflare_invoker.name
+}
+
 # SQS Trigger for Processor Lambda
 resource "aws_lambda_event_source_mapping" "sqs_trigger" {
   event_source_arn = aws_sqs_queue.eco_processing_queue.arn

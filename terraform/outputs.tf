@@ -23,6 +23,23 @@ output "step_function_arn" {
   value = aws_sfn_state_machine.polling_machine.arn
 }
 
+output "initiator_function_url" {
+  value       = aws_lambda_function_url.initiator_url.function_url
+  description = "Function URL for the initiator Lambda (manual triggers)"
+}
+
+output "cloudflare_invoker_access_key_id" {
+  value       = aws_iam_access_key.cloudflare_invoker_key.id
+  description = "Access key ID for Cloudflare to invoke Lambda"
+  sensitive   = true
+}
+
+output "cloudflare_invoker_secret_access_key" {
+  value       = aws_iam_access_key.cloudflare_invoker_key.secret
+  description = "Secret access key for Cloudflare to invoke Lambda"
+  sensitive   = true
+}
+
 output "d1_database_id" {
   value       = cloudflare_d1_database.main.id
   description = "ID of the D1 database"
