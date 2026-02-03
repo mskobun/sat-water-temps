@@ -15,9 +15,12 @@ resource "aws_lambda_function" "initiator_lambda" {
 
   environment {
     variables = {
-      APPEEARS_USER = var.appeears_user
-      APPEEARS_PASS = var.appeears_pass
-      STATE_MACHINE_ARN = aws_sfn_state_machine.polling_machine.arn
+      APPEEARS_USER         = var.appeears_user
+      APPEEARS_PASS         = var.appeears_pass
+      STATE_MACHINE_ARN     = aws_sfn_state_machine.polling_machine.arn
+      D1_DATABASE_ID        = cloudflare_d1_database.main.id
+      CLOUDFLARE_ACCOUNT_ID = var.cloudflare_account_id
+      CLOUDFLARE_API_TOKEN  = var.cloudflare_api_token
     }
   }
 
