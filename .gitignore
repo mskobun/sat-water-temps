@@ -38,3 +38,7 @@ node_modules/
 
 # Local D1 seed data (exported from prod)
 seed.sql
+# Agent skills
+.agents/
+.claude/
+.cursor/
