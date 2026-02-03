@@ -68,25 +68,47 @@ def log_job_to_d1(
     _d1_query(sql, params)
 
 
-def log_ecostress_request(task_id, trigger_type, triggered_by, description, sd, ed, status="submitted"):
-    """Log an ECOSTRESS request to the ecostress_requests table"""
-    sql = """
-    INSERT INTO ecostress_requests
-    (task_id, trigger_type, triggered_by, description, start_date, end_date, status, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+def log_ecostress_request(task_id, trigger_type, triggered_by, description, sd, ed, status="submitted", request_id=None):
+    """Log an ECOSTRESS request to the ecostress_requests table.
+    If request_id is provided (manual triggers), UPDATE the existing pending row.
+    Otherwise (timer triggers), INSERT a new row.
     """
-    params = [task_id, trigger_type, triggered_by, description, sd, ed, status, int(time.time() * 1000)]
+    if request_id:
+        sql = """
+        UPDATE ecostress_requests
+        SET task_id = ?, status = ?, updated_at = ?
+        WHERE id = ?
+        """
+        params = [task_id, status, int(time.time() * 1000), request_id]
+    else:
+        sql = """
+        INSERT INTO ecostress_requests
+        (task_id, trigger_type, triggered_by, description, start_date, end_date, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        params = [task_id, trigger_type, triggered_by, description, sd, ed, status, int(time.time() * 1000)]
     _d1_query(sql, params)
 
 
 def update_ecostress_request(task_id, status, error_message=None):
-    """Update an ECOSTRESS request status"""
+    """Update an ECOSTRESS request status by task_id"""
     sql = """
     UPDATE ecostress_requests
     SET status = ?, updated_at = ?, error_message = ?
     WHERE task_id = ?
     """
     params = [status, int(time.time() * 1000), error_message, task_id]
+    _d1_query(sql, params)
+
+
+def update_ecostress_request_by_id(request_id, status, error_message=None):
+    """Update an ECOSTRESS request status by row id"""
+    sql = """
+    UPDATE ecostress_requests
+    SET status = ?, updated_at = ?, error_message = ?
+    WHERE id = ?
+    """
+    params = [status, int(time.time() * 1000), error_message, request_id]
     _d1_query(sql, params)
 
 
@@ -142,6 +164,7 @@ def handler(event, context):
     trigger_type = event.get("trigger_type", "timer")
     triggered_by = event.get("triggered_by", "cloudwatch")
     description = event.get("description")
+    request_id = event.get("request_id")  # Set by admin UI for manual triggers
 
     token = get_token(user, password)
     headers = {"Authorization": f"Bearer {token}"}
@@ -180,7 +203,7 @@ def handler(event, context):
         print(f"Submitted task: {task_id}")
 
         # Log ECOSTRESS request
-        log_ecostress_request(task_id, trigger_type, triggered_by, description, sd, ed)
+        log_ecostress_request(task_id, trigger_type, triggered_by, description, sd, ed, request_id=request_id)
 
         # Log job start
         metadata = json.dumps({"start_date": sd, "end_date": ed})
@@ -207,8 +230,11 @@ def handler(event, context):
         if task_id:
             log_job_to_d1("scrape", task_id, "failed", duration_ms, str(e))
             update_ecostress_request(task_id, "failed", str(e))
+        elif request_id:
+            # Manual trigger failed before getting task_id - update existing row
+            update_ecostress_request_by_id(request_id, "failed", str(e))
         else:
-            # Task submission itself failed - log request with no task_id
+            # Timer trigger failed before getting task_id - create failed row
             log_ecostress_request(None, trigger_type, triggered_by, description, sd, ed, status="failed")
         print(f"✗ Error: {e}")
         return {"statusCode": 500, "body": json.dumps({"error": str(e)})}

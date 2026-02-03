@@ -74,7 +74,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			end_date: appearsDate,
 			trigger_type: 'manual',
 			triggered_by: userEmail,
-			description: description || `Manual trigger for ${date}`
+			description: description || `Manual trigger for ${date}`,
+			request_id: requestId
 		};
 
 		const response = await aws.fetch(lambdaUrl, {
@@ -96,14 +97,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 		const result = await response.json() as { task_id?: string };
 
-		// If Lambda returned a task_id, update the request (Lambda also does this, but as a fallback)
-		if (result.task_id) {
-			await db
-				.prepare(`UPDATE ecostress_requests SET task_id = ?, status = 'submitted', updated_at = ? WHERE id = ? AND task_id IS NULL`)
-				.bind(result.task_id, Date.now(), requestId)
-				.run();
-		}
-
+		// Lambda updates the pending ecostress_requests row directly via request_id
 		return json({ id: requestId, task_id: result.task_id, message: 'Processing triggered' });
 	} catch (err) {
 		const errorMessage = err instanceof Error ? err.message : String(err);
