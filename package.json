@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build",
+    "build": "svelte-kit sync && vite build",
     "preview": "vite preview",
     "deploy": "npm run build && wrangler pages deploy .svelte-kit/cloudflare",
     "lint": "svelte-check --threshold error",
