@@ -97,6 +97,7 @@ jobs:
           TF_VAR_r2_endpoint: ${{ secrets.R2_ENDPOINT }}
           TF_VAR_pages_project_name: sat-water-temps
           TF_VAR_pages_production_branch: main
+          TF_VAR_pages_domain: ${{ secrets.PAGES_DOMAIN }}
 
       - name: Output deployment info
         run: |

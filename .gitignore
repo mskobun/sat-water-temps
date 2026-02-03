@@ -9,6 +9,7 @@ venv/
 .env.local
 .env.production
 .env.*
+.dev.vars
 
 # Terraform
 *.tfvars

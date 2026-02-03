@@ -32,3 +32,36 @@ output "d1_database_name" {
   value       = cloudflare_d1_database.main.name
   description = "Name of the D1 database"
 }
+
+# Cognito outputs
+output "cognito_user_pool_id" {
+  value       = aws_cognito_user_pool.admin_pool.id
+  description = "Cognito User Pool ID"
+}
+
+output "cognito_client_id" {
+  value       = aws_cognito_user_pool_client.admin_client.id
+  description = "Cognito App Client ID"
+}
+
+output "cognito_client_secret" {
+  value       = aws_cognito_user_pool_client.admin_client.client_secret
+  description = "Cognito App Client Secret"
+  sensitive   = true
+}
+
+output "cognito_domain" {
+  value       = "https://${aws_cognito_user_pool_domain.admin_domain.domain}.auth.ap-southeast-1.amazoncognito.com"
+  description = "Cognito Hosted UI domain URL"
+}
+
+output "cognito_jwks_url" {
+  value       = "https://cognito-idp.ap-southeast-1.amazonaws.com/${aws_cognito_user_pool.admin_pool.id}/.well-known/jwks.json"
+  description = "Cognito JWKS URL for token verification"
+}
+
+output "session_secret" {
+  value       = random_password.session_secret.result
+  description = "Session encryption secret"
+  sensitive   = true
+}

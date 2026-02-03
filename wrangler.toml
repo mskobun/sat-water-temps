@@ -18,3 +18,8 @@ remote = true
 binding = "DB"
 database_name = "sat-water-temps-db"
 database_id = "6fbaa491-9631-4afa-9c8f-0e7b4c133fd5"
+
+# Environment variables for Cognito authentication
+# Secrets are set via .dev.vars (local) or Terraform (production)
+[vars]
+COGNITO_REGION = "ap-southeast-1"

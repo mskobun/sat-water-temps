@@ -119,3 +119,54 @@ The `csv_path` column in D1 points to the R2 object key.
 - Features are water bodies (lakes/reservoirs) identified by name (e.g., "Songkhla")
 - AID (Area ID) is a 1-indexed number corresponding to polygon order in `static/polygons_new.geojson`
 - Lambda functions use AID for processing; frontend uses feature names
+
+## Authentication (Admin Pages)
+
+Admin routes (`/admin/*`) are protected by **Auth.js** with **AWS Cognito** as the identity provider.
+
+### Architecture
+- **Auth.js** (@auth/sveltekit) handles OAuth flow, session management, CSRF protection
+- **Cognito User Pool** in ap-southeast-1 (Singapore) - admin-only user creation
+- **Route protection** via `src/hooks.server.ts` - redirects unauthenticated users
+
+### Key Files
+- `src/auth.ts` - Auth.js configuration with Cognito provider
+- `src/hooks.server.ts` - Route protection middleware
+- `terraform/cognito.tf` - Cognito User Pool, Client, Domain
+- `terraform/cloudflare_resources.tf` - Secrets deployed to Pages
+
+### Local Development with Auth
+
+After deploying, run the setup script to create `.dev.vars`:
+
+```bash
+./scripts/setup-dev-auth.sh
+```
+
+This fetches Cognito credentials from Terraform outputs and writes them to `.dev.vars`.
+
+### Protecting Additional Routes
+
+To protect routes beyond `/admin/*`, either:
+
+1. **Update hooks.server.ts** for path-based protection:
+```typescript
+const isProtectedRoute =
+  url.pathname.startsWith('/admin') ||
+  url.pathname.startsWith('/dashboard');
+```
+
+2. **Check session in load functions** for fine-grained control:
+```typescript
+export const load: PageServerLoad = async ({ locals }) => {
+  const session = await locals.auth();
+  if (!session?.user) {
+    throw redirect(303, '/auth/signin');
+  }
+  return { user: session.user };
+};
+```
+
+### Creating Admin Users
+
+Via AWS Console: Cognito → User Pools → [pool] → Users → Create User

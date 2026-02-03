@@ -70,3 +70,8 @@ variable "r2_endpoint" {
   description = "Cloudflare R2 S3-compatible endpoint (e.g., https://<accountid>.r2.cloudflarestorage.com)"
   type        = string
 }
+
+variable "pages_domain" {
+  description = "Production domain for Cloudflare Pages (e.g., your-app.pages.dev or custom domain)"
+  type        = string
+}
