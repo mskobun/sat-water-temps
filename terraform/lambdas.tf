@@ -81,6 +81,15 @@ resource "aws_lambda_function_url" "initiator_url" {
   authorization_type = "AWS_IAM"
 }
 
+# Resource-based policy granting the Cloudflare invoker user permission to call the Function URL
+resource "aws_lambda_permission" "allow_cf_invoker_url" {
+  statement_id         = "AllowCfInvokerFunctionUrl"
+  action               = "lambda:InvokeFunctionUrl"
+  function_name        = aws_lambda_function.initiator_lambda.function_name
+  principal            = aws_iam_user.cloudflare_invoker.arn
+  function_url_auth_type = "AWS_IAM"
+}
+
 # IAM user for Cloudflare Workers to invoke the initiator Lambda
 resource "aws_iam_user" "cloudflare_invoker" {
   name = "${var.project_name}-cf-invoker"
