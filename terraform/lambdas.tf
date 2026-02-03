@@ -3,14 +3,34 @@ data "aws_ecr_image" "lambda_image" {
   image_tag       = "latest"
 }
 
+# CloudWatch Log Groups with retention (imported from auto-created groups)
+resource "aws_cloudwatch_log_group" "initiator_logs" {
+  name              = "/aws/lambda/${var.project_name}-initiator"
+  retention_in_days = 30
+}
+
+resource "aws_cloudwatch_log_group" "status_checker_logs" {
+  name              = "/aws/lambda/${var.project_name}-status-checker"
+  retention_in_days = 30
+}
+
+resource "aws_cloudwatch_log_group" "processor_logs" {
+  name              = "/aws/lambda/${var.project_name}-processor"
+  retention_in_days = 30
+}
+
 resource "aws_lambda_function" "initiator_lambda" {
   function_name = "${var.project_name}-initiator"
   role          = aws_iam_role.lambda_role.arn
   package_type  = "Image"
   image_uri     = "${aws_ecr_repository.lambda_repo.repository_url}@${data.aws_ecr_image.lambda_image.image_digest}"
-  
+
   image_config {
     command = ["initiator.handler"]
+  }
+
+  tracing_config {
+    mode = "Active"
   }
 
   environment {
@@ -37,6 +57,10 @@ resource "aws_lambda_function" "status_checker_lambda" {
     command = ["status_checker.handler"]
   }
 
+  tracing_config {
+    mode = "Active"
+  }
+
   environment {
     variables = {
       APPEEARS_USER = var.appeears_user
@@ -57,21 +81,25 @@ resource "aws_lambda_function" "processor_lambda" {
     command = ["processor.handler"]
   }
 
+  tracing_config {
+    mode = "Active"
+  }
+
   environment {
     variables = {
-      APPEEARS_USER = var.appeears_user
-      APPEEARS_PASS = var.appeears_pass
-      R2_ENDPOINT   = var.r2_endpoint
-      R2_BUCKET_NAME = var.r2_bucket_name
-      R2_ACCESS_KEY_ID = var.r2_access_key_id
-      R2_SECRET_ACCESS_KEY = var.r2_secret_access_key
-      D1_DATABASE_ID = cloudflare_d1_database.main.id
+      APPEEARS_USER         = var.appeears_user
+      APPEEARS_PASS         = var.appeears_pass
+      R2_ENDPOINT           = var.r2_endpoint
+      R2_BUCKET_NAME        = var.r2_bucket_name
+      R2_ACCESS_KEY_ID      = var.r2_access_key_id
+      R2_SECRET_ACCESS_KEY  = var.r2_secret_access_key
+      D1_DATABASE_ID        = cloudflare_d1_database.main.id
       CLOUDFLARE_ACCOUNT_ID = var.cloudflare_account_id
-      CLOUDFLARE_API_TOKEN = var.cloudflare_api_token
+      CLOUDFLARE_API_TOKEN  = var.cloudflare_api_token
     }
   }
 
-  timeout     = 900 # 15 minutes max
+  timeout     = 900  # 15 minutes max
   memory_size = 3008 # Increased memory for performance
 }
 

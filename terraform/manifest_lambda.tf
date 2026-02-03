@@ -1,3 +1,8 @@
+resource "aws_cloudwatch_log_group" "manifest_processor_logs" {
+  name              = "/aws/lambda/${var.project_name}-manifest-processor"
+  retention_in_days = 30
+}
+
 resource "aws_lambda_function" "manifest_processor_lambda" {
   function_name = "${var.project_name}-manifest-processor"
   role          = aws_iam_role.lambda_role.arn
@@ -6,6 +11,10 @@ resource "aws_lambda_function" "manifest_processor_lambda" {
 
   image_config {
     command = ["manifest_processor.handler"]
+  }
+
+  tracing_config {
+    mode = "Active"
   }
 
   environment {

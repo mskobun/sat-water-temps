@@ -1,7 +1,7 @@
 # SQS Queue for completed tasks
 resource "aws_sqs_queue" "eco_processing_queue" {
   name                       = "${var.project_name}-processing-queue"
-  visibility_timeout_seconds = 900 # 15 minutes, matching Lambda max timeout
+  visibility_timeout_seconds = 900   # 15 minutes, matching Lambda max timeout
   message_retention_seconds  = 86400 # 1 day
 }
 
@@ -56,6 +56,14 @@ resource "aws_iam_role_policy" "lambda_policy" {
           "states:StartExecution"
         ]
         Resource = "*" # Ideally restrict to the specific Step Function ARN
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "xray:PutTraceSegments",
+          "xray:PutTelemetryRecords"
+        ]
+        Resource = "*"
       }
     ]
   })
@@ -100,6 +108,30 @@ resource "aws_iam_role_policy" "step_function_policy" {
           "sqs:SendMessage"
         ]
         Resource = aws_sqs_queue.eco_processing_queue.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogDelivery",
+          "logs:CreateLogStream",
+          "logs:GetLogDelivery",
+          "logs:UpdateLogDelivery",
+          "logs:DeleteLogDelivery",
+          "logs:ListLogDeliveries",
+          "logs:PutLogEvents",
+          "logs:PutResourcePolicy",
+          "logs:DescribeResourcePolicies",
+          "logs:DescribeLogGroups"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "xray:PutTraceSegments",
+          "xray:PutTelemetryRecords"
+        ]
+        Resource = "*"
       }
     ]
   })

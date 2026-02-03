@@ -216,9 +216,13 @@ def handler(event, context):
         metadata = json.dumps({"start_date": sd, "end_date": ed})
         log_job_to_d1("scrape", task_id, "started", metadata_json=metadata)
 
-        # Start Step Function
+        # Start Step Function with descriptive name for AWS Console visibility
+        trigger_label = "daily" if trigger_type == "timer" else "manual"
+        date_label = datetime.strptime(sd, "%m-%d-%Y").strftime("%Y-%m-%d")
+        execution_name = f"{trigger_label}-{date_label}-{task_id[:8]}"
         sfn_client.start_execution(
             stateMachineArn=state_machine_arn,
+            name=execution_name,
             input=json.dumps({"task_id": task_id, "wait_seconds": 30}),
         )
 
