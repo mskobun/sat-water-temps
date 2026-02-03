@@ -66,6 +66,15 @@ When making frontend/UI changes, verify them using the Cursor browser extension 
 
 3. **Alternative**: Open the development URL in your regular browser if the Cursor browser extension is not available
 
+## UI Components
+
+This project uses **shadcn-svelte** for UI components. When adding new UI elements:
+
+- Use existing shadcn-svelte components from `src/lib/components/ui/`
+- Add new components via CLI: `npx shadcn-svelte@latest add <component>`
+- Follow shadcn-svelte patterns for styling and composition
+- Components are built on Tailwind CSS and Bits UI primitives
+
 ## Architecture Overview
 
 This is a satellite water temperature monitoring platform with a split architecture:
