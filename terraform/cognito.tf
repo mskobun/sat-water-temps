@@ -8,7 +8,7 @@ provider "aws" {
 
 resource "aws_cognito_user_pool" "admin_pool" {
   provider = aws.singapore
-  name     = "${var.project_name}-admin-pool"
+  name     = "${local.name_prefix}-admin-pool"
 
   # Strong password policy
   password_policy {
@@ -25,7 +25,7 @@ resource "aws_cognito_user_pool" "admin_pool" {
     allow_admin_create_user_only = true
 
     invite_message_template {
-      email_subject = "Your admin account for ${var.project_name}"
+      email_subject = "Your admin account for ${local.name_prefix}"
       email_message = "Your username is {username} and temporary password is {####}. Please sign in at the admin portal to set a new password."
       sms_message   = "Your username is {username} and temporary password is {####}."
     }
@@ -60,14 +60,15 @@ resource "aws_cognito_user_pool" "admin_pool" {
   auto_verified_attributes = ["email"]
 
   tags = {
-    Project = var.project_name
-    Purpose = "Admin authentication"
+    Project     = var.project_name
+    Environment = var.environment != "" ? var.environment : "production"
+    Purpose     = "Admin authentication"
   }
 }
 
 resource "aws_cognito_user_pool_client" "admin_client" {
   provider     = aws.singapore
-  name         = "${var.project_name}-admin-client"
+  name         = "${local.name_prefix}-admin-client"
   user_pool_id = aws_cognito_user_pool.admin_pool.id
 
   # Generate client secret for confidential OAuth client
@@ -118,7 +119,7 @@ resource "aws_cognito_user_pool_client" "admin_client" {
 
 resource "aws_cognito_user_pool_domain" "admin_domain" {
   provider     = aws.singapore
-  domain       = "${var.project_name}-admin"
+  domain       = "${local.name_prefix}-admin"
   user_pool_id = aws_cognito_user_pool.admin_pool.id
 }
 

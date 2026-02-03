@@ -1,5 +1,5 @@
 resource "aws_ecr_repository" "lambda_repo" {
-  name                 = "${var.project_name}-lambda-images"
+  name                 = "${local.name_prefix}-lambda-images"
   image_tag_mutability = "MUTABLE"
 
   image_scanning_configuration {

@@ -8,6 +8,18 @@ variable "project_name" {
   default     = "eco-water-temps"
 }
 
+variable "environment" {
+  description = "Environment name (e.g. staging). Leave default empty for production (backward-compatible naming)."
+  type        = string
+  default     = ""
+}
+
+variable "d1_database_name" {
+  description = "Cloudflare D1 database name (use a different name per environment for staging)"
+  type        = string
+  default     = "sat-water-temps-db"
+}
+
 variable "lambda_image_uri" {
   description = "URI of the Docker image for Lambda functions"
   type        = string

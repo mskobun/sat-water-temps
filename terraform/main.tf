@@ -1,13 +1,18 @@
+locals {
+  # Production (environment = "") keeps existing names; staging gets project-environment.
+  name_prefix = var.environment != "" ? "${var.project_name}-${var.environment}" : var.project_name
+}
+
 # SQS Queue for completed tasks
 resource "aws_sqs_queue" "eco_processing_queue" {
-  name                       = "${var.project_name}-processing-queue"
+  name                       = "${local.name_prefix}-processing-queue"
   visibility_timeout_seconds = 900 # 15 minutes, matching Lambda max timeout
   message_retention_seconds  = 86400 # 1 day
 }
 
 # IAM Role for Lambdas
 resource "aws_iam_role" "lambda_role" {
-  name = "${var.project_name}-lambda-role"
+  name = "${local.name_prefix}-lambda-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -25,7 +30,7 @@ resource "aws_iam_role" "lambda_role" {
 
 # IAM Policy for Lambdas
 resource "aws_iam_role_policy" "lambda_policy" {
-  name = "${var.project_name}-lambda-policy"
+  name = "${local.name_prefix}-lambda-policy"
   role = aws_iam_role.lambda_role.id
 
   policy = jsonencode({
@@ -63,7 +68,7 @@ resource "aws_iam_role_policy" "lambda_policy" {
 
 # IAM Role for Step Function
 resource "aws_iam_role" "step_function_role" {
-  name = "${var.project_name}-step-function-role"
+  name = "${local.name_prefix}-step-function-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -81,7 +86,7 @@ resource "aws_iam_role" "step_function_role" {
 
 # IAM Policy for Step Function
 resource "aws_iam_role_policy" "step_function_policy" {
-  name = "${var.project_name}-step-function-policy"
+  name = "${local.name_prefix}-step-function-policy"
   role = aws_iam_role.step_function_role.id
 
   policy = jsonencode({

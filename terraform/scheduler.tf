@@ -1,5 +1,5 @@
 resource "aws_cloudwatch_event_rule" "daily_trigger" {
-  name                = "eco-water-temps-daily-trigger"
+  name                = "${local.name_prefix}-daily-trigger"
   description         = "Triggers the ECOSTRESS initiator lambda daily"
   schedule_expression = "rate(1 day)"
 }

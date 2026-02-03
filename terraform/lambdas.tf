@@ -1,10 +1,10 @@
 data "aws_ecr_image" "lambda_image" {
-  repository_name = "${var.project_name}-lambda-images"
+  repository_name = "${local.name_prefix}-lambda-images"
   image_tag       = "latest"
 }
 
 resource "aws_lambda_function" "initiator_lambda" {
-  function_name = "${var.project_name}-initiator"
+  function_name = "${local.name_prefix}-initiator"
   role          = aws_iam_role.lambda_role.arn
   package_type  = "Image"
   image_uri     = "${aws_ecr_repository.lambda_repo.repository_url}@${data.aws_ecr_image.lambda_image.image_digest}"
@@ -25,7 +25,7 @@ resource "aws_lambda_function" "initiator_lambda" {
 }
 
 resource "aws_lambda_function" "status_checker_lambda" {
-  function_name = "${var.project_name}-status-checker"
+  function_name = "${local.name_prefix}-status-checker"
   role          = aws_iam_role.lambda_role.arn
   package_type  = "Image"
   image_uri     = "${aws_ecr_repository.lambda_repo.repository_url}@${data.aws_ecr_image.lambda_image.image_digest}"
@@ -45,7 +45,7 @@ resource "aws_lambda_function" "status_checker_lambda" {
 }
 
 resource "aws_lambda_function" "processor_lambda" {
-  function_name = "${var.project_name}-processor"
+  function_name = "${local.name_prefix}-processor"
   role          = aws_iam_role.lambda_role.arn
   package_type  = "Image"
   image_uri     = "${aws_ecr_repository.lambda_repo.repository_url}@${data.aws_ecr_image.lambda_image.image_digest}"

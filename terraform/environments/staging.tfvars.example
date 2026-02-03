@@ -1,0 +1,19 @@
+# Copy to staging.tfvars and fill in real values.
+# Use: terraform plan -var-file=environments/staging.tfvars
+
+environment       = "staging"
+project_name      = "eco-water-temps"
+d1_database_name  = "sat-water-temps-staging-db"
+r2_bucket_name    = "multitifs-staging"
+pages_project_name = "sat-water-temps"  # Or a separate Pages project for staging
+pages_domain      = "https://staging.your-app.pages.dev"  # Staging branch or custom domain
+
+# Reuse or override; often same account, different resources
+# cloudflare_account_id = "..."
+# cloudflare_api_token  = "..."
+# r2_access_key_id     = "..."
+# r2_secret_access_key = "..."
+# r2_endpoint          = "..."
+# appeears_user        = "..."
+# appeears_pass        = "..."
+# lambda_image_uri     = "..."  # Or build/push staging image to staging ECR

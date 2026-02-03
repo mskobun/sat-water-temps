@@ -1,5 +1,5 @@
 resource "aws_sfn_state_machine" "polling_machine" {
-  name     = "${var.project_name}-polling-machine"
+  name     = "${local.name_prefix}-polling-machine"
   role_arn = aws_iam_role.step_function_role.arn
 
   definition = jsonencode({
