@@ -160,6 +160,13 @@ def handler(event, context):
     if not user or not password:
         raise ValueError("Missing AppEEARS credentials")
 
+    # Function URL invocations wrap the payload in event["body"]
+    if "body" in event:
+        body = event["body"]
+        if isinstance(body, str):
+            body = json.loads(body)
+        event = body
+
     # Trigger metadata: defaults to timer/cloudwatch, overridden by manual triggers
     trigger_type = event.get("trigger_type", "timer")
     triggered_by = event.get("triggered_by", "cloudwatch")
