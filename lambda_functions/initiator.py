@@ -10,15 +10,8 @@ import time
 sfn_client = boto3.client("stepfunctions")
 
 
-def log_job_to_d1(
-    job_type: str,
-    task_id: str = None,
-    status: str = "started",
-    duration_ms: int = None,
-    error_message: str = None,
-    metadata_json: str = None,
-):
-    """Log processing job to D1 database"""
+def _d1_query(sql, params):
+    """Execute a D1 query via Cloudflare API. Returns None on failure."""
     try:
         d1_db_id = os.environ.get("D1_DATABASE_ID")
         cf_account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
@@ -33,33 +26,68 @@ def log_job_to_d1(
             "Content-Type": "application/json",
         }
 
-        if status == "started":
-            sql = """
-            INSERT INTO processing_jobs 
-            (job_type, task_id, status, started_at, metadata)
-            VALUES (?, ?, ?, ?, ?)
-            """
-            params = [job_type, task_id, status, int(time.time() * 1000), metadata_json]
-        else:
-            sql = """
-            UPDATE processing_jobs 
-            SET status = ?, completed_at = ?, duration_ms = ?, error_message = ?
-            WHERE task_id = ? AND status = 'started'
-            """
-            params = [
-                status,
-                int(time.time() * 1000),
-                duration_ms,
-                error_message,
-                task_id,
-            ]
-
         payload = {"sql": sql, "params": params}
         response = requests.post(url, headers=headers, json=payload, timeout=10)
         response.raise_for_status()
-
+        return response.json()
     except Exception as e:
-        print(f"Warning: Failed to log job to D1: {e}")
+        print(f"Warning: D1 query failed: {e}")
+        return None
+
+
+def log_job_to_d1(
+    job_type: str,
+    task_id: str = None,
+    status: str = "started",
+    duration_ms: int = None,
+    error_message: str = None,
+    metadata_json: str = None,
+):
+    """Log processing job to D1 database"""
+    if status == "started":
+        sql = """
+        INSERT INTO processing_jobs
+        (job_type, task_id, status, started_at, metadata)
+        VALUES (?, ?, ?, ?, ?)
+        """
+        params = [job_type, task_id, status, int(time.time() * 1000), metadata_json]
+    else:
+        sql = """
+        UPDATE processing_jobs
+        SET status = ?, completed_at = ?, duration_ms = ?, error_message = ?
+        WHERE task_id = ? AND status = 'started'
+        """
+        params = [
+            status,
+            int(time.time() * 1000),
+            duration_ms,
+            error_message,
+            task_id,
+        ]
+
+    _d1_query(sql, params)
+
+
+def log_ecostress_request(task_id, trigger_type, triggered_by, description, sd, ed, status="submitted"):
+    """Log an ECOSTRESS request to the ecostress_requests table"""
+    sql = """
+    INSERT INTO ecostress_requests
+    (task_id, trigger_type, triggered_by, description, start_date, end_date, status, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """
+    params = [task_id, trigger_type, triggered_by, description, sd, ed, status, int(time.time() * 1000)]
+    _d1_query(sql, params)
+
+
+def update_ecostress_request(task_id, status, error_message=None):
+    """Update an ECOSTRESS request status"""
+    sql = """
+    UPDATE ecostress_requests
+    SET status = ?, updated_at = ?, error_message = ?
+    WHERE task_id = ?
+    """
+    params = [status, int(time.time() * 1000), error_message, task_id]
+    _d1_query(sql, params)
 
 
 def get_token(user, password):
@@ -110,6 +138,11 @@ def handler(event, context):
     if not user or not password:
         raise ValueError("Missing AppEEARS credentials")
 
+    # Trigger metadata: defaults to timer/cloudwatch, overridden by manual triggers
+    trigger_type = event.get("trigger_type", "timer")
+    triggered_by = event.get("triggered_by", "cloudwatch")
+    description = event.get("description")
+
     token = get_token(user, password)
     headers = {"Authorization": f"Bearer {token}"}
 
@@ -120,16 +153,19 @@ def handler(event, context):
     # Dates
     end_date = datetime.now() - timedelta(days=1)
     start_date = end_date - timedelta(days=1)  # Just do 1 day for now or configurable
-    # Or use the logic from original script:
-    # start_date = end_date - timedelta(days=29)
 
-    # For this implementation, let's stick to processing "yesterday" or a specific range from event
+    # Use dates from event if provided (manual triggers pass these)
     if "start_date" in event:
         sd = event["start_date"]
         ed = event.get("end_date", sd)
     else:
         sd = start_date.strftime("%m-%d-%Y")
         ed = end_date.strftime("%m-%d-%Y")
+
+    if not description:
+        description = f"{'Manual' if trigger_type == 'manual' else 'Daily'} processing for {sd}" + (
+            f" to {ed}" if sd != ed else ""
+        )
 
     product = "ECO_L2T_LSTE.002"
     layers = ["LST", "LST_err", "QC", "water", "cloud", "EmisWB", "height"]
@@ -142,6 +178,9 @@ def handler(event, context):
     try:
         task_id = submit_task(headers, task_request)
         print(f"Submitted task: {task_id}")
+
+        # Log ECOSTRESS request
+        log_ecostress_request(task_id, trigger_type, triggered_by, description, sd, ed)
 
         # Log job start
         metadata = json.dumps({"start_date": sd, "end_date": ed})
@@ -164,8 +203,12 @@ def handler(event, context):
         }
     except Exception as e:
         # Log failure
+        duration_ms = int((time.time() - start_time) * 1000)
         if task_id:
-            duration_ms = int((time.time() - start_time) * 1000)
             log_job_to_d1("scrape", task_id, "failed", duration_ms, str(e))
+            update_ecostress_request(task_id, "failed", str(e))
+        else:
+            # Task submission itself failed - log request with no task_id
+            log_ecostress_request(None, trigger_type, triggered_by, description, sd, ed, status="failed")
         print(f"✗ Error: {e}")
         return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
