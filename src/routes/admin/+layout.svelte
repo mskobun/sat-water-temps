@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/stores';
 	import { signOut } from '@auth/sveltekit/client';
 	import { Button } from '$lib/components/ui/button';
 	import type { LayoutData } from './$types';
@@ -14,10 +15,24 @@
 	{#if data.session?.user}
 		<header class="border-b bg-card">
 			<div class="container mx-auto px-6 py-4 flex justify-between items-center max-w-7xl">
-				<div class="flex items-center gap-4">
-					<a href="/admin/jobs" class="font-semibold text-foreground hover:text-primary">
+				<div class="flex items-center gap-6">
+					<a href="/admin/requests" class="font-semibold text-foreground hover:text-primary">
 						Admin Dashboard
 					</a>
+					<nav class="flex items-center gap-1">
+						<a
+							href="/admin/requests"
+							class="px-3 py-1.5 text-sm rounded-md transition-colors {$page.url.pathname.startsWith('/admin/requests') ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}"
+						>
+							Requests
+						</a>
+						<a
+							href="/admin/jobs"
+							class="px-3 py-1.5 text-sm rounded-md transition-colors {$page.url.pathname === '/admin/jobs' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}"
+						>
+							Jobs
+						</a>
+					</nav>
 				</div>
 				<div class="flex items-center gap-4">
 					{#if data.session.user.email}
