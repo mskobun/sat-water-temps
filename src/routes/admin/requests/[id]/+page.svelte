@@ -37,11 +37,11 @@
 		metadata: string | null;
 	}
 
-	let request: EcostressRequest | null = null;
-	let jobs: Job[] = [];
-	let loading = true;
-	let error = '';
-	let autoRefresh = false;
+	let request = $state<EcostressRequest | null>(null);
+	let jobs = $state<Job[]>([]);
+	let loading = $state(true);
+	let error = $state('');
+	let autoRefresh = $state(false);
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
 	async function fetchDetail() {
@@ -99,9 +99,9 @@
 		}
 	}
 
-	$: successCount = jobs.filter((j) => j.status === 'success').length;
-	$: failedCount = jobs.filter((j) => j.status === 'failed').length;
-	$: runningCount = jobs.filter((j) => j.status === 'started').length;
+	let successCount = $derived(jobs.filter((j) => j.status === 'success').length);
+	let failedCount = $derived(jobs.filter((j) => j.status === 'failed').length);
+	let runningCount = $derived(jobs.filter((j) => j.status === 'started').length);
 
 	onMount(() => {
 		fetchDetail();

@@ -4,6 +4,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Label } from '$lib/components/ui/label';
 	import * as Table from '$lib/components/ui/table';
+	import * as Select from '$lib/components/ui/select';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Spinner } from '$lib/components/ui/spinner';
@@ -22,11 +23,19 @@
 		metadata: string | null;
 	}
 
-	let jobs: Job[] = [];
-	let loading = true;
-	let error = '';
-	let filter = 'all';
-	let autoRefresh = false;
+	const filterOptions = [
+		{ value: 'all', label: 'All Jobs' },
+		{ value: 'success', label: 'Success' },
+		{ value: 'failed', label: 'Failed' },
+		{ value: 'started', label: 'In Progress' }
+	];
+
+	let jobs = $state<Job[]>([]);
+	let loading = $state(true);
+	let error = $state('');
+	let filter = $state('all');
+	let filterLabel = $derived(filterOptions.find((o) => o.value === filter)?.label ?? 'All Jobs');
+	let autoRefresh = $state(false);
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
 	async function fetchJobs() {
@@ -77,9 +86,11 @@
 		}
 	}
 
-	$: if (filter) {
-		fetchJobs();
-	}
+	$effect(() => {
+		if (filter) {
+			fetchJobs();
+		}
+	});
 
 	onMount(() => {
 		fetchJobs();
@@ -104,17 +115,19 @@
 			<Card.Content class="pt-6">
 				<div class="flex flex-wrap items-center justify-between gap-4">
 					<div class="flex items-center gap-4">
-						<Label for="filter-select" class="text-sm font-medium">Filter:</Label>
-						<select
-							id="filter-select"
-							bind:value={filter}
-							class="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-						>
-							<option value="all">All Jobs</option>
-							<option value="success">Success</option>
-							<option value="failed">Failed</option>
-							<option value="started">In Progress</option>
-						</select>
+						<Label class="text-sm font-medium">Filter:</Label>
+						<Select.Root type="single" bind:value={filter}>
+							<Select.Trigger class="w-44">
+								{#snippet children()}
+									<span data-slot="select-value">{filterLabel}</span>
+								{/snippet}
+							</Select.Trigger>
+							<Select.Content>
+								{#each filterOptions as opt}
+									<Select.Item value={opt.value} label={opt.label} />
+								{/each}
+							</Select.Content>
+						</Select.Root>
 					</div>
 					<div class="flex items-center gap-3">
 						<Button variant={autoRefresh ? 'default' : 'secondary'} size="sm" onclick={toggleAutoRefresh}>

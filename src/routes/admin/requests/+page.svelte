@@ -1,11 +1,15 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { CalendarDate, today, getLocalTimeZone } from '@internationalized/date';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import * as Table from '$lib/components/ui/table';
+	import * as Select from '$lib/components/ui/select';
+	import * as Popover from '$lib/components/ui/popover';
+	import { Calendar } from '$lib/components/ui/calendar';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Spinner } from '$lib/components/ui/spinner';
@@ -29,20 +33,36 @@
 		running_jobs: number;
 	}
 
-	let requests: EcostressRequest[] = [];
-	let loading = true;
-	let error = '';
-	let filter = 'all';
-	let autoRefresh = false;
+	const filterOptions = [
+		{ value: 'all', label: 'All Requests' },
+		{ value: 'pending', label: 'Pending' },
+		{ value: 'submitted', label: 'Submitted' },
+		{ value: 'processing', label: 'Processing' },
+		{ value: 'failed', label: 'Failed' }
+	];
+
+	let requests = $state<EcostressRequest[]>([]);
+	let loading = $state(true);
+	let error = $state('');
+	let filter = $state('all');
+	let filterLabel = $derived(filterOptions.find((o) => o.value === filter)?.label ?? 'All Requests');
+	let autoRefresh = $state(false);
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
 	// Trigger form state
-	let showTriggerForm = false;
-	let triggerDate = '';
-	let triggerDescription = '';
-	let triggerLoading = false;
-	let triggerError = '';
-	let triggerSuccess = '';
+	let showTriggerForm = $state(false);
+	let triggerDateValue = $state<CalendarDate | undefined>(undefined);
+	let triggerDescription = $state('');
+	let triggerLoading = $state(false);
+	let triggerError = $state('');
+	let triggerSuccess = $state('');
+	let calendarOpen = $state(false);
+
+	const triggerDateFormatted = $derived(
+		triggerDateValue
+			? `${triggerDateValue.year}-${String(triggerDateValue.month).padStart(2, '0')}-${String(triggerDateValue.day).padStart(2, '0')}`
+			: ''
+	);
 
 	async function fetchRequests() {
 		try {
@@ -92,7 +112,7 @@
 	}
 
 	async function handleTrigger() {
-		if (!triggerDate) return;
+		if (!triggerDateFormatted) return;
 
 		triggerLoading = true;
 		triggerError = '';
@@ -103,7 +123,7 @@
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					date: triggerDate,
+					date: triggerDateFormatted,
 					description: triggerDescription || undefined
 				})
 			});
@@ -116,7 +136,7 @@
 				triggerSuccess = data.warning;
 			} else {
 				triggerSuccess = data.message || 'Processing triggered successfully';
-				triggerDate = '';
+				triggerDateValue = undefined;
 				triggerDescription = '';
 				showTriggerForm = false;
 				fetchRequests();
@@ -129,9 +149,11 @@
 		}
 	}
 
-	$: if (filter) {
-		fetchRequests();
-	}
+	$effect(() => {
+		if (filter) {
+			fetchRequests();
+		}
+	});
 
 	onMount(() => {
 		fetchRequests();
@@ -165,13 +187,28 @@
 				<Card.Content>
 					<div class="flex flex-wrap items-end gap-4">
 						<div class="flex flex-col gap-1.5">
-							<Label for="trigger-date">Date</Label>
-							<Input
-								id="trigger-date"
-								type="date"
-								bind:value={triggerDate}
-								class="w-48"
-							/>
+							<Label>Date</Label>
+							<Popover.Root bind:open={calendarOpen}>
+								<Popover.Trigger>
+									{#snippet children()}
+										<Button variant="outline" class="w-56 justify-start text-left font-normal">
+											{#if triggerDateValue}
+												{triggerDateFormatted}
+											{:else}
+												<span class="text-muted-foreground">Pick a date</span>
+											{/if}
+										</Button>
+									{/snippet}
+								</Popover.Trigger>
+								<Popover.Content class="w-auto p-0" align="start">
+									<Calendar
+										type="single"
+										bind:value={triggerDateValue}
+										maxValue={today(getLocalTimeZone())}
+										onValueChange={() => { calendarOpen = false; }}
+									/>
+								</Popover.Content>
+							</Popover.Root>
 						</div>
 						<div class="flex flex-col gap-1.5 flex-1 min-w-48">
 							<Label for="trigger-desc">Description (optional)</Label>
@@ -182,7 +219,7 @@
 								bind:value={triggerDescription}
 							/>
 						</div>
-						<Button onclick={handleTrigger} disabled={triggerLoading || !triggerDate}>
+						<Button onclick={handleTrigger} disabled={triggerLoading || !triggerDateValue}>
 							{#if triggerLoading}
 								<Spinner class="size-4 mr-2" />
 							{/if}
@@ -207,18 +244,19 @@
 			<Card.Content class="pt-6">
 				<div class="flex flex-wrap items-center justify-between gap-4">
 					<div class="flex items-center gap-4">
-						<Label for="filter-select" class="text-sm font-medium">Filter:</Label>
-						<select
-							id="filter-select"
-							bind:value={filter}
-							class="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-						>
-							<option value="all">All Requests</option>
-							<option value="pending">Pending</option>
-							<option value="submitted">Submitted</option>
-							<option value="processing">Processing</option>
-							<option value="failed">Failed</option>
-						</select>
+						<Label class="text-sm font-medium">Filter:</Label>
+						<Select.Root type="single" bind:value={filter}>
+							<Select.Trigger class="w-44">
+								{#snippet children()}
+									<span data-slot="select-value">{filterLabel}</span>
+								{/snippet}
+							</Select.Trigger>
+							<Select.Content>
+								{#each filterOptions as opt}
+									<Select.Item value={opt.value} label={opt.label} />
+								{/each}
+							</Select.Content>
+						</Select.Root>
 					</div>
 					<div class="flex items-center gap-3">
 						<Button variant={autoRefresh ? 'default' : 'secondary'} size="sm" onclick={toggleAutoRefresh}>
