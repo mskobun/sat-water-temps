@@ -162,19 +162,19 @@ export async function getProcessingJobs(
 ) {
   try {
     let query = `
-      SELECT id, job_type, task_id, feature_id, date, status, 
+      SELECT id, job_type, task_id, feature_id, date, status,
              started_at, completed_at, duration_ms, error_message, metadata
       FROM processing_jobs
     `;
-    
+
     if (status) {
       query += ` WHERE status = ?`;
     }
-    
+
     query += ` ORDER BY started_at DESC LIMIT ?`;
 
     const stmt = db.prepare(query);
-    const result = status 
+    const result = status
       ? await stmt.bind(status, limit).all()
       : await stmt.bind(limit).all();
 
@@ -182,6 +182,75 @@ export async function getProcessingJobs(
   } catch (err) {
     console.error("D1 query error:", err);
     return [];
+  }
+}
+
+export async function getEcostressRequests(
+  db: D1Database,
+  limit: number = 50,
+  status?: string
+) {
+  try {
+    let query = `
+      SELECT
+        er.*,
+        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id) as total_jobs,
+        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.status = 'success') as success_jobs,
+        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.status = 'failed') as failed_jobs,
+        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.status = 'started') as running_jobs
+      FROM ecostress_requests er
+    `;
+
+    if (status) {
+      query += ` WHERE er.status = ?`;
+    }
+
+    query += ` ORDER BY er.created_at DESC LIMIT ?`;
+
+    const stmt = db.prepare(query);
+    const result = status
+      ? await stmt.bind(status, limit).all()
+      : await stmt.bind(limit).all();
+
+    return result.results || [];
+  } catch (err) {
+    console.error("D1 query error:", err);
+    return [];
+  }
+}
+
+export async function getEcostressRequestDetail(
+  db: D1Database,
+  id: number
+) {
+  try {
+    const request = await db
+      .prepare(`SELECT * FROM ecostress_requests WHERE id = ?`)
+      .bind(id)
+      .first();
+
+    if (!request) return null;
+
+    const jobs = request.task_id
+      ? await db
+          .prepare(`
+            SELECT id, job_type, task_id, feature_id, date, status,
+                   started_at, completed_at, duration_ms, error_message, metadata
+            FROM processing_jobs
+            WHERE task_id = ?
+            ORDER BY started_at DESC
+          `)
+          .bind(request.task_id)
+          .all()
+      : { results: [] };
+
+    return {
+      request,
+      jobs: jobs.results || []
+    };
+  } catch (err) {
+    console.error("D1 query error:", err);
+    return null;
   }
 }
 
