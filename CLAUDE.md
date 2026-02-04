@@ -75,6 +75,8 @@ This project uses **shadcn-svelte** for UI components. When adding new UI elemen
 - Follow shadcn-svelte patterns for styling and composition
 - Components are built on Tailwind CSS and Bits UI primitives
 
+Refer to shadcn-svelte documentation when planning new UI features to make sure new components are added when appropriate: https://www.shadcn-svelte.com/docs/components
+
 ## Architecture Overview
 
 This is a satellite water temperature monitoring platform with a split architecture:
