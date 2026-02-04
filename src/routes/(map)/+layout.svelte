@@ -53,6 +53,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 
 	// URL is the single source of truth
 	let urlFeatureId = $derived($page.params.id ?? null);
+	let urlDate = $derived($page.url.searchParams.get('date') ?? '');
 
 	// Derive selected feature FROM the URL
 	let selectedFeature = $derived.by(() => {
@@ -473,6 +474,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 						featureId={selectedFeature.id}
 						featureName={selectedFeature.name ?? ''}
 						isOpen={true}
+						initialDate={urlDate}
 						bind:selectedDate
 						bind:selectedColorScale
 						bind:currentUnit

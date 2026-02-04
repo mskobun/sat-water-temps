@@ -58,13 +58,16 @@
 				{#each dates as date}
 					<Card.Card class="overflow-hidden transition-transform hover:scale-[1.02]">
 						<Card.Content class="p-0">
-							<div class="aspect-square bg-muted flex items-center justify-center overflow-hidden">
+							<a
+								href={`/feature/${encodeURIComponent(featureId)}?date=${date}`}
+								class="aspect-square bg-muted flex items-center justify-center overflow-hidden cursor-pointer"
+							>
 								<img
 									src={`/api/feature/${featureId}/tif/${date}/relative`}
 									alt={`${featureId} - ${formatDateTime(date)}`}
 									class="max-w-full max-h-full object-contain"
 								/>
-							</div>
+							</a>
 							<div class="p-3 space-y-2">
 								<div
 									class="text-sm font-medium truncate"

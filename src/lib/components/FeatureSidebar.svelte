@@ -31,6 +31,7 @@
 	export let currentUnit: 'Kelvin' | 'Celsius' | 'Fahrenheit' = 'Celsius';
 	// Water off status (passed from parent, fetched with temperature data)
 	export let waterOff: boolean = false;
+	export let initialDate: string = '';
 
 	const dispatch = createEventDispatcher<{
 		close: void;
@@ -97,7 +98,7 @@
 			const fetchedDates = await response.json();
 			dates = Array.isArray(fetchedDates) ? fetchedDates : [];
 			if (dates.length > 0) {
-				selectedDate = dates[0];
+				selectedDate = (initialDate && dates.includes(initialDate)) ? initialDate : dates[0];
 				dispatch('dateChange', selectedDate);
 				// Temperature data is loaded by parent via handleDateChange
 			}
