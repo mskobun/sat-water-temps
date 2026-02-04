@@ -87,6 +87,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 
 	// Track previous feature ID to detect transitions
 	let previousFeatureId: string | null = null;
+	let isInitialNavigation = true;
 
 	// Effect handles map zoom as a SIDE EFFECT of state changes
 	$effect(() => {
@@ -111,8 +112,11 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 				zoom: currentMap.getZoom()
 			};
 			if (bounds) {
-				currentMap.fitBounds(bounds, { padding: 20 });
+				// Skip animation on initial page load (just jump to the feature)
+				const animate = !isInitialNavigation;
+				currentMap.fitBounds(bounds, { padding: 20, animate });
 			}
+			isInitialNavigation = false;
 			// Don't clear selectedDate/selectedColorScale here — sidebar sets them when it
 			// runs loadDates(). Clearing here would overwrite the date on direct navigation
 			// when the map becomes ready after the sidebar has already loaded.
