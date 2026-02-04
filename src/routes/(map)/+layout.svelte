@@ -500,44 +500,9 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 </svelte:head>
 
 <Sidebar.Provider open={sidebarOpen} onOpenChange={(open) => { if (!open) handleSidebarClose(); }}>
-	<div class="flex h-screen w-full">
-		<!-- Feature Sidebar (left side) – only in DOM when a feature is selected -->
-		{#if selectedFeature}
-			<Sidebar.Sidebar side="left" collapsible="offcanvas" class="border-r w-full sm:max-w-md">
-				<Sidebar.Header class="flex flex-row items-center justify-between gap-2 px-4 py-3 border-b shrink-0 bg-background">
-					<span class="font-semibold text-foreground truncate">
-						{selectedFeature.name ?? selectedFeature.id ?? 'Water body'}
-					</span>
-					<Button variant="ghost" size="icon-sm" onclick={handleSidebarClose} class="shrink-0">
-						<XIcon class="size-4" />
-						<span class="sr-only">Close</span>
-					</Button>
-				</Sidebar.Header>
-				<Sidebar.Content class="flex flex-col min-h-0 bg-background">
-					<FeatureSidebar
-						featureId={selectedFeature.id}
-						featureName={selectedFeature.name ?? ''}
-						isOpen={true}
-						initialDate={urlDate}
-						bind:selectedDate
-						bind:selectedColorScale
-						bind:currentUnit
-						{relativeMin}
-						{relativeMax}
-						{avgTemp}
-						{histogramData}
-						{waterOff}
-						on:close={handleSidebarClose}
-						on:dateChange={handleDateChange}
-						on:colorScaleChange={handleColorScaleChange}
-						on:tempFilterChange={handleTempFilterChange}
-					/>
-				</Sidebar.Content>
-			</Sidebar.Sidebar>
-		{/if}
-
-		<!-- Main content (map + footer) -->
-		<main class="flex-1 flex flex-col min-w-0">
+	<div class="relative h-screen w-full">
+		<!-- Main content (map + footer) - full width -->
+		<main class="absolute inset-0 flex flex-col">
 			<!-- Map Container -->
 			<div class="flex-1 relative w-full">
 				<MapLibre
@@ -631,6 +596,41 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 			</div>
 
 		</main>
+
+		<!-- Feature Sidebar (left side) – floating over map -->
+		{#if selectedFeature}
+			<Sidebar.Sidebar side="left" collapsible="offcanvas" class="border-r w-full sm:max-w-md [&_[data-sidebar=sidebar]]:backdrop-blur-sm [&_[data-sidebar=sidebar]]:bg-background/80">
+				<Sidebar.Header class="flex flex-row items-center justify-between gap-2 px-4 py-3 border-b shrink-0">
+					<span class="font-semibold text-foreground truncate">
+						{selectedFeature.name ?? selectedFeature.id ?? 'Water body'}
+					</span>
+					<Button variant="ghost" size="icon-sm" onclick={handleSidebarClose} class="shrink-0">
+						<XIcon class="size-4" />
+						<span class="sr-only">Close</span>
+					</Button>
+				</Sidebar.Header>
+				<Sidebar.Content class="flex flex-col min-h-0">
+					<FeatureSidebar
+						featureId={selectedFeature.id}
+						featureName={selectedFeature.name ?? ''}
+						isOpen={true}
+						initialDate={urlDate}
+						bind:selectedDate
+						bind:selectedColorScale
+						bind:currentUnit
+						{relativeMin}
+						{relativeMax}
+						{avgTemp}
+						{histogramData}
+						{waterOff}
+						on:close={handleSidebarClose}
+						on:dateChange={handleDateChange}
+						on:colorScaleChange={handleColorScaleChange}
+						on:tempFilterChange={handleTempFilterChange}
+					/>
+				</Sidebar.Content>
+			</Sidebar.Sidebar>
+		{/if}
 	</div>
 
 	<!-- Hidden slot for child pages (they don't render anything) -->

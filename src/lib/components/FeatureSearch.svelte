@@ -59,10 +59,7 @@
 <svelte:window onkeydown={handleGlobalKeydown} />
 
 <div class="absolute top-4 left-4 z-40 w-72 max-w-[calc(100%-2rem)]">
-	<Command.Root
-		class="rounded-lg border shadow-md backdrop-blur-sm bg-background/80"
-		shouldFilter={true}
-	>
+	<Command.Root class="rounded-lg border shadow-md backdrop-blur-sm bg-background/80" shouldFilter={true}>
 		<div class="relative">
 			<Command.Input
 				placeholder="Search features..."
