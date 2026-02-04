@@ -2,8 +2,8 @@
 	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-import { MapLibre, GeoJSONSource, FillLayer, LineLayer, CircleLayer } from 'svelte-maplibre-gl';
-import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } from 'maplibre-gl';
+import { MapLibre, GeoJSONSource, FillLayer, LineLayer } from 'svelte-maplibre-gl';
+import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, FilterSpecification } from 'maplibre-gl';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import { Button } from '$lib/components/ui/button';
 	import FeatureSidebar from '$lib/components/FeatureSidebar.svelte';
@@ -33,7 +33,9 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 	let tooltipY = $state(0);
 
 	// Temperature data (fetched here so map can use it for heatmap)
-	let heatmapGeojson: { type: 'FeatureCollection'; features: any[] } | null = $state(null);
+	// Use $state.raw to avoid deep reactive proxies over thousands of GeoJSON coordinates
+	let heatmapGeojson: { type: 'FeatureCollection'; features: any[] } | null = $state.raw(null);
+	let squareGeojson: { type: 'FeatureCollection'; features: any[] } | null = $state.raw(null);
 	let relativeMin = $state(0);
 	let relativeMax = $state(0);
 	let avgTemp = $state(0);
@@ -126,6 +128,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 			selectedDate = '';
 			selectedColorScale = 'relative';
 			heatmapGeojson = null;
+			squareGeojson = null;
 			relativeMin = 0;
 			relativeMax = 0;
 			avgTemp = 0;
@@ -141,6 +144,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 			selectedDate = '';
 			selectedColorScale = 'relative';
 			heatmapGeojson = null;
+			squareGeojson = null;
 			relativeMin = 0;
 			relativeMax = 0;
 			avgTemp = 0;
@@ -153,17 +157,17 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 	});
 
 
-	// Circle paint properties based on color scale - colors each point by its temperature
-	let circlePaint = $derived.by(() => {
+	// Fill paint properties based on color scale - colors each square by its temperature
+	let fillPaint = $derived.by(() => {
 		let minTemp = selectedColorScale === 'relative' ? relativeMin : globalMin;
 		let maxTemp = selectedColorScale === 'relative' ? relativeMax : globalMax;
-		
+
 		// Ensure valid range for interpolation
 		if (minTemp >= maxTemp) {
 			minTemp = globalMin;
 			maxTemp = globalMax;
 		}
-		
+
 		// Color ramp based on scale type - interpolates temperature to color
 		const colorExpr = selectedColorScale === 'gray'
 			? [
@@ -183,13 +187,11 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 				minTemp + (maxTemp - minTemp) * 0.75, 'rgb(255,255,0)',
 				maxTemp, 'rgb(255,0,0)'
 			];
-		
+
 		return {
-			'circle-radius': 12,
-			'circle-color': colorExpr,
-			'circle-opacity': 0.6,
-			'circle-blur': 0.8
-		} as unknown as CircleLayerSpecification['paint'];
+			'fill-color': colorExpr,
+			'fill-opacity': 0.8
+		} as unknown as FillLayerSpecification['paint'];
 	});
 
 	// MapLibre style with Esri World Imagery tiles
@@ -281,18 +283,19 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 	async function loadTemperatureData(featureId: string, date: string) {
 		// Clear previous data first
 		heatmapGeojson = null;
+		squareGeojson = null;
 		relativeMin = 0;
 		relativeMax = 0;
 		avgTemp = 0;
 		histogramData = [];
 		waterOff = false;
-		
+
 		if (!featureId || !date) return;
-		
+
 		try {
 			const response = await fetch(`/api/feature/${featureId}/temperature/${date}`);
 			if (!response.ok) return;
-			
+
 			const data = (await response.json()) as {
 				error?: string;
 				geojson?: { type: 'FeatureCollection'; features: any[] };
@@ -302,9 +305,10 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 				wtoff?: boolean;
 			};
 			if (data.error || !data.geojson) return;
-			
+
 			// Server returns ready-to-use GeoJSON and pre-computed stats
 			heatmapGeojson = data.geojson;
+			squareGeojson = data.geojson.features.length > 0 ? pointsToSquares(data.geojson) : null;
 			relativeMin = data.min_max?.[0] || 0;
 			relativeMax = data.min_max?.[1] || 0;
 			avgTemp = data.avg || 0;
@@ -332,7 +336,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 	}
 
 	// MapLibre filter expression for temperature filtering (GPU-accelerated)
-	let tempLayerFilter = $derived.by(() => {
+	let tempLayerFilter = $derived.by((): FilterSpecification | undefined => {
 		if (tempFilterMin === null || tempFilterMax === null) {
 			return undefined; // No filter - show all points
 		}
@@ -340,7 +344,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 			'all',
 			['>=', ['get', 'temperature'], tempFilterMin],
 			['<=', ['get', 'temperature'], tempFilterMax]
-		];
+		] as unknown as FilterSpecification;
 	});
 
 	function handleSidebarClose() {
@@ -366,6 +370,68 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 		return featureId ?? '';
 	}
 	
+	/**
+	 * Detect the grid cell spacing from a set of points by finding the median gap
+	 * in sorted unique x and y coordinates.
+	 */
+	function detectGridSpacing(features: any[]): { dx: number; dy: number } {
+		const lngs = new Set<number>();
+		const lats = new Set<number>();
+		for (const f of features) {
+			const [lng, lat] = f.geometry.coordinates;
+			lngs.add(lng);
+			lats.add(lat);
+		}
+
+		function medianGap(values: Set<number>): number {
+			const sorted = [...values].sort((a, b) => a - b);
+			if (sorted.length < 2) return 0.0007; // fallback ~70m
+			const gaps: number[] = [];
+			for (let i = 1; i < sorted.length; i++) {
+				const g = sorted[i] - sorted[i - 1];
+				if (g > 1e-8) gaps.push(g);
+			}
+			if (gaps.length === 0) return 0.0007;
+			gaps.sort((a, b) => a - b);
+			return gaps[Math.floor(gaps.length / 2)];
+		}
+
+		return { dx: medianGap(lngs), dy: medianGap(lats) };
+	}
+
+	/**
+	 * Convert a Point FeatureCollection to a Polygon FeatureCollection
+	 * where each point becomes a square cell for contiguous rendering.
+	 */
+	function pointsToSquares(
+		geojson: { type: 'FeatureCollection'; features: any[] }
+	): { type: 'FeatureCollection'; features: any[] } {
+		const { dx, dy } = detectGridSpacing(geojson.features);
+		const halfDx = dx / 2;
+		const halfDy = dy / 2;
+
+		return {
+			type: 'FeatureCollection',
+			features: geojson.features.map((f) => {
+				const [lng, lat] = f.geometry.coordinates;
+				return {
+					type: 'Feature',
+					geometry: {
+						type: 'Polygon',
+						coordinates: [[
+							[lng - halfDx, lat - halfDy],
+							[lng + halfDx, lat - halfDy],
+							[lng + halfDx, lat + halfDy],
+							[lng - halfDx, lat + halfDy],
+							[lng - halfDx, lat - halfDy]
+						]]
+					},
+					properties: f.properties
+				};
+			})
+		};
+	}
+
 	// Format temperature for tooltip based on selected unit
 	function convertTemp(kelvin: number): number {
 		if (currentUnit === 'Celsius') return kelvin - 273.15;
@@ -487,13 +553,13 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, CircleLayerSpecification } f
 						</GeoJSONSource>
 					{/if}
 
-					{#if heatmapGeojson}
-						<!-- Temperature points - each colored by its temperature value -->
+					{#if squareGeojson}
+						<!-- Temperature squares - each colored by its temperature value -->
 						{#key selectedDate}
-							<GeoJSONSource id="temperature-points" data={heatmapGeojson}>
-								<CircleLayer 
-									id="temperature-layer" 
-									paint={circlePaint} 
+							<GeoJSONSource id="temperature-points" data={squareGeojson}>
+								<FillLayer
+									id="temperature-layer"
+									paint={fillPaint}
 									filter={tempLayerFilter}
 								/>
 							</GeoJSONSource>
