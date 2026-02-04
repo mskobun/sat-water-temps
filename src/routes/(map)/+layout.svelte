@@ -374,6 +374,45 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 	function getFeatureExpression(featureId: string | null | undefined): string {
 		return featureId ?? '';
 	}
+
+	// Imperatively update polygon styling when selection/hover changes,
+	// as a safeguard in case the library's paint prop tracking misses updates
+	$effect(() => {
+		const selectedName = selectedFeature?.name ?? '';
+		const hoveredName = hoveredFeatureId?.split('/')[0] ?? '';
+
+		if (!map || !mapReady) return;
+		if (!map.getLayer('polygons-fill')) return;
+
+		map.setPaintProperty('polygons-fill', 'fill-color', [
+			'case',
+			['==', ['get', 'name'], selectedName],
+			'#00ff00',
+			['==', ['get', 'name'], hoveredName],
+			'#00ff00',
+			'transparent'
+		]);
+		map.setPaintProperty('polygons-line', 'line-color', [
+			'case',
+			['==', ['get', 'name'], selectedName],
+			'#00ff00',
+			['==', ['get', 'name'], hoveredName],
+			'#00ff00',
+			'#8abbff'
+		]);
+		map.setPaintProperty('polygons-line', 'line-width', [
+			'case',
+			['==', ['get', 'name'], selectedName],
+			3,
+			2
+		]);
+		map.setPaintProperty('polygons-line', 'line-opacity', [
+			'case',
+			['==', ['get', 'name'], selectedName],
+			0.3,
+			1
+		]);
+	});
 	
 	/**
 	 * Detect the grid cell spacing from a set of points by finding the median gap
