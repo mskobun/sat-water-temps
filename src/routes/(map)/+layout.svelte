@@ -460,10 +460,10 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 </svelte:head>
 
 <Sidebar.Provider open={sidebarOpen} onOpenChange={(open) => { if (!open) handleSidebarClose(); }}>
-	<div class="flex h-screen w-full flex-row-reverse">
-		<!-- Feature Sidebar (right side) – only in DOM when a feature is selected -->
+	<div class="flex h-screen w-full">
+		<!-- Feature Sidebar (left side) – only in DOM when a feature is selected -->
 		{#if selectedFeature}
-			<Sidebar.Sidebar side="right" collapsible="offcanvas" class="border-l w-full sm:max-w-md">
+			<Sidebar.Sidebar side="left" collapsible="offcanvas" class="border-r w-full sm:max-w-md">
 				<Sidebar.Header class="flex flex-row items-center justify-between gap-2 px-4 py-3 border-b shrink-0 bg-background">
 					<span class="font-semibold text-foreground truncate">
 						{selectedFeature.name ?? selectedFeature.id ?? 'Water body'}
