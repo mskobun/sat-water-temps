@@ -338,7 +338,10 @@ def process_rasters(
     s3_client,
     bucket_name,
 ):
-    print(f"Processing date: {date} for aid: {aid_number}")
+    name, location = aid_folder_mapping.get(aid_number, (f"aid{aid_number}", "lake"))
+    feature_id = f"{name}/{location}" if location != "lake" else name
+
+    print(f"  [{feature_id}] Filtering {len(selected_files)} file(s) for aid={aid_number} date={date}")
     relevant_files = []
     for f in selected_files:
         aid, f_date = extract_metadata(f)
@@ -346,9 +349,13 @@ def process_rasters(
             relevant_files.append(f)
 
     if not relevant_files:
+        print(f"  [{feature_id}] ERROR: No relevant files found after filtering")
         return
 
+    print(f"  [{feature_id}] Found {len(relevant_files)} relevant file(s)")
+
     # Read raster layers
+    print(f"  [{feature_id}] Reading raster layers...")
     LST = read_raster("LST_doy", relevant_files)
     LST_err = read_raster("LST_err", relevant_files)
     QC = read_raster("QC", relevant_files)
@@ -357,8 +364,15 @@ def process_rasters(
     EmisWB = read_raster("EmisWB", relevant_files)
     heig = read_raster("height", relevant_files)
 
-    if None in [LST, LST_err, QC, wt, cl, EmisWB, heig]:
-        print(f"Skipping {date} due to missing layers.")
+    missing_layers = []
+    layer_names = ["LST", "LST_err", "QC", "water", "cloud", "EmisWB", "height"]
+    for layer_name, layer in zip(layer_names, [LST, LST_err, QC, wt, cl, EmisWB, heig]):
+        if layer is None:
+            missing_layers.append(layer_name)
+
+    if missing_layers:
+        print(f"  [{feature_id}] ERROR: Missing layers: {', '.join(missing_layers)}")
+        print(f"  [{feature_id}] Available files: {[os.path.basename(f) for f in relevant_files]}")
         return
 
     arrays = {
@@ -371,9 +385,7 @@ def process_rasters(
         "height": read_array(heig),
     }
 
-    name, location = aid_folder_mapping.get(aid_number, (None, None))
-    if not name:
-        return
+    print(f"  [{feature_id}] Processing raster data...")
 
     # Processing logic (simplified adaptation from original)
     rows, cols = arrays["LST"].shape
@@ -548,12 +560,17 @@ def process_rasters(
 
 def handler(event, context):
     # SQS event structure
+    print(f"Received {len(event['Records'])} SQS message(s)")
+
     for record in event["Records"]:
         body = json.loads(record["body"])
         task_id = body.get("task_id")
 
         if not task_id:
+            print(f"[UNKNOWN] Skipping message: no task_id in body")
             continue
+
+        print(f"[{task_id}] Processing SQS message")
 
         user = os.environ.get("APPEEARS_USER")
         password = os.environ.get("APPEEARS_PASS")
@@ -574,8 +591,10 @@ def handler(event, context):
         # Use provided files list
         files_to_process = body.get("files", [])
         if not files_to_process:
-            print("No files provided in message")
+            print(f"[{task_id}] ERROR: No files provided in SQS message body")
             continue
+
+        print(f"[{task_id}] Downloading {len(files_to_process)} file(s)")
 
         downloaded_files = []
 
@@ -586,11 +605,14 @@ def handler(event, context):
 
             # Download file
             d_url = f"{url}/{file_id}"
+            print(f"[{task_id}] Downloading: {filename}")
             r = session.get(d_url, headers=headers, stream=True)
             with open(local_path, "wb") as f:
                 for chunk in r.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE):
                     f.write(chunk)
             downloaded_files.append(local_path)
+
+        print(f"[{task_id}] Downloaded {len(downloaded_files)} file(s) successfully")
 
         # Process
         # Need ROI mapping
@@ -609,6 +631,10 @@ def handler(event, context):
                 if key not in files_by_aid_date:
                     files_by_aid_date[key] = []
                 files_by_aid_date[key].append(f)
+            else:
+                print(f"[{task_id}] WARNING: Could not extract AID/date from {os.path.basename(f)}")
+
+        print(f"[{task_id}] Grouped files into {len(files_by_aid_date)} AID/date combination(s)")
 
         # R2 client
         s3_client = boto3.client(
@@ -627,6 +653,8 @@ def handler(event, context):
             # Get feature_id for logging
             name, location = aid_folder_mapping.get(aid, (f"aid{aid}", "lake"))
             feature_id = f"{name}/{location}" if location != "lake" else name
+
+            print(f"[{task_id}][{feature_id}] Starting processing for date {date} with {len(files)} file(s)")
 
             # Log job start
             log_job_to_d1("process", feature_id, date, task_id, "started")
@@ -647,19 +675,24 @@ def handler(event, context):
                 log_job_to_d1(
                     "process", feature_id, date, task_id, "success", duration_ms
                 )
-                print(f"✓ Processed {feature_id} {date} in {duration_ms}ms")
+                print(f"[{task_id}][{feature_id}] ✓ Processed successfully in {duration_ms}ms")
 
             except Exception as e:
                 # Log failure
                 duration_ms = int((time.time() - start_time) * 1000)
+                error_msg = str(e)
                 log_job_to_d1(
-                    "process", feature_id, date, task_id, "failed", duration_ms, str(e)
+                    "process", feature_id, date, task_id, "failed", duration_ms, error_msg
                 )
-                print(f"✗ Error processing {aid} {date}: {e}")
+                print(f"[{task_id}][{feature_id}] ✗ Processing failed: {error_msg}")
+                import traceback
+                print(f"[{task_id}][{feature_id}] Traceback: {traceback.format_exc()}")
 
         # Cleanup
         import shutil
 
         shutil.rmtree(work_dir)
+        print(f"[{task_id}] Cleaned up work directory")
 
+    print(f"Handler completed successfully")
     return {"statusCode": 200}
