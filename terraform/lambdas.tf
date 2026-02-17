@@ -137,11 +137,18 @@ resource "aws_iam_user_policy" "cloudflare_invoker_policy" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["lambda:InvokeFunctionUrl", "lambda:InvokeFunction"]
-      Resource = aws_lambda_function.initiator_lambda.arn
-    }]
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["lambda:InvokeFunctionUrl", "lambda:InvokeFunction"]
+        Resource = aws_lambda_function.initiator_lambda.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["states:StartExecution"]
+        Resource = aws_sfn_state_machine.polling_machine.arn
+      }
+    ]
   })
 }
 

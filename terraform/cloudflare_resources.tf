@@ -70,6 +70,10 @@ resource "cloudflare_pages_project" "static" {
           value = var.aws_region
           type  = "plain_text"
         }
+        STEP_FUNCTION_ARN = {
+          value = aws_sfn_state_machine.polling_machine.arn
+          type  = "secret_text"
+        }
       }
 
       # D1 database binding
@@ -132,6 +136,10 @@ resource "cloudflare_pages_project" "static" {
         AWS_LAMBDA_REGION = {
           value = var.aws_region
           type  = "plain_text"
+        }
+        STEP_FUNCTION_ARN = {
+          value = aws_sfn_state_machine.polling_machine.arn
+          type  = "secret_text"
         }
       }
 
