@@ -9,6 +9,21 @@
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Spinner } from '$lib/components/ui/spinner';
 
+	interface FilterStats {
+		total_pixels: number;
+		histogram: Record<string, number>;
+	}
+
+	// Helper to compute stats from histogram
+	function getStatsFromHistogram(stats: FilterStats) {
+		const hist = stats.histogram;
+		const valid = hist['0'] || 0;
+		const filtered_qc = [1, 3, 5, 7].reduce((sum, i) => sum + (hist[i.toString()] || 0), 0);
+		const filtered_cloud = [2, 3, 6, 7].reduce((sum, i) => sum + (hist[i.toString()] || 0), 0);
+		const filtered_water = [4, 5, 6, 7].reduce((sum, i) => sum + (hist[i.toString()] || 0), 0);
+		return { valid, filtered_qc, filtered_cloud, filtered_water, total: stats.total_pixels };
+	}
+
 	interface Job {
 		id: number;
 		job_type: string;
@@ -20,7 +35,8 @@
 		completed_at: number | null;
 		duration_ms: number | null;
 		error_message: string | null;
-		metadata: string | null;
+		metadata: any | null;
+		filter_stats: FilterStats | null;
 	}
 
 	const filterOptions = [
@@ -61,6 +77,27 @@
 		if (!ms) return '-';
 		if (ms < 1000) return `${ms}ms`;
 		return `${(ms / 1000).toFixed(1)}s`;
+	}
+
+	function formatFilterSummary(stats: FilterStats | null): string {
+		if (!stats) return '-';
+		const { valid, total } = getStatsFromHistogram(stats);
+		const pctFiltered = total > 0 ? (((total - valid) / total) * 100).toFixed(1) : '0.0';
+		return `${pctFiltered}% filtered`;
+	}
+
+	function getFilterBreakdown(stats: FilterStats | null): string {
+		if (!stats) return '';
+		const { filtered_qc, filtered_cloud, filtered_water, total } = getStatsFromHistogram(stats);
+		if (total === 0) return '';
+
+		const parts = [];
+		if (filtered_qc > 0) parts.push(`QC: ${((filtered_qc / total) * 100).toFixed(1)}%`);
+		if (filtered_cloud > 0)
+			parts.push(`Cloud: ${((filtered_cloud / total) * 100).toFixed(1)}%`);
+		if (filtered_water > 0)
+			parts.push(`Water: ${((filtered_water / total) * 100).toFixed(1)}%`);
+		return parts.join(', ');
 	}
 
 	function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
@@ -186,12 +223,16 @@
 								<Table.Head>Task ID</Table.Head>
 								<Table.Head>Started</Table.Head>
 								<Table.Head>Duration</Table.Head>
+								<Table.Head>Filters</Table.Head>
 								<Table.Head>Error</Table.Head>
 							</Table.Row>
 						</Table.Header>
 						<Table.Body>
 							{#each jobs as job}
-								<Table.Row>
+								<Table.Row
+									class="cursor-pointer hover:bg-muted/50"
+									onclick={() => (window.location.href = `/admin/jobs/${job.id}`)}
+								>
 									<Table.Cell>
 										<Badge variant={getStatusVariant(job.status)}>{job.status}</Badge>
 									</Table.Cell>
@@ -217,6 +258,16 @@
 										{formatDate(job.started_at)}
 									</Table.Cell>
 									<Table.Cell class="text-sm">{formatDuration(job.duration_ms)}</Table.Cell>
+									<Table.Cell class="text-sm">
+										{#if job.filter_stats}
+											<div class="font-medium">{formatFilterSummary(job.filter_stats)}</div>
+											<div class="text-xs text-muted-foreground">
+												{getFilterBreakdown(job.filter_stats)}
+											</div>
+										{:else}
+											-
+										{/if}
+									</Table.Cell>
 									<Table.Cell class="text-sm text-destructive max-w-xs truncate">
 										{job.error_message || '-'}
 									</Table.Cell>

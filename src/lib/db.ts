@@ -162,26 +162,68 @@ export async function getProcessingJobs(
 ) {
   try {
     let query = `
-      SELECT id, job_type, task_id, feature_id, date, status,
-             started_at, completed_at, duration_ms, error_message, metadata
-      FROM processing_jobs
+      SELECT
+        j.id, j.job_type, j.task_id, j.feature_id, j.date, j.status,
+        j.started_at, j.completed_at, j.duration_ms, j.error_message, j.metadata,
+        tm.filter_stats
+      FROM processing_jobs j
+      LEFT JOIN temperature_metadata tm
+        ON j.feature_id = tm.feature_id AND j.date = tm.date
     `;
 
     if (status) {
-      query += ` WHERE status = ?`;
+      query += ` WHERE j.status = ?`;
     }
 
-    query += ` ORDER BY started_at DESC LIMIT ?`;
+    query += ` ORDER BY j.started_at DESC LIMIT ?`;
 
     const stmt = db.prepare(query);
     const result = status
       ? await stmt.bind(status, limit).all()
       : await stmt.bind(limit).all();
 
-    return result.results || [];
+    // Parse JSON metadata and filter_stats
+    return (result.results || []).map((job: any) => ({
+      ...job,
+      metadata: job.metadata ? JSON.parse(job.metadata) : null,
+      filter_stats: job.filter_stats ? JSON.parse(job.filter_stats) : null
+    }));
   } catch (err) {
     console.error("D1 query error:", err);
     return [];
+  }
+}
+
+export async function getJobWithFilterStats(
+  db: D1Database,
+  jobId: number
+) {
+  try {
+    const job = await db
+      .prepare(`
+        SELECT
+          j.id, j.job_type, j.task_id, j.feature_id, j.date, j.status,
+          j.started_at, j.completed_at, j.duration_ms, j.error_message, j.metadata,
+          tm.filter_stats
+        FROM processing_jobs j
+        LEFT JOIN temperature_metadata tm
+          ON j.feature_id = tm.feature_id AND j.date = tm.date
+        WHERE j.id = ?
+      `)
+      .bind(jobId)
+      .first();
+
+    if (!job) return null;
+
+    // Parse JSON fields
+    return {
+      ...job,
+      metadata: job.metadata ? JSON.parse(job.metadata) : null,
+      filter_stats: job.filter_stats ? JSON.parse(job.filter_stats) : null
+    };
+  } catch (err) {
+    console.error("D1 query error:", err);
+    return null;
   }
 }
 

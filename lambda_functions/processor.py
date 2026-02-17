@@ -189,12 +189,16 @@ def insert_metadata_to_d1(
 
         # Now insert metadata with file paths (after feature exists)
         meta_sql = """
-        INSERT OR REPLACE INTO temperature_metadata 
+        INSERT OR REPLACE INTO temperature_metadata
         (feature_id, date, min_temp, max_temp, mean_temp, median_temp, std_dev,
          data_points, water_pixel_count, land_pixel_count, wtoff,
-         csv_path, tif_path, png_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         csv_path, tif_path, png_path, filter_stats)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
+
+        # Serialize filter_stats to JSON
+        filter_stats_json = json.dumps(metadata.get("filter_stats", {}))
+
         meta_params = [
             feature_id,
             date,
@@ -210,6 +214,7 @@ def insert_metadata_to_d1(
             csv_path,
             tif_path,
             png_path,
+            filter_stats_json,
         ]
         query_d1(meta_sql, meta_params)
 
@@ -303,6 +308,21 @@ def upload_to_r2(s3_client, bucket_name, key, file_path, content_type=None):
     print(f"Uploaded {file_path} to {key}")
 
 
+def compute_filter_stats(filter_flags, total_pixels):
+    """Compute filter statistics as bit flag histogram"""
+    # Create histogram of bit flag values (0-7)
+    histogram = {}
+    for flag_value in range(8):
+        count = int(np.sum(filter_flags == flag_value))
+        if count > 0:  # Only store non-zero counts
+            histogram[str(flag_value)] = count
+
+    return {
+        "total_pixels": int(total_pixels),
+        "histogram": histogram
+    }
+
+
 def process_rasters(
     aid_number,
     date,
@@ -368,18 +388,32 @@ def process_rasters(
         }
     )
 
+    # Create filter tracking array (1 byte per pixel, 3 bits used)
+    filter_flags = np.zeros(len(df), dtype=np.uint8)
+
     # Filter by QC and cloud first
     water_mask_flag = df["wt"].isin([1]).any()
 
+    # QC filtering (bit 0)
+    qc_mask = df["QC"].isin(INVALID_QC_VALUES)
+    filter_flags = np.where(qc_mask, filter_flags | 1, filter_flags)
+
     for col in ["LST", "LST_err", "QC", "EmisWB", "height"]:
-        df[f"{col}_filter"] = np.where(
-            df["QC"].isin(INVALID_QC_VALUES), np.nan, df[col]
-        )
-        df[f"{col}_filter"] = np.where(df["cloud"] == 1, np.nan, df[f"{col}_filter"])
+        df[f"{col}_filter"] = np.where(qc_mask, np.nan, df[col])
+
+    # Cloud filtering (bit 1)
+    cloud_mask = df["cloud"] == 1
+    filter_flags = np.where(cloud_mask, filter_flags | 2, filter_flags)
+
+    for col in ["LST", "LST_err", "QC", "EmisWB", "height"]:
+        df[f"{col}_filter"] = np.where(cloud_mask, np.nan, df[f"{col}_filter"])
 
     suffix = ""
     if water_mask_flag:
-        # Water detected - filter to keep only water pixels
+        # Water detected - filter to keep only water pixels (bit 2)
+        water_mask = df["wt"] == 0
+        filter_flags = np.where(water_mask, filter_flags | 4, filter_flags)
+
         for col in [
             "LST_filter",
             "LST_err_filter",
@@ -387,10 +421,30 @@ def process_rasters(
             "EmisWB_filter",
             "height_filter",
         ]:
-            df[f"{col}"] = np.where(df["wt"] == 0, np.nan, df[col])
+            df[f"{col}"] = np.where(water_mask, np.nan, df[col])
     else:
         # No water detected - keep all data but flag as unreliable
         suffix = "_wtoff"
+
+    # Compute filter statistics
+    filter_stats = compute_filter_stats(filter_flags, len(df))
+
+    # Log to CloudWatch (compute stats from histogram for display)
+    hist = filter_stats["histogram"]
+    total = filter_stats["total_pixels"]
+    valid = hist.get("0", 0)
+    filtered_qc = sum(hist.get(str(i), 0) for i in [1, 3, 5, 7])  # Bit 0 set
+    filtered_cloud = sum(hist.get(str(i), 0) for i in [2, 3, 6, 7])  # Bit 1 set
+    filtered_water = sum(hist.get(str(i), 0) for i in [4, 5, 6, 7])  # Bit 2 set
+
+    print(f"Filter Statistics for {name}/{location} {date}:")
+    print(f"  Total pixels: {total:,}")
+    print(f"  Valid pixels: {valid:,} ({valid/total*100:.1f}%)")
+    print(f"  Filtered: {total - valid:,} ({(total-valid)/total*100:.1f}%)")
+    print(f"    - QC filtered: {filtered_qc:,} ({filtered_qc/total*100:.1f}%)")
+    print(f"    - Cloud filtered: {filtered_cloud:,} ({filtered_cloud/total*100:.1f}%)")
+    if water_mask_flag:
+        print(f"    - Water mask filtered: {filtered_water:,} ({filtered_water/total*100:.1f}%)")
 
     # Create filtered raster
     filtered_rasters = {
@@ -437,6 +491,10 @@ def process_rasters(
             print(f"PNG generation failed for {scale}: {e}")
 
     # Metadata JSON
+    hist = filter_stats["histogram"]
+    valid_pixels = hist.get("0", 0)
+    land_pixels = sum(hist.get(str(i), 0) for i in [4, 5, 6, 7]) if water_mask_flag else 0
+
     metadata = {
         "date": date,
         "min_temp": float(df["LST_filter"].min())
@@ -446,7 +504,10 @@ def process_rasters(
         if not df["LST_filter"].empty
         else None,
         "data_points": int(len(df)),
+        "water_pixel_count": valid_pixels,
+        "land_pixel_count": land_pixels,
         "wtoff": bool(suffix),
+        "filter_stats": filter_stats,
     }
     metadata_path = os.path.join(work_dir, f"{base_name}_metadata.json")
     with open(metadata_path, "w") as f:
