@@ -98,7 +98,14 @@
 	}
 
 	function getTriggerVariant(type: string): 'default' | 'secondary' | 'destructive' | 'outline' {
-		return type === 'manual' ? 'secondary' : 'outline';
+		switch (type) {
+			case 'manual':
+				return 'secondary';
+			case 'reprocess':
+				return 'outline';
+			default:
+				return 'default';
+		}
 	}
 
 	function toggleAutoRefresh() {

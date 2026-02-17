@@ -44,6 +44,11 @@
 	let autoRefresh = $state(false);
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
+	// Reprocess state
+	let reprocessLoading = $state(false);
+	let reprocessError = $state('');
+	let reprocessSuccess = $state('');
+
 	async function fetchDetail() {
 		try {
 			const response = await fetch(`/api/admin/requests/${$page.params.id}`);
@@ -99,6 +104,39 @@
 		}
 	}
 
+	async function handleReprocess() {
+		if (!request?.task_id) return;
+
+		reprocessLoading = true;
+		reprocessError = '';
+		reprocessSuccess = '';
+
+		try {
+			const response = await fetch('/api/admin/reprocess', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ request_id: request.id })
+			});
+
+			const result = await response.json();
+
+			if (!response.ok) {
+				reprocessError = result.error || 'Failed to start reprocessing';
+				return;
+			}
+
+			reprocessSuccess = `Reprocessing started! New request ID: ${result.id}`;
+
+			// Refresh current request to show updated processing status
+			await fetchDetail();
+		} catch (e) {
+			reprocessError = 'Failed to start reprocessing';
+			console.error(e);
+		} finally {
+			reprocessLoading = false;
+		}
+	}
+
 	let successCount = $derived(jobs.filter((j) => j.status === 'success').length);
 	let failedCount = $derived(jobs.filter((j) => j.status === 'failed').length);
 	let runningCount = $derived(jobs.filter((j) => j.status === 'started').length);
@@ -146,7 +184,11 @@
 							<div>
 								<dt class="text-muted-foreground">Trigger Type</dt>
 								<dd class="mt-0.5">
-									<Badge variant={request.trigger_type === 'manual' ? 'secondary' : 'outline'}>
+									<Badge variant={
+										request.trigger_type === 'manual' ? 'secondary' :
+										request.trigger_type === 'reprocess' ? 'outline' :
+										'default'
+									}>
 										{request.trigger_type}
 									</Badge>
 								</dd>
@@ -232,6 +274,38 @@
 					</Card.Content>
 				</Card.Card>
 			</div>
+
+			{#if request.task_id}
+				<div class="mb-6">
+					<Card.Card>
+						<Card.Header>
+							<Card.Title>Reprocess Data</Card.Title>
+							<Card.Description>
+								Re-run the processing pipeline for this task without resubmitting to AppEEARS.
+							</Card.Description>
+						</Card.Header>
+						<Card.Content>
+							{#if reprocessSuccess}
+								<Alert variant="default" class="mb-4">
+									<AlertDescription>{reprocessSuccess}</AlertDescription>
+								</Alert>
+							{/if}
+							{#if reprocessError}
+								<Alert variant="destructive" class="mb-4">
+									<AlertDescription>{reprocessError}</AlertDescription>
+								</Alert>
+							{/if}
+							<Button
+								onclick={handleReprocess}
+								disabled={reprocessLoading}
+								variant="outline"
+							>
+								{reprocessLoading ? 'Starting...' : 'Reprocess Task'}
+							</Button>
+						</Card.Content>
+					</Card.Card>
+				</div>
+			{/if}
 
 			<div class="flex items-center justify-between mb-4">
 				<h2 class="text-xl font-semibold">Processing Jobs</h2>
