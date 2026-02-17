@@ -34,8 +34,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	await db
 		.prepare(`
 			INSERT INTO ecostress_requests
-			(trigger_type, triggered_by, description, start_date, end_date, status, created_at)
-			VALUES (?, ?, ?, ?, ?, 'pending', ?)
+			(trigger_type, triggered_by, description, start_date, end_date, created_at)
+			VALUES (?, ?, ?, ?, ?, ?)
 		`)
 		.bind('manual', userEmail, description || `Manual trigger for ${date}`, appearsDate, appearsDate, now)
 		.run();
@@ -86,9 +86,9 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 		if (!response.ok) {
 			const errorText = await response.text();
-			// Update request status to failed
+			// Update request with error
 			await db
-				.prepare(`UPDATE ecostress_requests SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?`)
+				.prepare(`UPDATE ecostress_requests SET error_message = ?, updated_at = ? WHERE id = ?`)
 				.bind(`Lambda invocation failed: ${response.status} ${errorText}`, Date.now(), requestId)
 				.run();
 
@@ -102,7 +102,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	} catch (err) {
 		const errorMessage = err instanceof Error ? err.message : String(err);
 		await db
-			.prepare(`UPDATE ecostress_requests SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?`)
+			.prepare(`UPDATE ecostress_requests SET error_message = ?, updated_at = ? WHERE id = ?`)
 			.bind(errorMessage, Date.now(), requestId)
 			.run();
 
