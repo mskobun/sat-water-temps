@@ -363,8 +363,9 @@ def process_rasters(
             relevant_files.append(f)
 
     if not relevant_files:
-        print(f"  [{feature_id}] ERROR: No relevant files found after filtering")
-        return
+        error_msg = f"No relevant files found after filtering for aid={aid_number} date={date}"
+        print(f"  [{feature_id}] ERROR: {error_msg}")
+        raise ValueError(error_msg)
 
     print(f"  [{feature_id}] Found {len(relevant_files)} relevant file(s)")
 
@@ -385,9 +386,10 @@ def process_rasters(
             missing_layers.append(layer_name)
 
     if missing_layers:
-        print(f"  [{feature_id}] ERROR: Missing layers: {', '.join(missing_layers)}")
+        error_msg = f"Missing required layers: {', '.join(missing_layers)}"
+        print(f"  [{feature_id}] ERROR: {error_msg}")
         print(f"  [{feature_id}] Available files: {[os.path.basename(f) for f in relevant_files]}")
-        return
+        raise ValueError(error_msg)
 
     arrays = {
         "LST": read_array(LST),
