@@ -13,6 +13,11 @@ from PIL import Image
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from typing import List, Dict
+from aws_xray_sdk.core import xray_recorder
+from aws_xray_sdk.core import patch_all
+
+# Patch all supported libraries for automatic X-Ray tracing
+patch_all()
 
 # Constants
 INVALID_QC_VALUES = {15, 2501, 3525, 65535}
@@ -187,9 +192,13 @@ def insert_metadata_to_d1(
         import time
 
         feature_params = [feature_id, name, location, date, int(time.time())]
-        feature_result = query_d1(feature_sql, feature_params)
-        if not feature_result.get("success"):
-            raise Exception(f"Failed to insert feature record: {feature_result.get('error')}")
+
+        with xray_recorder.capture('d1_insert_feature') as subsegment:
+            subsegment.put_metadata('feature_id', feature_id)
+            feature_result = query_d1(feature_sql, feature_params)
+            if not feature_result.get("success"):
+                subsegment.put_annotation('error', True)
+                raise Exception(f"Failed to insert feature record: {feature_result.get('error')}")
 
         # Now insert metadata with file paths (after feature exists)
         meta_sql = """
@@ -220,9 +229,14 @@ def insert_metadata_to_d1(
             png_path,
             filter_stats_json,
         ]
-        meta_result = query_d1(meta_sql, meta_params)
-        if not meta_result.get("success"):
-            raise Exception(f"Failed to insert temperature metadata: {meta_result.get('error')}")
+        with xray_recorder.capture('d1_insert_temperature_metadata') as subsegment:
+            subsegment.put_metadata('feature_id', feature_id)
+            subsegment.put_metadata('date', date)
+            subsegment.put_metadata('has_filter_stats', bool(filter_stats_json and filter_stats_json != '{}'))
+            meta_result = query_d1(meta_sql, meta_params)
+            if not meta_result.get("success"):
+                subsegment.put_annotation('error', True)
+                raise Exception(f"Failed to insert temperature metadata: {meta_result.get('error')}")
 
         print(f"✓ Inserted metadata to D1 with R2 paths")
 
@@ -598,21 +612,25 @@ def handler(event, context):
 
         downloaded_files = []
 
-        for file_info in files_to_process:
-            file_id = file_info["file_id"]
-            filename = file_info["file_name"]
-            local_path = os.path.join(work_dir, filename)
+        with xray_recorder.capture('download_files') as subsegment:
+            subsegment.put_metadata('task_id', task_id)
+            subsegment.put_metadata('file_count', len(files_to_process))
 
-            # Download file
-            d_url = f"{url}/{file_id}"
-            print(f"[{task_id}] Downloading: {filename}")
-            r = session.get(d_url, headers=headers, stream=True)
-            with open(local_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE):
-                    f.write(chunk)
-            downloaded_files.append(local_path)
+            for file_info in files_to_process:
+                file_id = file_info["file_id"]
+                filename = file_info["file_name"]
+                local_path = os.path.join(work_dir, filename)
 
-        print(f"[{task_id}] Downloaded {len(downloaded_files)} file(s) successfully")
+                # Download file
+                d_url = f"{url}/{file_id}"
+                print(f"[{task_id}] Downloading: {filename}")
+                r = session.get(d_url, headers=headers, stream=True)
+                with open(local_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE):
+                        f.write(chunk)
+                downloaded_files.append(local_path)
+
+            print(f"[{task_id}] Downloaded {len(downloaded_files)} file(s) successfully")
 
         # Process
         # Need ROI mapping
@@ -659,34 +677,45 @@ def handler(event, context):
             # Log job start
             log_job_to_d1("process", feature_id, date, task_id, "started")
 
-            try:
-                process_rasters(
-                    aid,
-                    date,
-                    files,
-                    aid_folder_mapping,
-                    work_dir,
-                    s3_client,
-                    bucket_name,
-                )
+            with xray_recorder.capture('process_feature') as subsegment:
+                subsegment.put_metadata('task_id', task_id)
+                subsegment.put_metadata('feature_id', feature_id)
+                subsegment.put_metadata('date', date)
+                subsegment.put_metadata('file_count', len(files))
 
-                # Log success
-                duration_ms = int((time.time() - start_time) * 1000)
-                log_job_to_d1(
-                    "process", feature_id, date, task_id, "success", duration_ms
-                )
-                print(f"[{task_id}][{feature_id}] ✓ Processed successfully in {duration_ms}ms")
+                try:
+                    process_rasters(
+                        aid,
+                        date,
+                        files,
+                        aid_folder_mapping,
+                        work_dir,
+                        s3_client,
+                        bucket_name,
+                    )
 
-            except Exception as e:
-                # Log failure
-                duration_ms = int((time.time() - start_time) * 1000)
-                error_msg = str(e)
-                log_job_to_d1(
-                    "process", feature_id, date, task_id, "failed", duration_ms, error_msg
-                )
-                print(f"[{task_id}][{feature_id}] ✗ Processing failed: {error_msg}")
-                import traceback
-                print(f"[{task_id}][{feature_id}] Traceback: {traceback.format_exc()}")
+                    # Log success
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    log_job_to_d1(
+                        "process", feature_id, date, task_id, "success", duration_ms
+                    )
+                    print(f"[{task_id}][{feature_id}] ✓ Processed successfully in {duration_ms}ms")
+
+                except Exception as e:
+                    # Log failure
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    error_msg = str(e)
+                    log_job_to_d1(
+                        "process", feature_id, date, task_id, "failed", duration_ms, error_msg
+                    )
+                    print(f"[{task_id}][{feature_id}] ✗ Processing failed: {error_msg}")
+                    import traceback
+                    print(f"[{task_id}][{feature_id}] Traceback: {traceback.format_exc()}")
+
+                    # Add error to X-Ray trace
+                    subsegment.put_annotation('error', True)
+                    subsegment.put_metadata('error_message', error_msg)
+                    raise
 
         # Cleanup
         import shutil
