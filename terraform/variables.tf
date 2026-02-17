@@ -8,11 +8,6 @@ variable "project_name" {
   default     = "eco-water-temps"
 }
 
-variable "lambda_image_uri" {
-  description = "URI of the Docker image for Lambda functions"
-  type        = string
-}
-
 variable "appeears_user" {
   description = "AppEEARS Username"
   type        = string

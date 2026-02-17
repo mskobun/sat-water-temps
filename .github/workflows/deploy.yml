@@ -1,7 +1,7 @@
 name: Build and Deploy
 
 # Hybrid Architecture Deployment:
-# 1. Deploy AWS Lambda functions (data processing)
+# 1. Deploy AWS Lambda functions (data processing) - only when Lambda code changes
 # 2. Deploy Cloudflare Pages (SvelteKit frontend + API)
 #    - D1 database for metadata and job tracking
 #    - R2 for large CSV/TIF/PNG files
@@ -26,14 +26,58 @@ on:
       - 'terraform/**'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
+    inputs:
+      force_lambda_deploy:
+        description: 'Force Lambda deployment even if no Lambda files changed'
+        required: false
+        default: false
+        type: boolean
 
 env:
   AWS_REGION: us-west-2
   ECR_REPOSITORY: eco-water-temps-lambda-images
 
 jobs:
+  # Detect which files changed to conditionally run jobs
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      lambda: ${{ steps.filter.outputs.lambda }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for file changes
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            lambda:
+              - 'lambda_functions/**'
+              - 'Dockerfile'
+              - 'uv.lock'
+              - 'pyproject.toml'
+              - 'terraform/**'
+              - '.github/workflows/deploy.yml'
+            frontend:
+              - 'src/**'
+              - 'migrations/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'svelte.config.js'
+              - 'vite.config.ts'
+              - 'wrangler.toml'
+              - 'tsconfig.json'
+              - '.github/workflows/deploy.yml'
+
   deploy-infrastructure:
     name: Deploy Infrastructure & Lambdas
+    needs: changes
+    if: needs.changes.outputs.lambda == 'true' || github.event.inputs.force_lambda_deploy == 'true'
     runs-on: ubuntu-latest
     concurrency:
       group: terraform-apply
@@ -41,7 +85,7 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -88,7 +132,6 @@ jobs:
         env:
           TF_VAR_appeears_user: ${{ secrets.APPEEARS_USER }}
           TF_VAR_appeears_pass: ${{ secrets.APPEEARS_PASS }}
-          TF_VAR_lambda_image_uri: ${{ steps.build-image.outputs.image }}
           TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           TF_VAR_cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           TF_VAR_r2_bucket_name: ${{ secrets.R2_BUCKET_NAME }}
@@ -106,7 +149,12 @@ jobs:
 
   deploy-pages:
     name: Deploy SvelteKit to Cloudflare Pages
-    needs: deploy-infrastructure
+    needs: [changes, deploy-infrastructure]
+    # Run if frontend changed, but skip waiting for infrastructure if it didn't run
+    if: |
+      always() &&
+      needs.changes.outputs.frontend == 'true' &&
+      (needs.deploy-infrastructure.result == 'success' || needs.deploy-infrastructure.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: read
