@@ -242,6 +242,7 @@ def insert_metadata_to_d1(
 
     except Exception as e:
         print(f"Error inserting to D1: {e}")
+        raise  # Re-raise to fail the job properly
 
 
 def normalize(data):
@@ -523,6 +524,10 @@ def process_rasters(
             png_r2_keys[scale] = png_key
         except Exception as e:
             print(f"PNG generation failed for {scale}: {e}")
+
+    # Ensure at least one PNG was generated successfully
+    if not png_r2_keys:
+        raise Exception("Failed to generate any PNG visualizations - all scales failed")
 
     # Metadata JSON
     hist = filter_stats["histogram"]
