@@ -146,7 +146,9 @@ def log_job_to_d1(
                 feature_id,
                 date,
             ]
-            query_d1(sql, params)
+            result = query_d1(sql, params)
+            if not result.get("success"):
+                print(f"Warning: Failed to update job status: {result.get('error')}")
     except Exception as e:
         print(f"Warning: Failed to log job to D1: {e}")
         return None
@@ -185,7 +187,9 @@ def insert_metadata_to_d1(
         import time
 
         feature_params = [feature_id, name, location, date, int(time.time())]
-        query_d1(feature_sql, feature_params)
+        feature_result = query_d1(feature_sql, feature_params)
+        if not feature_result.get("success"):
+            raise Exception(f"Failed to insert feature record: {feature_result.get('error')}")
 
         # Now insert metadata with file paths (after feature exists)
         meta_sql = """
@@ -216,7 +220,9 @@ def insert_metadata_to_d1(
             png_path,
             filter_stats_json,
         ]
-        query_d1(meta_sql, meta_params)
+        meta_result = query_d1(meta_sql, meta_params)
+        if not meta_result.get("success"):
+            raise Exception(f"Failed to insert temperature metadata: {meta_result.get('error')}")
 
         print(f"✓ Inserted metadata to D1 with R2 paths")
 
