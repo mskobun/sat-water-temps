@@ -41,7 +41,7 @@ def extract_metadata(filename):
 
 
 def update_ecostress_request(task_id, scenes_count):
-    """Update ecostress_requests with scene count and status='processing'"""
+    """Update ecostress_requests with scene count"""
     try:
         d1_db_id = os.environ.get("D1_DATABASE_ID")
         cf_account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
@@ -58,7 +58,7 @@ def update_ecostress_request(task_id, scenes_count):
 
         sql = """
         UPDATE ecostress_requests
-        SET status = 'processing', scenes_count = ?, updated_at = ?
+        SET scenes_count = ?, updated_at = ?
         WHERE task_id = ?
         """
         params = [scenes_count, int(time.time() * 1000), task_id]

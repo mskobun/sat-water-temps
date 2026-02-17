@@ -193,16 +193,37 @@ export async function getEcostressRequests(
   try {
     let query = `
       SELECT
-        er.*,
-        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id) as total_jobs,
-        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.status = 'success') as success_jobs,
-        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.status = 'failed') as failed_jobs,
-        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.status = 'started') as running_jobs
+        er.id,
+        er.task_id,
+        er.trigger_type,
+        er.triggered_by,
+        er.description,
+        er.start_date,
+        er.end_date,
+        er.scenes_count,
+        er.created_at,
+        er.updated_at,
+        er.error_message,
+        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'process') as total_jobs,
+        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'process' AND pj.status = 'success') as success_jobs,
+        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'process' AND pj.status = 'failed') as failed_jobs,
+        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'process' AND pj.status = 'started') as running_jobs,
+        CASE
+          WHEN er.task_id IS NULL THEN 'pending'
+          WHEN (SELECT status FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'scrape' LIMIT 1) = 'failed' THEN 'failed'
+          WHEN er.scenes_count IS NULL OR er.scenes_count = 0 THEN 'processing'
+          WHEN (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'process' AND pj.status IN ('success', 'failed')) >= er.scenes_count THEN
+            CASE
+              WHEN (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'process' AND pj.status = 'failed') > 0 THEN 'completed_with_errors'
+              ELSE 'completed'
+            END
+          ELSE 'processing'
+        END as status
       FROM ecostress_requests er
     `;
 
     if (status) {
-      query += ` WHERE er.status = ?`;
+      query += ` WHERE status = ?`;
     }
 
     query += ` ORDER BY er.created_at DESC LIMIT ?`;
@@ -225,7 +246,33 @@ export async function getEcostressRequestDetail(
 ) {
   try {
     const request = await db
-      .prepare(`SELECT * FROM ecostress_requests WHERE id = ?`)
+      .prepare(`
+        SELECT
+          er.id,
+          er.task_id,
+          er.trigger_type,
+          er.triggered_by,
+          er.description,
+          er.start_date,
+          er.end_date,
+          er.scenes_count,
+          er.created_at,
+          er.updated_at,
+          er.error_message,
+          CASE
+            WHEN er.task_id IS NULL THEN 'pending'
+            WHEN (SELECT status FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'scrape' LIMIT 1) = 'failed' THEN 'failed'
+            WHEN er.scenes_count IS NULL OR er.scenes_count = 0 THEN 'processing'
+            WHEN (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'process' AND pj.status IN ('success', 'failed')) >= er.scenes_count THEN
+              CASE
+                WHEN (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'process' AND pj.status = 'failed') > 0 THEN 'completed_with_errors'
+                ELSE 'completed'
+              END
+            ELSE 'processing'
+          END as status
+        FROM ecostress_requests er
+        WHERE er.id = ?
+      `)
       .bind(id)
       .first();
 
@@ -238,9 +285,10 @@ export async function getEcostressRequestDetail(
                    started_at, completed_at, duration_ms, error_message, metadata
             FROM processing_jobs
             WHERE task_id = ?
+              AND started_at >= ?
             ORDER BY started_at DESC
           `)
-          .bind(request.task_id)
+          .bind(request.task_id, request.created_at)
           .all()
       : { results: [] };
 

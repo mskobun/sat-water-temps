@@ -80,10 +80,12 @@
 
 	function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
 		switch (status) {
-			case 'success':
-			case 'submitted':
 			case 'processing':
 				return 'default';
+			case 'completed':
+				return 'secondary';
+			case 'completed_with_errors':
+				return 'destructive';
 			case 'failed':
 				return 'destructive';
 			case 'started':
