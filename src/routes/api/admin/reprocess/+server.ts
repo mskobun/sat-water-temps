@@ -40,9 +40,11 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	const taskId = String(originalRequest.task_id);
 
 	// Check if there's already an active reprocessing job for this task_id
+	// Status is computed via the ecostress_requests_with_status view
 	const activeReprocess = await db
 		.prepare(`
-			SELECT id FROM ecostress_requests
+			SELECT id, status
+			FROM ecostress_requests_with_status
 			WHERE task_id = ?
 			AND trigger_type = 'reprocess'
 			AND status IN ('submitted', 'processing', 'pending')
@@ -66,8 +68,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	await db
 		.prepare(`
 			INSERT INTO ecostress_requests
-			(task_id, trigger_type, triggered_by, description, start_date, end_date, status, created_at)
-			VALUES (?, 'reprocess', ?, ?, ?, ?, 'pending', ?)
+			(task_id, trigger_type, triggered_by, description, start_date, end_date, created_at)
+			VALUES (?, 'reprocess', ?, ?, ?, ?, ?)
 		`)
 		.bind(
 			taskId,
@@ -132,9 +134,9 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		if (!response.ok) {
 			const errorText = await response.text();
 
-			// Update request status to failed
+			// Update request with error message (status is computed dynamically)
 			await db
-				.prepare(`UPDATE ecostress_requests SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?`)
+				.prepare(`UPDATE ecostress_requests SET error_message = ?, updated_at = ? WHERE id = ?`)
 				.bind(`Step Function invocation failed: ${response.status} ${errorText}`, Date.now(), newRequestId)
 				.run();
 
@@ -146,9 +148,9 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 		const result = await response.json() as { executionArn?: string };
 
-		// Update status to submitted
+		// Update timestamp (status is computed dynamically from processing_jobs)
 		await db
-			.prepare(`UPDATE ecostress_requests SET status = 'submitted', updated_at = ? WHERE id = ?`)
+			.prepare(`UPDATE ecostress_requests SET updated_at = ? WHERE id = ?`)
 			.bind(Date.now(), newRequestId)
 			.run();
 
@@ -161,8 +163,9 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 	} catch (err) {
 		const errorMessage = err instanceof Error ? err.message : String(err);
+		// Update with error message (status is computed dynamically)
 		await db
-			.prepare(`UPDATE ecostress_requests SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?`)
+			.prepare(`UPDATE ecostress_requests SET error_message = ?, updated_at = ? WHERE id = ?`)
 			.bind(errorMessage, Date.now(), newRequestId)
 			.run();
 
