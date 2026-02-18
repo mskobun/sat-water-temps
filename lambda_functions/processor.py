@@ -708,18 +708,28 @@ def handler(event, context):
                     )
                     print(f"[{task_id}][{feature_id}] ✓ Processed successfully in {duration_ms}ms")
 
-                except Exception as e:
-                    # Log failure
+                except ValueError as e:
+                    # Permanent failure (missing layers, no files) - don't retry
                     duration_ms = int((time.time() - start_time) * 1000)
                     error_msg = str(e)
                     log_job_to_d1(
                         "process", feature_id, date, task_id, "failed", duration_ms, error_msg
                     )
-                    print(f"[{task_id}][{feature_id}] ✗ Processing failed: {error_msg}")
+                    print(f"[{task_id}][{feature_id}] ✗ Permanent failure (skipping): {error_msg}")
+                    subsegment.put_annotation('error', True)
+                    subsegment.put_annotation('permanent_failure', True)
+                    subsegment.put_metadata('error_message', error_msg)
+
+                except Exception as e:
+                    # Transient failure - re-raise to trigger SQS retry
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    error_msg = str(e)
+                    log_job_to_d1(
+                        "process", feature_id, date, task_id, "failed", duration_ms, error_msg
+                    )
+                    print(f"[{task_id}][{feature_id}] ✗ Transient failure (will retry): {error_msg}")
                     import traceback
                     print(f"[{task_id}][{feature_id}] Traceback: {traceback.format_exc()}")
-
-                    # Add error to X-Ray trace
                     subsegment.put_annotation('error', True)
                     subsegment.put_metadata('error_message', error_msg)
                     raise
