@@ -155,10 +155,49 @@ export async function getLatestDate(db: D1Database, featureId: string): Promise<
   }
 }
 
+export async function countJobsByStatus(db: D1Database) {
+  try {
+    const result = await db
+      .prepare(`
+        SELECT
+          COUNT(*) as total,
+          SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success,
+          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+          SUM(CASE WHEN status = 'started' THEN 1 ELSE 0 END) as started
+        FROM processing_jobs
+      `)
+      .first();
+    return {
+      total: Number(result?.total || 0),
+      success: Number(result?.success || 0),
+      failed: Number(result?.failed || 0),
+      started: Number(result?.started || 0),
+    };
+  } catch (err) {
+    console.error("D1 query error:", err);
+    return { total: 0, success: 0, failed: 0, started: 0 };
+  }
+}
+
+export async function countJobsByFilter(db: D1Database, status?: string) {
+  try {
+    let query = `SELECT COUNT(*) as total FROM processing_jobs`;
+    if (status) query += ` WHERE status = ?`;
+    const result = status
+      ? await db.prepare(query).bind(status).first()
+      : await db.prepare(query).first();
+    return Number(result?.total || 0);
+  } catch (err) {
+    console.error("D1 query error:", err);
+    return 0;
+  }
+}
+
 export async function getProcessingJobs(
   db: D1Database,
-  limit: number = 100,
-  status?: string
+  limit: number = 50,
+  status?: string,
+  offset: number = 0
 ) {
   try {
     let query = `
@@ -175,12 +214,12 @@ export async function getProcessingJobs(
       query += ` WHERE j.status = ?`;
     }
 
-    query += ` ORDER BY j.started_at DESC LIMIT ?`;
+    query += ` ORDER BY j.started_at DESC LIMIT ? OFFSET ?`;
 
     const stmt = db.prepare(query);
     const result = status
-      ? await stmt.bind(status, limit).all()
-      : await stmt.bind(limit).all();
+      ? await stmt.bind(status, limit, offset).all()
+      : await stmt.bind(limit, offset).all();
 
     // Parse JSON metadata and filter_stats
     return (result.results || []).map((job: any) => ({
@@ -236,10 +275,10 @@ export async function getEcostressRequests(
     let query = `
       SELECT
         er.*,
-        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'process') as total_jobs,
-        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'process' AND pj.status = 'success') as success_jobs,
-        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'process' AND pj.status = 'failed') as failed_jobs,
-        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'process' AND pj.status = 'started') as running_jobs
+        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'process' AND pj.started_at >= er.created_at) as total_jobs,
+        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'process' AND pj.status = 'success' AND pj.started_at >= er.created_at) as success_jobs,
+        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'process' AND pj.status = 'failed' AND pj.started_at >= er.created_at) as failed_jobs,
+        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'process' AND pj.status = 'started' AND pj.started_at >= er.created_at) as running_jobs
       FROM ecostress_requests_with_status er
     `;
 
@@ -280,12 +319,15 @@ export async function getEcostressRequestDetail(
     const jobs = request.task_id
       ? await db
           .prepare(`
-            SELECT id, job_type, task_id, feature_id, date, status,
-                   started_at, completed_at, duration_ms, error_message, metadata
-            FROM processing_jobs
-            WHERE task_id = ?
-              AND started_at >= ?
-            ORDER BY started_at DESC
+            SELECT j.id, j.job_type, j.task_id, j.feature_id, j.date, j.status,
+                   j.started_at, j.completed_at, j.duration_ms, j.error_message, j.metadata,
+                   tm.filter_stats
+            FROM processing_jobs j
+            LEFT JOIN temperature_metadata tm
+              ON j.feature_id = tm.feature_id AND j.date = tm.date
+            WHERE j.task_id = ?
+              AND j.started_at >= ?
+            ORDER BY j.started_at DESC
           `)
           .bind(request.task_id, request.created_at)
           .all()
@@ -293,7 +335,11 @@ export async function getEcostressRequestDetail(
 
     return {
       request,
-      jobs: jobs.results || []
+      jobs: (jobs.results || []).map((job: any) => ({
+        ...job,
+        metadata: job.metadata ? JSON.parse(job.metadata) : null,
+        filter_stats: job.filter_stats ? JSON.parse(job.filter_stats) : null
+      }))
     };
   } catch (err) {
     console.error("D1 query error:", err);

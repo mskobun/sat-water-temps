@@ -1,43 +1,16 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Label } from '$lib/components/ui/label';
-	import * as Table from '$lib/components/ui/table';
 	import * as Select from '$lib/components/ui/select';
-	import { Badge } from '$lib/components/ui/badge';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Spinner } from '$lib/components/ui/spinner';
+	import JobsTable from '$lib/components/admin/JobsTable.svelte';
+	import type { Job } from '$lib/components/admin/JobsTable.svelte';
 
-	interface FilterStats {
-		total_pixels: number;
-		histogram: Record<string, number>;
-	}
-
-	// Helper to compute stats from histogram
-	function getStatsFromHistogram(stats: FilterStats) {
-		const hist = stats.histogram;
-		const valid = hist['0'] || 0;
-		const filtered_qc = [1, 3, 5, 7].reduce((sum, i) => sum + (hist[i.toString()] || 0), 0);
-		const filtered_cloud = [2, 3, 6, 7].reduce((sum, i) => sum + (hist[i.toString()] || 0), 0);
-		const filtered_water = [4, 5, 6, 7].reduce((sum, i) => sum + (hist[i.toString()] || 0), 0);
-		return { valid, filtered_qc, filtered_cloud, filtered_water, total: stats.total_pixels };
-	}
-
-	interface Job {
-		id: number;
-		job_type: string;
-		task_id: string | null;
-		feature_id: string | null;
-		date: string | null;
-		status: string;
-		started_at: number;
-		completed_at: number | null;
-		duration_ms: number | null;
-		error_message: string | null;
-		metadata: any | null;
-		filter_stats: FilterStats | null;
-	}
+	const LIMIT = 50;
+	const POLL_INTERVAL = 30_000;
 
 	const filterOptions = [
 		{ value: 'all', label: 'All Jobs' },
@@ -51,16 +24,33 @@
 	let error = $state('');
 	let filter = $state('all');
 	let filterLabel = $derived(filterOptions.find((o) => o.value === filter)?.label ?? 'All Jobs');
-	let autoRefresh = $state(false);
+	let page = $state(1);
+	let total = $state(0);
+	let statusCounts = $state({ total: 0, success: 0, failed: 0, started: 0 });
+	let updatedAt = $state('');
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
+
+	const totalPages = $derived(Math.max(1, Math.ceil(total / LIMIT)));
+	const rangeStart = $derived((page - 1) * LIMIT + 1);
+	const rangeEnd = $derived(Math.min(page * LIMIT, total));
 
 	async function fetchJobs() {
 		try {
-			const statusParam = filter !== 'all' ? `?status=${filter}` : '';
-			const response = await fetch(`/api/admin/jobs${statusParam}`);
-			const data = (await response.json()) as { jobs?: Job[] };
+			const params = new URLSearchParams({ limit: String(LIMIT), page: String(page) });
+			if (filter !== 'all') params.set('status', filter);
+			const response = await fetch(`/api/admin/jobs?${params}`);
+			const data = await response.json() as {
+				jobs?: Job[];
+				total?: number;
+				status_counts?: typeof statusCounts;
+				page?: number;
+				limit?: number;
+			};
 			jobs = data.jobs || [];
+			total = data.total ?? 0;
+			if (data.status_counts) statusCounts = data.status_counts;
 			error = '';
+			updatedAt = new Date().toLocaleTimeString();
 		} catch (e) {
 			error = 'Failed to fetch jobs';
 			console.error(e);
@@ -69,68 +59,21 @@
 		}
 	}
 
-	function formatDate(timestamp: number) {
-		return new Date(timestamp).toLocaleString();
-	}
-
-	function formatDuration(ms: number | null) {
-		if (!ms) return '-';
-		if (ms < 1000) return `${ms}ms`;
-		return `${(ms / 1000).toFixed(1)}s`;
-	}
-
-	function formatFilterSummary(stats: FilterStats | null): string {
-		if (!stats) return '-';
-		const { valid, total } = getStatsFromHistogram(stats);
-		const pctFiltered = total > 0 ? (((total - valid) / total) * 100).toFixed(1) : '0.0';
-		return `${pctFiltered}% filtered`;
-	}
-
-	function getFilterBreakdown(stats: FilterStats | null): string {
-		if (!stats) return '';
-		const { filtered_qc, filtered_cloud, filtered_water, total } = getStatsFromHistogram(stats);
-		if (total === 0) return '';
-
-		const parts = [];
-		if (filtered_qc > 0) parts.push(`QC: ${((filtered_qc / total) * 100).toFixed(1)}%`);
-		if (filtered_cloud > 0)
-			parts.push(`Cloud: ${((filtered_cloud / total) * 100).toFixed(1)}%`);
-		if (filtered_water > 0)
-			parts.push(`Water: ${((filtered_water / total) * 100).toFixed(1)}%`);
-		return parts.join(', ');
-	}
-
-	function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
-		switch (status) {
-			case 'success':
-				return 'secondary';
-			case 'failed':
-				return 'destructive';
-			case 'started':
-				return 'default';
-			default:
-				return 'outline';
-		}
-	}
-
-	function toggleAutoRefresh() {
-		autoRefresh = !autoRefresh;
-		if (autoRefresh) {
-			refreshInterval = setInterval(fetchJobs, 5000);
-		} else if (refreshInterval) {
-			clearInterval(refreshInterval);
-			refreshInterval = null;
-		}
+	function goToPage(p: number) {
+		page = Math.max(1, Math.min(p, totalPages));
+		fetchJobs();
 	}
 
 	$effect(() => {
-		if (filter) {
+		filter; // track filter changes only
+		untrack(() => {
+			page = 1;
 			fetchJobs();
-		}
+		});
 	});
 
 	onMount(() => {
-		fetchJobs();
+		refreshInterval = setInterval(fetchJobs, POLL_INTERVAL);
 		return () => {
 			if (refreshInterval) clearInterval(refreshInterval);
 		};
@@ -148,42 +91,40 @@
 			<p class="text-muted-foreground">Monitor Lambda processing jobs and scraping tasks</p>
 		</div>
 
-		<Card.Card class="mb-6">
-			<Card.Content class="pt-6">
-				<div class="flex flex-wrap items-center justify-between gap-4">
-					<div class="flex items-center gap-4">
-						<Label class="text-sm font-medium">Filter:</Label>
-						<Select.Root type="single" bind:value={filter}>
-							<Select.Trigger class="w-44">
-								{#snippet children()}
-									<span data-slot="select-value">{filterLabel}</span>
-								{/snippet}
-							</Select.Trigger>
-							<Select.Content>
-								{#each filterOptions as opt}
-									<Select.Item value={opt.value} label={opt.label} />
-								{/each}
-							</Select.Content>
-						</Select.Root>
-					</div>
-					<div class="flex items-center gap-3">
-						<Button variant={autoRefresh ? 'default' : 'secondary'} size="sm" onclick={toggleAutoRefresh}>
-							{autoRefresh ? '⏸ Pause' : '▶ Auto-refresh'}
-						</Button>
-						<Button variant="outline" size="sm" onclick={fetchJobs} disabled={loading}>
-							🔄 Refresh
-						</Button>
-					</div>
-				</div>
-			</Card.Content>
-		</Card.Card>
+		<!-- Lightweight filter toolbar (no Card wrapper) -->
+		<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+			<div class="flex items-center gap-4">
+				<Label class="text-sm font-medium">Filter:</Label>
+				<Select.Root type="single" bind:value={filter}>
+					<Select.Trigger class="w-44">
+						{#snippet children()}
+							<span data-slot="select-value">{filterLabel}</span>
+						{/snippet}
+					</Select.Trigger>
+					<Select.Content>
+						{#each filterOptions as opt}
+							<Select.Item value={opt.value} label={opt.label} />
+						{/each}
+					</Select.Content>
+				</Select.Root>
+			</div>
+			<div class="flex items-center gap-3">
+				{#if updatedAt}
+					<span class="text-xs text-muted-foreground">Updated {updatedAt}</span>
+				{/if}
+				<Button variant="outline" size="sm" onclick={fetchJobs} disabled={loading}>
+					↻ Refresh
+				</Button>
+			</div>
+		</div>
 
+		<!-- Stats cards — always global, never filtered -->
 		<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
 			{#each [
-				{ label: 'Total', count: jobs.length },
-				{ label: 'Success', count: jobs.filter((j) => j.status === 'success').length },
-				{ label: 'Failed', count: jobs.filter((j) => j.status === 'failed').length },
-				{ label: 'In Progress', count: jobs.filter((j) => j.status === 'started').length }
+				{ label: 'Total', count: statusCounts.total },
+				{ label: 'Success', count: statusCounts.success },
+				{ label: 'Failed', count: statusCounts.failed },
+				{ label: 'In Progress', count: statusCounts.started }
 			] as stat}
 				<Card.Card>
 					<Card.Content class="pt-6">
@@ -194,7 +135,7 @@
 			{/each}
 		</div>
 
-		{#if loading}
+		{#if loading && jobs.length === 0}
 			<Card.Card>
 				<Card.Content class="flex flex-col items-center justify-center py-12 gap-4">
 					<Spinner class="size-12" />
@@ -213,68 +154,32 @@
 			</Card.Card>
 		{:else}
 			<Card.Card>
-				<div class="overflow-x-auto">
-					<Table.Root>
-						<Table.Header>
-							<Table.Row>
-								<Table.Head>Status</Table.Head>
-								<Table.Head>Type</Table.Head>
-								<Table.Head>Feature / Date</Table.Head>
-								<Table.Head>Task ID</Table.Head>
-								<Table.Head>Started</Table.Head>
-								<Table.Head>Duration</Table.Head>
-								<Table.Head>Filters</Table.Head>
-								<Table.Head>Error</Table.Head>
-							</Table.Row>
-						</Table.Header>
-						<Table.Body>
-							{#each jobs as job}
-								<Table.Row
-									class="cursor-pointer hover:bg-muted/50"
-									onclick={() => (window.location.href = `/admin/jobs/${job.id}`)}
-								>
-									<Table.Cell>
-										<Badge variant={getStatusVariant(job.status)}>{job.status}</Badge>
-									</Table.Cell>
-									<Table.Cell class="text-sm">{job.job_type}</Table.Cell>
-									<Table.Cell class="text-sm">
-										{#if job.feature_id}
-											<div class="font-medium">{job.feature_id}</div>
-											{#if job.date}
-												<div class="text-xs text-muted-foreground">{job.date}</div>
-											{/if}
-										{:else}
-											-
-										{/if}
-									</Table.Cell>
-									<Table.Cell class="text-sm font-mono">
-										{#if job.task_id}
-											<span class="text-xs">{job.task_id.slice(0, 12)}...</span>
-										{:else}
-											-
-										{/if}
-									</Table.Cell>
-									<Table.Cell class="text-sm text-muted-foreground">
-										{formatDate(job.started_at)}
-									</Table.Cell>
-									<Table.Cell class="text-sm">{formatDuration(job.duration_ms)}</Table.Cell>
-									<Table.Cell class="text-sm">
-										{#if job.filter_stats}
-											<div class="font-medium">{formatFilterSummary(job.filter_stats)}</div>
-											<div class="text-xs text-muted-foreground">
-												{getFilterBreakdown(job.filter_stats)}
-											</div>
-										{:else}
-											-
-										{/if}
-									</Table.Cell>
-									<Table.Cell class="text-sm text-destructive max-w-xs truncate">
-										{job.error_message || '-'}
-									</Table.Cell>
-								</Table.Row>
-							{/each}
-						</Table.Body>
-					</Table.Root>
+				<JobsTable {jobs} showTaskId={true} />
+
+				<!-- Pagination controls -->
+				<div class="flex items-center justify-between px-4 py-3 border-t text-sm">
+					<span class="text-muted-foreground">
+						Showing {rangeStart}–{rangeEnd} of {total}
+					</span>
+					<div class="flex items-center gap-2">
+						<Button
+							variant="outline"
+							size="sm"
+							onclick={() => goToPage(page - 1)}
+							disabled={page <= 1}
+						>
+							← Prev
+						</Button>
+						<span class="text-muted-foreground">Page {page} of {totalPages}</span>
+						<Button
+							variant="outline"
+							size="sm"
+							onclick={() => goToPage(page + 1)}
+							disabled={page >= totalPages}
+						>
+							Next →
+						</Button>
+					</div>
 				</div>
 			</Card.Card>
 		{/if}

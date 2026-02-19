@@ -3,10 +3,13 @@
 	import { page } from '$app/stores';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
-	import * as Table from '$lib/components/ui/table';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Spinner } from '$lib/components/ui/spinner';
+	import JobsTable from '$lib/components/admin/JobsTable.svelte';
+	import type { Job } from '$lib/components/admin/JobsTable.svelte';
+
+	const POLL_INTERVAL = 30_000;
 
 	interface EcostressRequest {
 		id: number;
@@ -23,25 +26,11 @@
 		error_message: string | null;
 	}
 
-	interface Job {
-		id: number;
-		job_type: string;
-		task_id: string | null;
-		feature_id: string | null;
-		date: string | null;
-		status: string;
-		started_at: number;
-		completed_at: number | null;
-		duration_ms: number | null;
-		error_message: string | null;
-		metadata: string | null;
-	}
-
 	let request = $state<EcostressRequest | null>(null);
 	let jobs = $state<Job[]>([]);
 	let loading = $state(true);
 	let error = $state('');
-	let autoRefresh = $state(false);
+	let updatedAt = $state('');
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
 	// Reprocess state
@@ -60,6 +49,7 @@
 			request = data.request;
 			jobs = data.jobs || [];
 			error = '';
+			updatedAt = new Date().toLocaleTimeString();
 		} catch (e) {
 			error = 'Failed to fetch request details';
 			console.error(e);
@@ -72,37 +62,15 @@
 		return new Date(timestamp).toLocaleString();
 	}
 
-	function formatDuration(ms: number | null) {
-		if (!ms) return '-';
-		if (ms < 1000) return `${ms}ms`;
-		return `${(ms / 1000).toFixed(1)}s`;
-	}
-
 	function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
 		switch (status) {
-			case 'processing':
-				return 'default';
-			case 'completed':
-				return 'secondary';
-			case 'completed_with_errors':
-				return 'destructive';
-			case 'failed':
-				return 'destructive';
+			case 'processing': return 'default';
+			case 'completed': return 'secondary';
+			case 'completed_with_errors': return 'destructive';
+			case 'failed': return 'destructive';
 			case 'started':
-			case 'pending':
-				return 'outline';
-			default:
-				return 'secondary';
-		}
-	}
-
-	function toggleAutoRefresh() {
-		autoRefresh = !autoRefresh;
-		if (autoRefresh) {
-			refreshInterval = setInterval(fetchDetail, 5000);
-		} else if (refreshInterval) {
-			clearInterval(refreshInterval);
-			refreshInterval = null;
+			case 'pending': return 'outline';
+			default: return 'secondary';
 		}
 	}
 
@@ -128,8 +96,6 @@
 			}
 
 			reprocessSuccess = `Reprocessing started! New request ID: ${result.id}`;
-
-			// Refresh current request to show updated processing status
 			await fetchDetail();
 		} catch (e) {
 			reprocessError = 'Failed to start reprocessing';
@@ -145,6 +111,7 @@
 
 	onMount(() => {
 		fetchDetail();
+		refreshInterval = setInterval(fetchDetail, POLL_INTERVAL);
 		return () => {
 			if (refreshInterval) clearInterval(refreshInterval);
 		};
@@ -164,7 +131,7 @@
 			<h1 class="text-3xl font-bold">Request #{$page.params.id}</h1>
 		</div>
 
-		{#if loading}
+		{#if loading && !request}
 			<Card.Card>
 				<Card.Content class="flex flex-col items-center justify-center py-12 gap-4">
 					<Spinner class="size-12" />
@@ -312,11 +279,11 @@
 			<div class="flex items-center justify-between mb-4">
 				<h2 class="text-xl font-semibold">Processing Jobs</h2>
 				<div class="flex items-center gap-3">
-					<Button variant={autoRefresh ? 'default' : 'secondary'} size="sm" onclick={toggleAutoRefresh}>
-						{autoRefresh ? 'Pause' : 'Auto-refresh'}
-					</Button>
+					{#if updatedAt}
+						<span class="text-xs text-muted-foreground">Updated {updatedAt}</span>
+					{/if}
 					<Button variant="outline" size="sm" onclick={fetchDetail}>
-						Refresh
+						↻ Refresh
 					</Button>
 				</div>
 			</div>
@@ -329,47 +296,7 @@
 				</Card.Card>
 			{:else}
 				<Card.Card>
-					<div class="overflow-x-auto">
-						<Table.Root>
-							<Table.Header>
-								<Table.Row>
-									<Table.Head>Status</Table.Head>
-									<Table.Head>Type</Table.Head>
-									<Table.Head>Feature / Date</Table.Head>
-									<Table.Head>Started</Table.Head>
-									<Table.Head>Duration</Table.Head>
-									<Table.Head>Error</Table.Head>
-								</Table.Row>
-							</Table.Header>
-							<Table.Body>
-								{#each jobs as job}
-									<Table.Row>
-										<Table.Cell>
-											<Badge variant={getStatusVariant(job.status)}>{job.status}</Badge>
-										</Table.Cell>
-										<Table.Cell class="text-sm">{job.job_type}</Table.Cell>
-										<Table.Cell class="text-sm">
-											{#if job.feature_id}
-												<div class="font-medium">{job.feature_id}</div>
-												{#if job.date}
-													<div class="text-xs text-muted-foreground">{job.date}</div>
-												{/if}
-											{:else}
-												-
-											{/if}
-										</Table.Cell>
-										<Table.Cell class="text-sm text-muted-foreground">
-											{formatDate(job.started_at)}
-										</Table.Cell>
-										<Table.Cell class="text-sm">{formatDuration(job.duration_ms)}</Table.Cell>
-										<Table.Cell class="text-sm text-destructive max-w-xs truncate">
-											{job.error_message || '-'}
-										</Table.Cell>
-									</Table.Row>
-								{/each}
-							</Table.Body>
-						</Table.Root>
-					</div>
+					<JobsTable {jobs} showTaskId={false} />
 				</Card.Card>
 			{/if}
 		{/if}
