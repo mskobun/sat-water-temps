@@ -9,10 +9,13 @@
 	import * as Table from '$lib/components/ui/table';
 	import * as Select from '$lib/components/ui/select';
 	import * as Popover from '$lib/components/ui/popover';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import { Calendar } from '$lib/components/ui/calendar';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Spinner } from '$lib/components/ui/spinner';
+
+	const POLL_INTERVAL = 30_000;
 
 	interface EcostressRequest {
 		id: number;
@@ -46,11 +49,11 @@
 	let error = $state('');
 	let filter = $state('all');
 	let filterLabel = $derived(filterOptions.find((o) => o.value === filter)?.label ?? 'All Requests');
-	let autoRefresh = $state(false);
+	let updatedAt = $state('');
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
-	// Trigger form state
-	let showTriggerForm = $state(false);
+	// Trigger dialog state
+	let dialogOpen = $state(false);
 	let triggerDateValue = $state<CalendarDate | undefined>(undefined);
 	let triggerDescription = $state('');
 	let triggerLoading = $state(false);
@@ -71,6 +74,7 @@
 			const data = (await response.json()) as { requests?: EcostressRequest[] };
 			requests = data.requests || [];
 			error = '';
+			updatedAt = new Date().toLocaleTimeString();
 		} catch (e) {
 			error = 'Failed to fetch requests';
 			console.error(e);
@@ -85,39 +89,20 @@
 
 	function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
 		switch (status) {
-			case 'processing':
-				return 'default';
-			case 'completed':
-				return 'secondary';
-			case 'completed_with_errors':
-				return 'destructive';
-			case 'failed':
-				return 'destructive';
-			case 'pending':
-				return 'outline';
-			default:
-				return 'secondary';
+			case 'processing': return 'default';
+			case 'completed': return 'secondary';
+			case 'completed_with_errors': return 'destructive';
+			case 'failed': return 'destructive';
+			case 'pending': return 'outline';
+			default: return 'secondary';
 		}
 	}
 
 	function getTriggerVariant(type: string): 'default' | 'secondary' | 'destructive' | 'outline' {
 		switch (type) {
-			case 'manual':
-				return 'secondary';
-			case 'reprocess':
-				return 'outline';
-			default:
-				return 'default';
-		}
-	}
-
-	function toggleAutoRefresh() {
-		autoRefresh = !autoRefresh;
-		if (autoRefresh) {
-			refreshInterval = setInterval(fetchRequests, 5000);
-		} else if (refreshInterval) {
-			clearInterval(refreshInterval);
-			refreshInterval = null;
+			case 'manual': return 'secondary';
+			case 'reprocess': return 'outline';
+			default: return 'default';
 		}
 	}
 
@@ -148,8 +133,9 @@
 				triggerSuccess = data.message || 'Processing triggered successfully';
 				triggerDateValue = undefined;
 				triggerDescription = '';
-				showTriggerForm = false;
 				fetchRequests();
+				// Close dialog after short delay so user sees the success message
+				setTimeout(() => { dialogOpen = false; triggerSuccess = ''; }, 2000);
 			}
 		} catch (e) {
 			triggerError = 'Failed to trigger processing';
@@ -160,13 +146,11 @@
 	}
 
 	$effect(() => {
-		if (filter) {
-			fetchRequests();
-		}
+		if (filter) fetchRequests();
 	});
 
 	onMount(() => {
-		fetchRequests();
+		refreshInterval = setInterval(fetchRequests, POLL_INTERVAL);
 		return () => {
 			if (refreshInterval) clearInterval(refreshInterval);
 		};
@@ -184,24 +168,28 @@
 				<h1 class="text-3xl font-bold mb-2">ECOSTRESS Requests</h1>
 				<p class="text-muted-foreground">Track AppEEARS task submissions and their processing results</p>
 			</div>
-			<Button onclick={() => (showTriggerForm = !showTriggerForm)}>
-				{showTriggerForm ? 'Cancel' : 'Trigger Processing'}
-			</Button>
-		</div>
 
-		{#if showTriggerForm}
-			<Card.Card class="mb-6">
-				<Card.Header>
-					<Card.Title>Manual Processing Trigger</Card.Title>
-				</Card.Header>
-				<Card.Content>
-					<div class="flex flex-wrap items-end gap-4">
+			<!-- Trigger Processing Dialog -->
+			<Dialog.Root bind:open={dialogOpen}>
+				<Dialog.Trigger>
+					{#snippet children()}
+						<Button>Trigger Processing</Button>
+					{/snippet}
+				</Dialog.Trigger>
+				<Dialog.Content class="sm:max-w-md">
+					<Dialog.Header>
+						<Dialog.Title>Manual Processing Trigger</Dialog.Title>
+						<Dialog.Description>
+							Submit a new AppEEARS task for the selected date.
+						</Dialog.Description>
+					</Dialog.Header>
+					<div class="flex flex-col gap-4 py-2">
 						<div class="flex flex-col gap-1.5">
 							<Label>Date</Label>
 							<Popover.Root bind:open={calendarOpen}>
 								<Popover.Trigger>
 									{#snippet children()}
-										<Button variant="outline" class="w-56 justify-start text-left font-normal">
+										<Button variant="outline" class="w-full justify-start text-left font-normal">
 											{#if triggerDateValue}
 												{triggerDateFormatted}
 											{:else}
@@ -220,7 +208,7 @@
 								</Popover.Content>
 							</Popover.Root>
 						</div>
-						<div class="flex flex-col gap-1.5 flex-1 min-w-48">
+						<div class="flex flex-col gap-1.5">
 							<Label for="trigger-desc">Description (optional)</Label>
 							<Input
 								id="trigger-desc"
@@ -229,56 +217,56 @@
 								bind:value={triggerDescription}
 							/>
 						</div>
+						{#if triggerError}
+							<Alert variant="destructive">
+								<AlertDescription>{triggerError}</AlertDescription>
+							</Alert>
+						{/if}
+						{#if triggerSuccess}
+							<Alert>
+								<AlertDescription>{triggerSuccess}</AlertDescription>
+							</Alert>
+						{/if}
+					</div>
+					<Dialog.Footer>
+						<Button variant="outline" onclick={() => { dialogOpen = false; }}>Cancel</Button>
 						<Button onclick={handleTrigger} disabled={triggerLoading || !triggerDateValue}>
 							{#if triggerLoading}
 								<Spinner class="size-4 mr-2" />
 							{/if}
 							Submit
 						</Button>
-					</div>
-					{#if triggerError}
-						<Alert variant="destructive" class="mt-4">
-							<AlertDescription>{triggerError}</AlertDescription>
-						</Alert>
-					{/if}
-					{#if triggerSuccess}
-						<Alert class="mt-4">
-							<AlertDescription>{triggerSuccess}</AlertDescription>
-						</Alert>
-					{/if}
-				</Card.Content>
-			</Card.Card>
-		{/if}
+					</Dialog.Footer>
+				</Dialog.Content>
+			</Dialog.Root>
+		</div>
 
-		<Card.Card class="mb-6">
-			<Card.Content class="pt-6">
-				<div class="flex flex-wrap items-center justify-between gap-4">
-					<div class="flex items-center gap-4">
-						<Label class="text-sm font-medium">Filter:</Label>
-						<Select.Root type="single" bind:value={filter}>
-							<Select.Trigger class="w-44">
-								{#snippet children()}
-									<span data-slot="select-value">{filterLabel}</span>
-								{/snippet}
-							</Select.Trigger>
-							<Select.Content>
-								{#each filterOptions as opt}
-									<Select.Item value={opt.value} label={opt.label} />
-								{/each}
-							</Select.Content>
-						</Select.Root>
-					</div>
-					<div class="flex items-center gap-3">
-						<Button variant={autoRefresh ? 'default' : 'secondary'} size="sm" onclick={toggleAutoRefresh}>
-							{autoRefresh ? 'Pause' : 'Auto-refresh'}
-						</Button>
-						<Button variant="outline" size="sm" onclick={fetchRequests} disabled={loading}>
-							Refresh
-						</Button>
-					</div>
-				</div>
-			</Card.Content>
-		</Card.Card>
+		<!-- Lightweight filter toolbar -->
+		<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+			<div class="flex items-center gap-4">
+				<Label class="text-sm font-medium">Filter:</Label>
+				<Select.Root type="single" bind:value={filter}>
+					<Select.Trigger class="w-44">
+						{#snippet children()}
+							<span data-slot="select-value">{filterLabel}</span>
+						{/snippet}
+					</Select.Trigger>
+					<Select.Content>
+						{#each filterOptions as opt}
+							<Select.Item value={opt.value} label={opt.label} />
+						{/each}
+					</Select.Content>
+				</Select.Root>
+			</div>
+			<div class="flex items-center gap-3">
+				{#if updatedAt}
+					<span class="text-xs text-muted-foreground">Updated {updatedAt}</span>
+				{/if}
+				<Button variant="outline" size="sm" onclick={fetchRequests} disabled={loading}>
+					↻ Refresh
+				</Button>
+			</div>
+		</div>
 
 		<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
 			{#each [
@@ -296,7 +284,7 @@
 			{/each}
 		</div>
 
-		{#if loading}
+		{#if loading && requests.length === 0}
 			<Card.Card>
 				<Card.Content class="flex flex-col items-center justify-center py-12 gap-4">
 					<Spinner class="size-12" />
@@ -354,17 +342,16 @@
 									</Table.Cell>
 									<Table.Cell class="text-sm">
 										{#if req.total_jobs > 0}
-											<div class="flex items-center gap-1.5">
-												{#if req.success_jobs > 0}
-													<span class="text-green-600">{req.success_jobs}ok</span>
-												{/if}
-												{#if req.failed_jobs > 0}
-													<span class="text-destructive">{req.failed_jobs}err</span>
-												{/if}
-												{#if req.running_jobs > 0}
-													<span class="text-blue-600">{req.running_jobs}run</span>
-												{/if}
+											<div>
+												<span class="text-green-600 font-medium">{req.success_jobs}</span>
+												<span class="text-muted-foreground"> / {req.total_jobs}</span>
 											</div>
+											{#if req.failed_jobs > 0}
+												<div class="text-xs text-destructive">{req.failed_jobs} failed</div>
+											{/if}
+											{#if req.running_jobs > 0}
+												<div class="text-xs text-blue-600">{req.running_jobs} running</div>
+											{/if}
 										{:else}
 											<span class="text-muted-foreground">-</span>
 										{/if}
