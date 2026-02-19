@@ -9,6 +9,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 	import FeatureSidebar from '$lib/components/FeatureSidebar.svelte';
 	import FeatureSearch from '$lib/components/FeatureSearch.svelte';
 	import IntroCard from '$lib/components/IntroCard.svelte';
+	import UserMenu from '$lib/components/UserMenu.svelte';
 	import type { Snippet } from 'svelte';
 	import XIcon from '@lucide/svelte/icons/x';
 
@@ -618,7 +619,9 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 				{/if}
 				<!-- Floating intro card (bottom left) -->
 				<IntroCard />
-				
+				<!-- Floating user menu (top right) -->
+				<UserMenu />
+
 				<!-- Temperature hover tooltip (styled like shadcn tooltip) -->
 				{#if hoveredTemp != null}
 					<div 
