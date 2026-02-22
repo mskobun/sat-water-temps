@@ -19,10 +19,6 @@ output "initiator_lambda_name" {
   value = aws_lambda_function.initiator_lambda.function_name
 }
 
-output "step_function_arn" {
-  value = aws_sfn_state_machine.polling_machine.arn
-}
-
 output "initiator_function_url" {
   value       = aws_lambda_function_url.initiator_url.function_url
   description = "Function URL for the initiator Lambda (manual triggers)"

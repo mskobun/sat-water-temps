@@ -1,13 +1,9 @@
 import json
 import os
-import boto3
 import requests
 from datetime import datetime, timedelta
 import geopandas as gpd
 import time
-
-# Initialize clients
-sfn_client = boto3.client("stepfunctions")
 
 
 def _d1_query(sql, params):
@@ -152,7 +148,6 @@ def submit_task(headers, task_request):
 def handler(event, context):
     user = os.environ.get("APPEEARS_USER")
     password = os.environ.get("APPEEARS_PASS")
-    state_machine_arn = os.environ.get("STATE_MACHINE_ARN")
 
     # Path to ROI file - assumed to be in the task root in Docker
     roi_path = "static/polygons_new.geojson"
@@ -215,16 +210,6 @@ def handler(event, context):
         # Log job start
         metadata = json.dumps({"start_date": sd, "end_date": ed})
         log_job_to_d1("scrape", task_id, "started", metadata_json=metadata)
-
-        # Start Step Function with descriptive name for AWS Console visibility
-        trigger_label = "daily" if trigger_type == "timer" else "manual"
-        date_label = datetime.strptime(sd, "%m-%d-%Y").strftime("%Y-%m-%d")
-        execution_name = f"{trigger_label}-{date_label}-{task_id[:8]}"
-        sfn_client.start_execution(
-            stateMachineArn=state_machine_arn,
-            name=execution_name,
-            input=json.dumps({"task_id": task_id, "wait_seconds": 30}),
-        )
 
         # Log success
         duration_ms = int((time.time() - start_time) * 1000)

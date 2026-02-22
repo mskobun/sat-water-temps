@@ -9,8 +9,8 @@ resource "aws_cloudwatch_log_group" "initiator_logs" {
   retention_in_days = 30
 }
 
-resource "aws_cloudwatch_log_group" "status_checker_logs" {
-  name              = "/aws/lambda/${var.project_name}-status-checker"
+resource "aws_cloudwatch_log_group" "task_poller_logs" {
+  name              = "/aws/lambda/${var.project_name}-task-poller"
   retention_in_days = 30
 }
 
@@ -37,7 +37,6 @@ resource "aws_lambda_function" "initiator_lambda" {
     variables = {
       APPEEARS_USER         = var.appeears_user
       APPEEARS_PASS         = var.appeears_pass
-      STATE_MACHINE_ARN     = aws_sfn_state_machine.polling_machine.arn
       D1_DATABASE_ID        = cloudflare_d1_database.main.id
       CLOUDFLARE_ACCOUNT_ID = var.cloudflare_account_id
       CLOUDFLARE_API_TOKEN  = var.cloudflare_api_token
@@ -47,14 +46,14 @@ resource "aws_lambda_function" "initiator_lambda" {
   timeout = 300
 }
 
-resource "aws_lambda_function" "status_checker_lambda" {
-  function_name = "${var.project_name}-status-checker"
+resource "aws_lambda_function" "task_poller_lambda" {
+  function_name = "${var.project_name}-task-poller"
   role          = aws_iam_role.lambda_role.arn
   package_type  = "Image"
   image_uri     = "${aws_ecr_repository.lambda_repo.repository_url}@${data.aws_ecr_image.lambda_image.image_digest}"
 
   image_config {
-    command = ["status_checker.handler"]
+    command = ["task_poller.handler"]
   }
 
   tracing_config {
@@ -63,8 +62,12 @@ resource "aws_lambda_function" "status_checker_lambda" {
 
   environment {
     variables = {
-      APPEEARS_USER = var.appeears_user
-      APPEEARS_PASS = var.appeears_pass
+      APPEEARS_USER         = var.appeears_user
+      APPEEARS_PASS         = var.appeears_pass
+      D1_DATABASE_ID        = cloudflare_d1_database.main.id
+      CLOUDFLARE_ACCOUNT_ID = var.cloudflare_account_id
+      CLOUDFLARE_API_TOKEN  = var.cloudflare_api_token
+      MANIFEST_PROCESSOR_ARN = aws_lambda_function.manifest_processor_lambda.arn
     }
   }
 
@@ -142,11 +145,6 @@ resource "aws_iam_user_policy" "cloudflare_invoker_policy" {
         Effect   = "Allow"
         Action   = ["lambda:InvokeFunctionUrl", "lambda:InvokeFunction"]
         Resource = aws_lambda_function.initiator_lambda.arn
-      },
-      {
-        Effect   = "Allow"
-        Action   = ["states:StartExecution"]
-        Resource = aws_sfn_state_machine.polling_machine.arn
       }
     ]
   })
