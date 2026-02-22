@@ -6,6 +6,7 @@ import boto3
 import time
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from d1 import query_d1
 
 
 def create_http_session():
@@ -42,32 +43,10 @@ def extract_metadata(filename):
 
 def update_ecostress_request(task_id, scenes_count):
     """Update ecostress_requests with scene count"""
-    try:
-        d1_db_id = os.environ.get("D1_DATABASE_ID")
-        cf_account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
-        cf_api_token = os.environ.get("CLOUDFLARE_API_TOKEN")
-
-        if not all([d1_db_id, cf_account_id, cf_api_token]):
-            return
-
-        url = f"https://api.cloudflare.com/client/v4/accounts/{cf_account_id}/d1/database/{d1_db_id}/query"
-        headers = {
-            "Authorization": f"Bearer {cf_api_token}",
-            "Content-Type": "application/json",
-        }
-
-        sql = """
-        UPDATE ecostress_requests
-        SET scenes_count = ?, updated_at = ?
-        WHERE task_id = ?
-        """
-        params = [scenes_count, int(time.time() * 1000), task_id]
-
-        payload = {"sql": sql, "params": params}
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
-        response.raise_for_status()
-    except Exception as e:
-        print(f"Warning: Failed to update ecostress_request in D1: {e}")
+    query_d1(
+        "UPDATE ecostress_requests SET scenes_count = ?, updated_at = ? WHERE task_id = ?",
+        [scenes_count, int(time.time() * 1000), task_id],
+    )
 
 
 def handler(event, context):

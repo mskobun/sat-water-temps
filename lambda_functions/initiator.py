@@ -4,31 +4,7 @@ import requests
 from datetime import datetime, timedelta
 import geopandas as gpd
 import time
-
-
-def _d1_query(sql, params):
-    """Execute a D1 query via Cloudflare API. Returns None on failure."""
-    try:
-        d1_db_id = os.environ.get("D1_DATABASE_ID")
-        cf_account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
-        cf_api_token = os.environ.get("CLOUDFLARE_API_TOKEN")
-
-        if not all([d1_db_id, cf_account_id, cf_api_token]):
-            return None
-
-        url = f"https://api.cloudflare.com/client/v4/accounts/{cf_account_id}/d1/database/{d1_db_id}/query"
-        headers = {
-            "Authorization": f"Bearer {cf_api_token}",
-            "Content-Type": "application/json",
-        }
-
-        payload = {"sql": sql, "params": params}
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        print(f"Warning: D1 query failed: {e}")
-        return None
+from d1 import query_d1
 
 
 def log_job_to_d1(
@@ -61,7 +37,7 @@ def log_job_to_d1(
             task_id,
         ]
 
-    _d1_query(sql, params)
+    query_d1(sql, params)
 
 
 def log_ecostress_request(task_id, trigger_type, triggered_by, description, sd, ed, request_id=None):
@@ -83,7 +59,7 @@ def log_ecostress_request(task_id, trigger_type, triggered_by, description, sd, 
         VALUES (?, ?, ?, ?, ?, ?, ?)
         """
         params = [task_id, trigger_type, triggered_by, description, sd, ed, int(time.time() * 1000)]
-    _d1_query(sql, params)
+    query_d1(sql, params)
 
 
 def update_ecostress_request(task_id, error_message=None):
@@ -94,7 +70,7 @@ def update_ecostress_request(task_id, error_message=None):
     WHERE task_id = ?
     """
     params = [int(time.time() * 1000), error_message, task_id]
-    _d1_query(sql, params)
+    query_d1(sql, params)
 
 
 def update_ecostress_request_by_id(request_id, error_message=None):
@@ -105,7 +81,7 @@ def update_ecostress_request_by_id(request_id, error_message=None):
     WHERE id = ?
     """
     params = [int(time.time() * 1000), error_message, request_id]
-    _d1_query(sql, params)
+    query_d1(sql, params)
 
 
 def get_token(user, password):

@@ -3,36 +3,12 @@ import os
 import time
 import boto3
 import requests
-
-
-def _d1_query(sql, params):
-    """Execute a D1 query via Cloudflare API. Returns None on failure."""
-    try:
-        d1_db_id = os.environ.get("D1_DATABASE_ID")
-        cf_account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
-        cf_api_token = os.environ.get("CLOUDFLARE_API_TOKEN")
-
-        if not all([d1_db_id, cf_account_id, cf_api_token]):
-            return None
-
-        url = f"https://api.cloudflare.com/client/v4/accounts/{cf_account_id}/d1/database/{d1_db_id}/query"
-        headers = {
-            "Authorization": f"Bearer {cf_api_token}",
-            "Content-Type": "application/json",
-        }
-
-        payload = {"sql": sql, "params": params}
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        print(f"Warning: D1 query failed: {e}")
-        return None
+from d1 import query_d1
 
 
 def get_pending_task_ids():
     """Return list of task_ids that need polling."""
-    result = _d1_query(
+    result = query_d1(
         """
         SELECT task_id FROM ecostress_requests
         WHERE task_id IS NOT NULL
@@ -52,18 +28,18 @@ def get_pending_task_ids():
 
 
 def mark_dispatched(task_id):
-    _d1_query(
+    query_d1(
         "UPDATE ecostress_requests SET dispatched_at = ? WHERE task_id = ?",
         [int(time.time() * 1000), task_id],
     )
 
 
 def mark_error(task_id, error_message):
-    _d1_query(
+    query_d1(
         "UPDATE ecostress_requests SET error_message = ?, updated_at = ? WHERE task_id = ?",
         [error_message, int(time.time() * 1000), task_id],
     )
-    _d1_query(
+    query_d1(
         "UPDATE processing_jobs SET status = 'failed', completed_at = ?, error_message = ? WHERE task_id = ? AND status = 'started'",
         [int(time.time() * 1000), error_message, task_id],
     )

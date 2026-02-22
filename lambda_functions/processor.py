@@ -15,6 +15,7 @@ from urllib3.util.retry import Retry
 from typing import List, Dict
 from aws_xray_sdk.core import xray_recorder
 from aws_xray_sdk.core import patch_all
+from d1 import query_d1
 
 # Patch all supported libraries for automatic X-Ray tracing
 patch_all()
@@ -51,44 +52,6 @@ def get_token(user, password):
     response.raise_for_status()
     return response.json()["token"]
 
-
-def query_d1(sql: str, params: List = None) -> Dict:
-    """Execute SQL query against D1 database via Cloudflare API"""
-    d1_db_id = os.environ.get("D1_DATABASE_ID")
-    cf_account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
-    cf_api_token = os.environ.get("CLOUDFLARE_API_TOKEN")
-
-    if not all([d1_db_id, cf_account_id, cf_api_token]):
-        print("Warning: D1 credentials not configured, skipping database insert")
-        return {"success": False}
-
-    url = f"https://api.cloudflare.com/client/v4/accounts/{cf_account_id}/d1/database/{d1_db_id}/query"
-    headers = {
-        "Authorization": f"Bearer {cf_api_token}",
-        "Content-Type": "application/json",
-    }
-    payload = {"sql": sql}
-    if params:
-        payload["params"] = params
-
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()
-        result = response.json()
-        # D1 API returns result in a specific format
-        # {"success": true, "result": [{"success": true, "meta": {...}, "results": [...]}]}
-        return result
-    except requests.exceptions.HTTPError as e:
-        # Log the full error response for debugging
-        try:
-            error_details = e.response.json()
-            print(f"D1 query error: {e}, Details: {error_details}")
-        except:
-            print(f"D1 query error: {e}")
-        return {"success": False, "error": str(e)}
-    except Exception as e:
-        print(f"D1 query error: {e}")
-        return {"success": False, "error": str(e)}
 
 
 def log_job_to_d1(
