@@ -1,5 +1,4 @@
 import { json } from '@sveltejs/kit';
-import { AwsClient } from 'aws4fetch';
 import type { RequestHandler } from './$types';
 
 export const POST: RequestHandler = async ({ request, locals, platform }) => {
@@ -89,86 +88,9 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 	const newRequestId = inserted?.id;
 
-	// Invoke Step Functions directly
-	const stepFunctionArn = platform?.env?.STEP_FUNCTION_ARN;
-	const awsKeyId = platform?.env?.AWS_ACCESS_KEY_ID;
-	const awsSecret = platform?.env?.AWS_SECRET_ACCESS_KEY;
-	const awsRegion = platform?.env?.AWS_LAMBDA_REGION || 'us-west-2';
-
-	if (!stepFunctionArn || !awsKeyId || !awsSecret) {
-		return json({
-			id: newRequestId,
-			warning: 'Step Function credentials not configured. Request recorded but Step Function not invoked.'
-		}, { status: 202 });
-	}
-
-	try {
-		const aws = new AwsClient({
-			accessKeyId: awsKeyId,
-			secretAccessKey: awsSecret,
-			region: awsRegion,
-			service: 'states'
-		});
-
-		// Invoke Step Functions with task_id and wait_seconds=0 (immediate processing)
-		const sfnInput = {
-			task_id: taskId,
-			wait_seconds: 0
-		};
-
-		// Construct Step Functions API endpoint
-		const sfnEndpoint = `https://states.${awsRegion}.amazonaws.com`;
-
-		const response = await aws.fetch(sfnEndpoint, {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/x-amz-json-1.0',
-				'X-Amz-Target': 'AWSStepFunctions.StartExecution'
-			},
-			body: JSON.stringify({
-				stateMachineArn: stepFunctionArn,
-				input: JSON.stringify(sfnInput)
-			})
-		});
-
-		if (!response.ok) {
-			const errorText = await response.text();
-
-			// Update request with error message (status is computed dynamically)
-			await db
-				.prepare(`UPDATE ecostress_requests SET error_message = ?, updated_at = ? WHERE id = ?`)
-				.bind(`Step Function invocation failed: ${response.status} ${errorText}`, Date.now(), newRequestId)
-				.run();
-
-			return json({
-				id: newRequestId,
-				error: `Step Function invocation failed: ${response.status}`
-			}, { status: 502 });
-		}
-
-		const result = await response.json() as { executionArn?: string };
-
-		// Update timestamp (status is computed dynamically from processing_jobs)
-		await db
-			.prepare(`UPDATE ecostress_requests SET updated_at = ? WHERE id = ?`)
-			.bind(Date.now(), newRequestId)
-			.run();
-
-		return json({
-			id: newRequestId,
-			task_id: taskId,
-			execution_arn: result.executionArn,
-			message: 'Reprocessing started'
-		});
-
-	} catch (err) {
-		const errorMessage = err instanceof Error ? err.message : String(err);
-		// Update with error message (status is computed dynamically)
-		await db
-			.prepare(`UPDATE ecostress_requests SET error_message = ?, updated_at = ? WHERE id = ?`)
-			.bind(errorMessage, Date.now(), newRequestId)
-			.run();
-
-		return json({ id: newRequestId, error: errorMessage }, { status: 500 });
-	}
+	return json({
+		id: newRequestId,
+		task_id: taskId,
+		message: 'Reprocessing queued. The task poller will pick it up shortly.'
+	});
 };

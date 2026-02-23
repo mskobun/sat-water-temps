@@ -25,7 +25,6 @@ declare global {
 				AWS_SECRET_ACCESS_KEY: string;
 				LAMBDA_INITIATOR_URL: string;
 				AWS_LAMBDA_REGION: string;
-				STEP_FUNCTION_ARN: string;
 			};
 			context: {
 				waitUntil(promise: Promise<any>): void;
