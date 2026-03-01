@@ -62,6 +62,20 @@
 		return new Date(timestamp).toLocaleString();
 	}
 
+	function formatStatus(status: string): string {
+		const labels: Record<string, string> = {
+			pending: 'Pending',
+			submitted: 'Submitted',
+			processing: 'Processing',
+			completed: 'Completed',
+			completed_with_errors: 'Completed with Errors',
+			failed: 'Failed',
+			started: 'Started',
+			success: 'Success'
+		};
+		return labels[status] ?? status;
+	}
+
 	function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
 		switch (status) {
 			case 'processing': return 'default';
@@ -165,7 +179,7 @@
 							<div>
 								<dt class="text-muted-foreground">Status</dt>
 								<dd class="mt-0.5">
-									<Badge variant={getStatusVariant(request.status)}>{request.status}</Badge>
+									<Badge variant={getStatusVariant(request.status)}>{formatStatus(request.status)}</Badge>
 								</dd>
 							</div>
 							<div>

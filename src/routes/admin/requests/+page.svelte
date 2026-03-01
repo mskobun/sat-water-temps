@@ -100,6 +100,18 @@
 		return new Date(timestamp).toLocaleString();
 	}
 
+	function formatStatus(status: string): string {
+		const labels: Record<string, string> = {
+			pending: 'Pending',
+			submitted: 'Submitted',
+			processing: 'Processing',
+			completed: 'Completed',
+			completed_with_errors: 'Completed with Errors',
+			failed: 'Failed'
+		};
+		return labels[status] ?? status;
+	}
+
 	function getStatusVariant(status: string): 'default' | 'secondary' | 'destructive' | 'outline' {
 		switch (status) {
 			case 'processing': return 'default';
@@ -372,7 +384,7 @@
 										<Badge variant={getTriggerVariant(req.trigger_type)}>{req.trigger_type}</Badge>
 									</Table.Cell>
 									<Table.Cell>
-										<Badge variant={getStatusVariant(req.status)}>{req.status}</Badge>
+										<Badge variant={getStatusVariant(req.status)}>{formatStatus(req.status)}</Badge>
 									</Table.Cell>
 									<Table.Cell class="text-sm">
 										<div>{req.start_date}</div>
