@@ -2,6 +2,27 @@ import { json } from '@sveltejs/kit';
 import { AwsClient } from 'aws4fetch';
 import type { RequestHandler } from './$types';
 
+const MAX_RANGE_DAYS = 60;
+
+function parseDate(str: string): RegExpMatchArray | null {
+	return str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+}
+
+function toAppearsDate(match: RegExpMatchArray): string {
+	return `${match[2]}-${match[3]}-${match[1]}`;
+}
+
+function enumerateDays(start: string, end: string): string[] {
+	const days: string[] = [];
+	const d = new Date(start + 'T00:00:00');
+	const last = new Date(end + 'T00:00:00');
+	while (d <= last) {
+		days.push(d.toISOString().slice(0, 10));
+		d.setDate(d.getDate() + 1);
+	}
+	return days;
+}
+
 export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	const db = platform?.env?.DB;
 	if (!db) {
@@ -14,98 +35,132 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	}
 
 	const body = await request.json();
-	const { date, description } = body as { date?: string; description?: string };
+	const { startDate, endDate, description } = body as {
+		startDate?: string;
+		endDate?: string;
+		description?: string;
+	};
 
-	if (!date) {
-		return json({ error: 'Date is required' }, { status: 400 });
+	if (!startDate || !endDate) {
+		return json({ error: 'startDate and endDate are required' }, { status: 400 });
 	}
 
-	// Validate date format (YYYY-MM-DD from HTML input) and convert to MM-DD-YYYY for AppEEARS
-	const dateMatch = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-	if (!dateMatch) {
+	const startMatch = parseDate(startDate);
+	const endMatch = parseDate(endDate);
+	if (!startMatch || !endMatch) {
 		return json({ error: 'Invalid date format. Expected YYYY-MM-DD.' }, { status: 400 });
 	}
-	const appearsDate = `${dateMatch[2]}-${dateMatch[3]}-${dateMatch[1]}`;
+
+	if (endDate < startDate) {
+		return json({ error: 'endDate must not be before startDate' }, { status: 400 });
+	}
+
+	const days = enumerateDays(startDate, endDate);
+	if (days.length > MAX_RANGE_DAYS) {
+		return json({ error: `Date range too large. Maximum ${MAX_RANGE_DAYS} days.` }, { status: 400 });
+	}
 
 	const userEmail = session.user.email || 'unknown';
 
-	// Insert pending request into D1
-	const now = Date.now();
-	await db
-		.prepare(`
-			INSERT INTO ecostress_requests
-			(trigger_type, triggered_by, description, start_date, end_date, created_at)
-			VALUES (?, ?, ?, ?, ?, ?)
-		`)
-		.bind('manual', userEmail, description || `Manual trigger for ${date}`, appearsDate, appearsDate, now)
-		.run();
-
-	// Get the inserted row ID
-	const inserted = await db
-		.prepare(`SELECT id FROM ecostress_requests WHERE created_at = ? AND triggered_by = ? ORDER BY id DESC LIMIT 1`)
-		.bind(now, userEmail)
-		.first();
-
-	const requestId = inserted?.id;
-
-	// Invoke the initiator Lambda via Function URL
 	const lambdaUrl = platform?.env?.LAMBDA_INITIATOR_URL;
 	const awsKeyId = platform?.env?.AWS_ACCESS_KEY_ID;
 	const awsSecret = platform?.env?.AWS_SECRET_ACCESS_KEY;
 	const awsRegion = platform?.env?.AWS_LAMBDA_REGION || 'us-west-2';
+	const hasLambdaCreds = !!(lambdaUrl && awsKeyId && awsSecret);
 
-	if (!lambdaUrl || !awsKeyId || !awsSecret) {
-		return json({
-			id: requestId,
-			warning: 'Lambda invocation credentials not configured. Request recorded but Lambda not invoked.'
-		}, { status: 202 });
-	}
-
-	try {
-		const aws = new AwsClient({
+	let aws: AwsClient | undefined;
+	if (hasLambdaCreds) {
+		aws = new AwsClient({
 			accessKeyId: awsKeyId,
 			secretAccessKey: awsSecret,
 			region: awsRegion,
 			service: 'lambda'
 		});
+	}
 
-		const lambdaPayload = {
-			start_date: appearsDate,
-			end_date: appearsDate,
-			trigger_type: 'manual',
-			triggered_by: userEmail,
-			description: description || `Manual trigger for ${date}`,
-			request_id: requestId
-		};
+	const ids: number[] = [];
+	const errors: string[] = [];
+	let successful = 0;
 
-		const response = await aws.fetch(lambdaUrl, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(lambdaPayload)
-		});
+	for (const day of days) {
+		const dayMatch = parseDate(day)!;
+		const appearsDate = toAppearsDate(dayMatch);
+		const dayDesc = description ? `${description} (${appearsDate})` : `Manual trigger for ${appearsDate}`;
 
-		if (!response.ok) {
-			const errorText = await response.text();
-			// Update request with error
-			await db
-				.prepare(`UPDATE ecostress_requests SET error_message = ?, updated_at = ? WHERE id = ?`)
-				.bind(`Lambda invocation failed: ${response.status} ${errorText}`, Date.now(), requestId)
-				.run();
-
-			return json({ id: requestId, error: `Lambda invocation failed: ${response.status}` }, { status: 502 });
-		}
-
-		const result = await response.json() as { task_id?: string };
-
-		// Lambda updates the pending ecostress_requests row directly via request_id
-		return json({ id: requestId, task_id: result.task_id, message: 'Processing triggered' });
-	} catch (err) {
-		const errorMessage = err instanceof Error ? err.message : String(err);
-		await db
-			.prepare(`UPDATE ecostress_requests SET error_message = ?, updated_at = ? WHERE id = ?`)
-			.bind(errorMessage, Date.now(), requestId)
+		// Insert request row
+		const result = await db
+			.prepare(`
+				INSERT INTO ecostress_requests
+				(trigger_type, triggered_by, description, start_date, end_date, created_at)
+				VALUES (?, ?, ?, ?, ?, ?)
+			`)
+			.bind('manual', userEmail, dayDesc, appearsDate, appearsDate, Date.now())
 			.run();
 
-		return json({ id: requestId, error: errorMessage }, { status: 500 });
+		const requestId = result.meta.last_row_id;
+		ids.push(requestId);
+
+		if (!aws) continue;
+
+		try {
+			const lambdaPayload = {
+				start_date: appearsDate,
+				end_date: appearsDate,
+				trigger_type: 'manual',
+				triggered_by: userEmail,
+				description: dayDesc,
+				request_id: requestId
+			};
+
+			const response = await aws.fetch(lambdaUrl, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(lambdaPayload)
+			});
+
+			if (!response.ok) {
+				const errorText = await response.text();
+				const msg = `Lambda failed for ${day}: ${response.status} ${errorText}`;
+				errors.push(msg);
+				await db
+					.prepare(`UPDATE ecostress_requests SET error_message = ?, updated_at = ? WHERE id = ?`)
+					.bind(msg, Date.now(), requestId)
+					.run();
+			} else {
+				successful++;
+			}
+		} catch (err) {
+			const msg = `Lambda error for ${day}: ${err instanceof Error ? err.message : String(err)}`;
+			errors.push(msg);
+			await db
+				.prepare(`UPDATE ecostress_requests SET error_message = ?, updated_at = ? WHERE id = ?`)
+				.bind(msg, Date.now(), requestId)
+				.run();
+		}
 	}
+
+	if (!hasLambdaCreds) {
+		return json({
+			count: days.length,
+			successful: 0,
+			failed: 0,
+			ids,
+			errors: [],
+			warning: 'Lambda invocation credentials not configured. Requests recorded but Lambda not invoked.'
+		}, { status: 202 });
+	}
+
+	const failed = errors.length;
+	const message = failed > 0
+		? `Created ${days.length} request(s): ${successful} succeeded, ${failed} failed`
+		: `Created ${days.length} request(s) successfully`;
+
+	return json({
+		count: days.length,
+		successful,
+		failed,
+		ids,
+		errors: errors.length > 0 ? errors : undefined,
+		message
+	});
 };

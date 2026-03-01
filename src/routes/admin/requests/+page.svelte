@@ -56,18 +56,29 @@
 
 	// Trigger dialog state
 	let dialogOpen = $state(false);
-	let triggerDateValue = $state<CalendarDate | undefined>(undefined);
+	let triggerStartDate = $state<CalendarDate | undefined>(undefined);
+	let triggerEndDate = $state<CalendarDate | undefined>(undefined);
 	let triggerDescription = $state('');
 	let triggerLoading = $state(false);
 	let triggerError = $state('');
 	let triggerSuccess = $state('');
-	let calendarOpen = $state(false);
+	let calendarStartOpen = $state(false);
+	let calendarEndOpen = $state(false);
 
-	const triggerDateFormatted = $derived(
-		triggerDateValue
-			? `${triggerDateValue.year}-${String(triggerDateValue.month).padStart(2, '0')}-${String(triggerDateValue.day).padStart(2, '0')}`
-			: ''
-	);
+	function formatCalendarDate(d: CalendarDate | undefined): string {
+		if (!d) return '';
+		return `${d.year}-${String(d.month).padStart(2, '0')}-${String(d.day).padStart(2, '0')}`;
+	}
+
+	const triggerStartFormatted = $derived(formatCalendarDate(triggerStartDate));
+	const triggerEndFormatted = $derived(formatCalendarDate(triggerEndDate));
+
+	const dayCount = $derived(() => {
+		if (!triggerStartDate || !triggerEndDate) return 0;
+		const start = new Date(triggerStartFormatted + 'T00:00:00');
+		const end = new Date(triggerEndFormatted + 'T00:00:00');
+		return Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
+	});
 
 	async function fetchRequests() {
 		try {
@@ -109,7 +120,7 @@
 	}
 
 	async function handleTrigger() {
-		if (!triggerDateFormatted) return;
+		if (!triggerStartFormatted || !triggerEndFormatted) return;
 
 		triggerLoading = true;
 		triggerError = '';
@@ -120,23 +131,24 @@
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					date: triggerDateFormatted,
+					startDate: triggerStartFormatted,
+					endDate: triggerEndFormatted,
 					description: triggerDescription || undefined
 				})
 			});
 
-			const data = await response.json() as { id?: number; error?: string; warning?: string; message?: string };
+			const data = await response.json() as { count?: number; error?: string; warning?: string; message?: string };
 
 			if (!response.ok) {
 				triggerError = data.error || `Request failed with status ${response.status}`;
 			} else if (data.warning) {
-				triggerSuccess = data.warning;
+				triggerSuccess = `${data.count} request(s) recorded. ${data.warning}`;
 			} else {
-				triggerSuccess = data.message || 'Processing triggered successfully';
-				triggerDateValue = undefined;
+				triggerSuccess = data.message || `Created ${data.count} request(s)`;
+				triggerStartDate = undefined;
+				triggerEndDate = undefined;
 				triggerDescription = '';
 				fetchRequests();
-				// Close dialog after short delay so user sees the success message
 				setTimeout(() => { dialogOpen = false; triggerSuccess = ''; }, 2000);
 			}
 		} catch (e) {
@@ -182,34 +194,66 @@
 					<Dialog.Header>
 						<Dialog.Title>Manual Processing Trigger</Dialog.Title>
 						<Dialog.Description>
-							Submit a new AppEEARS task for the selected date.
+							Submit AppEEARS task(s) for the selected date range. One request per day will be created.
 						</Dialog.Description>
 					</Dialog.Header>
 					<div class="flex flex-col gap-4 py-2">
-						<div class="flex flex-col gap-1.5">
-							<Label>Date</Label>
-							<Popover.Root bind:open={calendarOpen}>
-								<Popover.Trigger>
-									{#snippet children()}
-										<Button variant="outline" class="w-full justify-start text-left font-normal">
-											{#if triggerDateValue}
-												{triggerDateFormatted}
-											{:else}
-												<span class="text-muted-foreground">Pick a date</span>
-											{/if}
-										</Button>
-									{/snippet}
-								</Popover.Trigger>
-								<Popover.Content class="w-auto p-0" align="start">
-									<Calendar
-										type="single"
-										bind:value={triggerDateValue}
-										maxValue={today(getLocalTimeZone())}
-										onValueChange={() => { calendarOpen = false; }}
-									/>
-								</Popover.Content>
-							</Popover.Root>
+						<div class="grid grid-cols-2 gap-3">
+							<div class="flex flex-col gap-1.5">
+								<Label>Start Date</Label>
+								<Popover.Root bind:open={calendarStartOpen}>
+									<Popover.Trigger>
+										{#snippet children()}
+											<Button variant="outline" class="w-full justify-start text-left font-normal">
+												{#if triggerStartDate}
+													{triggerStartFormatted}
+												{:else}
+													<span class="text-muted-foreground">Start</span>
+												{/if}
+											</Button>
+										{/snippet}
+									</Popover.Trigger>
+									<Popover.Content class="w-auto p-0" align="start">
+										<Calendar
+											type="single"
+											bind:value={triggerStartDate}
+											maxValue={today(getLocalTimeZone())}
+											onValueChange={() => { calendarStartOpen = false; }}
+										/>
+									</Popover.Content>
+								</Popover.Root>
+							</div>
+							<div class="flex flex-col gap-1.5">
+								<Label>End Date</Label>
+								<Popover.Root bind:open={calendarEndOpen}>
+									<Popover.Trigger>
+										{#snippet children()}
+											<Button variant="outline" class="w-full justify-start text-left font-normal">
+												{#if triggerEndDate}
+													{triggerEndFormatted}
+												{:else}
+													<span class="text-muted-foreground">End</span>
+												{/if}
+											</Button>
+										{/snippet}
+									</Popover.Trigger>
+									<Popover.Content class="w-auto p-0" align="start">
+										<Calendar
+											type="single"
+											bind:value={triggerEndDate}
+											minValue={triggerStartDate}
+											maxValue={today(getLocalTimeZone())}
+											onValueChange={() => { calendarEndOpen = false; }}
+										/>
+									</Popover.Content>
+								</Popover.Root>
+							</div>
 						</div>
+						{#if triggerStartDate && triggerEndDate}
+							<p class="text-sm text-muted-foreground">
+								{dayCount()} request(s) will be created
+							</p>
+						{/if}
 						<div class="flex flex-col gap-1.5">
 							<Label for="trigger-desc">Description (optional)</Label>
 							<Input
@@ -232,7 +276,7 @@
 					</div>
 					<Dialog.Footer>
 						<Button variant="outline" onclick={() => { dialogOpen = false; }}>Cancel</Button>
-						<Button onclick={handleTrigger} disabled={triggerLoading || !triggerDateValue}>
+						<Button onclick={handleTrigger} disabled={triggerLoading || !triggerStartDate || !triggerEndDate}>
 							{#if triggerLoading}
 								<Spinner class="size-4 mr-2" />
 							{/if}
