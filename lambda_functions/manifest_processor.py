@@ -9,6 +9,41 @@ from urllib3.util.retry import Retry
 from d1 import query_d1
 
 
+def log_job_to_d1(
+    job_type: str,
+    task_id: str = None,
+    status: str = "started",
+    duration_ms: int = None,
+    error_message: str = None,
+    metadata_json: str = None,
+):
+    """Log processing job to D1 database"""
+    if status == "started":
+        sql = """
+        INSERT INTO processing_jobs
+        (job_type, task_id, status, started_at, metadata)
+        VALUES (?, ?, ?, ?, ?)
+        """
+        params = [job_type, task_id, status, int(time.time() * 1000), metadata_json]
+    else:
+        sql = """
+        UPDATE processing_jobs
+        SET status = ?, completed_at = ?, duration_ms = ?, error_message = ?, metadata = COALESCE(?, metadata)
+        WHERE task_id = ? AND job_type = ? AND status = 'started'
+        """
+        params = [
+            status,
+            int(time.time() * 1000),
+            duration_ms,
+            error_message,
+            metadata_json,
+            task_id,
+            job_type,
+        ]
+
+    query_d1(sql, params)
+
+
 def create_http_session():
     retries = Retry(
         total=3,
@@ -63,6 +98,9 @@ def handler(event, context):
 
     sqs = boto3.client("sqs")
 
+    # Log manifest job start
+    log_job_to_d1("manifest", task_id, "started")
+
     try:
         # Authenticate
         token = get_token(user, password)
@@ -104,6 +142,8 @@ def handler(event, context):
             sqs.send_message(QueueUrl=queue_url, MessageBody=json.dumps(message_body))
 
         duration_ms = int((time.time() - start_time) * 1000)
+        metadata = json.dumps({"scenes_count": len(scenes), "files_count": len(files)})
+        log_job_to_d1("manifest", task_id, "success", duration_ms, metadata_json=metadata)
         print(
             f"✓ Processed manifest for {task_id}: {len(scenes)} scenes, {len(files)} files in {duration_ms}ms"
         )
@@ -116,5 +156,6 @@ def handler(event, context):
         }
     except Exception as e:
         duration_ms = int((time.time() - start_time) * 1000)
+        log_job_to_d1("manifest", task_id, "failed", duration_ms, str(e))
         print(f"✗ Error processing manifest for {task_id}: {e} (took {duration_ms}ms)")
         raise

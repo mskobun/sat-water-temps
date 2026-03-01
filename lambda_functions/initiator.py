@@ -186,12 +186,12 @@ def handler(event, context):
 
         # Log job start
         metadata = json.dumps({"start_date": sd, "end_date": ed})
-        log_job_to_d1("scrape", task_id, "started", metadata_json=metadata)
+        log_job_to_d1("submit", task_id, "started", metadata_json=metadata)
 
         # Log success
         duration_ms = int((time.time() - start_time) * 1000)
-        log_job_to_d1("scrape", task_id, "success", duration_ms)
-        print(f"✓ Initiated scrape job {task_id} in {duration_ms}ms")
+        log_job_to_d1("submit", task_id, "success", duration_ms)
+        print(f"✓ Initiated submit job {task_id} in {duration_ms}ms")
 
         return {
             "statusCode": 200,
@@ -201,7 +201,7 @@ def handler(event, context):
         # Log failure
         duration_ms = int((time.time() - start_time) * 1000)
         if task_id:
-            log_job_to_d1("scrape", task_id, "failed", duration_ms, str(e))
+            log_job_to_d1("submit", task_id, "failed", duration_ms, str(e))
             update_ecostress_request(task_id, str(e))
         elif request_id:
             # Manual trigger failed before getting task_id - update existing row
