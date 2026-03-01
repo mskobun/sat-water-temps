@@ -41,6 +41,8 @@
 		{ value: 'pending', label: 'Pending' },
 		{ value: 'submitted', label: 'Submitted' },
 		{ value: 'processing', label: 'Processing' },
+		{ value: 'completed', label: 'Completed' },
+		{ value: 'completed_with_errors', label: 'Completed w/ Errors' },
 		{ value: 'failed', label: 'Failed' }
 	];
 
