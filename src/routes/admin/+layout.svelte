@@ -32,6 +32,12 @@
 						>
 							Jobs
 						</a>
+						<a
+							href="/admin/settings"
+							class="px-3 py-1.5 text-sm rounded-md transition-colors {$page.url.pathname === '/admin/settings' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}"
+						>
+							Settings
+						</a>
 					</nav>
 				</div>
 				<div class="flex items-center gap-4">

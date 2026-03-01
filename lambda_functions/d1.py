@@ -36,3 +36,15 @@ def query_d1(sql: str, params: List = None) -> Dict:
     except Exception as e:
         print(f"D1 query error: {e}")
         return {"success": False, "error": str(e)}
+
+
+def get_setting(key: str, default=None):
+    """Fetch a single value from the app_settings table."""
+    result = query_d1("SELECT value FROM app_settings WHERE key = ?", [key])
+    try:
+        rows = result.get("result", [{}])[0].get("results", [])
+        if rows:
+            return rows[0]["value"]
+    except (IndexError, KeyError, TypeError):
+        pass
+    return default

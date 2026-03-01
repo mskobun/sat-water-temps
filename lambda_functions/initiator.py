@@ -4,7 +4,7 @@ import requests
 from datetime import datetime, timedelta
 import geopandas as gpd
 import time
-from d1 import query_d1
+from d1 import query_d1, get_setting
 
 
 def log_job_to_d1(
@@ -151,9 +151,10 @@ def handler(event, context):
     roi = gpd.read_file(roi_path)
     roi_json = roi.__geo_interface__
 
-    # Dates
-    end_date = datetime.now() - timedelta(days=1)
-    start_date = end_date - timedelta(days=1)  # Just do 1 day for now or configurable
+    # Dates — delay is configurable via admin settings (default 2 days for ECOSTRESS latency)
+    delay_days = int(get_setting("data_delay_days", default=2))
+    end_date = datetime.now() - timedelta(days=delay_days)
+    start_date = end_date - timedelta(days=1)
 
     # Use dates from event if provided (manual triggers pass these)
     if "start_date" in event:
