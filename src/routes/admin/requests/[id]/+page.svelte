@@ -119,6 +119,11 @@
 		}
 	}
 
+	const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+	let reprocessExpired = $derived(
+		request ? Date.now() - request.created_at > THIRTY_DAYS_MS : false
+	);
+
 	let successCount = $derived(jobs.filter((j) => j.status === 'success').length);
 	let failedCount = $derived(jobs.filter((j) => j.status === 'failed').length);
 	let runningCount = $derived(jobs.filter((j) => j.status === 'started').length);
@@ -268,23 +273,39 @@
 							</Card.Description>
 						</Card.Header>
 						<Card.Content>
-							{#if reprocessSuccess}
-								<Alert variant="default" class="mb-4">
-									<AlertDescription>{reprocessSuccess}</AlertDescription>
-								</Alert>
-							{/if}
-							{#if reprocessError}
+							{#if reprocessExpired}
 								<Alert variant="destructive" class="mb-4">
-									<AlertDescription>{reprocessError}</AlertDescription>
+									<AlertDescription>
+										Reprocessing is unavailable — this request is older than 30 days.
+										<a
+											href="https://appeears.earthdatacloud.nasa.gov/help?section=sample-retention"
+											target="_blank"
+											rel="noopener noreferrer"
+											class="underline font-medium"
+										>Sample requests are available to download for 30 days after completion.</a>
+										To re-acquire this data, submit a new processing request via the
+										<a href="/admin/trigger" class="underline font-medium">Trigger</a> page.
+									</AlertDescription>
 								</Alert>
+							{:else}
+								{#if reprocessSuccess}
+									<Alert variant="default" class="mb-4">
+										<AlertDescription>{reprocessSuccess}</AlertDescription>
+									</Alert>
+								{/if}
+								{#if reprocessError}
+									<Alert variant="destructive" class="mb-4">
+										<AlertDescription>{reprocessError}</AlertDescription>
+									</Alert>
+								{/if}
+								<Button
+									onclick={handleReprocess}
+									disabled={reprocessLoading}
+									variant="outline"
+								>
+									{reprocessLoading ? 'Starting...' : 'Reprocess Task'}
+								</Button>
 							{/if}
-							<Button
-								onclick={handleReprocess}
-								disabled={reprocessLoading}
-								variant="outline"
-							>
-								{reprocessLoading ? 'Starting...' : 'Reprocess Task'}
-							</Button>
 						</Card.Content>
 					</Card.Card>
 				</div>

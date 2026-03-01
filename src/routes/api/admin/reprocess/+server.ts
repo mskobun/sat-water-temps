@@ -38,6 +38,15 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 	const taskId = String(originalRequest.task_id);
 
+	// Check if the request is older than 30 days (AppEEARS sample retention limit)
+	const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+	const requestAge = Date.now() - Number(originalRequest.created_at);
+	if (requestAge > THIRTY_DAYS_MS) {
+		return json({
+			error: 'Cannot reprocess: this request is older than 30 days. AppEEARS sample data is no longer available. Please submit a new processing request instead.'
+		}, { status: 400 });
+	}
+
 	// Check if there's already an active reprocessing job for this task_id
 	// Status is computed via the ecostress_requests_with_status view
 	const activeReprocess = await db
