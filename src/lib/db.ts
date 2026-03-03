@@ -48,8 +48,12 @@ function buildGeoJSON(points: GeoPoint[]) {
 function computeHistogram(temps: number[], numBins = 6): Array<{ range: string; count: number }> {
   if (!temps.length) return [];
   
-  const min = Math.min(...temps);
-  const max = Math.max(...temps);
+  let min = Infinity;
+  let max = -Infinity;
+  for (const t of temps) {
+    if (t < min) min = t;
+    if (t > max) max = t;
+  }
   const binWidth = (max - min) / numBins;
   
   const bins = new Array(numBins).fill(0);
