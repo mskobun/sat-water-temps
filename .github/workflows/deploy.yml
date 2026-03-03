@@ -12,6 +12,7 @@ on:
       - main
     paths:
       - 'lambda_functions/**'
+      - 'tests/**'
       - 'src/**'
       - 'migrations/**'
       - 'Dockerfile'
@@ -58,6 +59,7 @@ jobs:
           filters: |
             lambda:
               - 'lambda_functions/**'
+              - 'tests/**'
               - 'Dockerfile'
               - 'uv.lock'
               - 'pyproject.toml'
@@ -74,10 +76,28 @@ jobs:
               - 'tsconfig.json'
               - '.github/workflows/deploy.yml'
 
+  test-lambda:
+    name: Test Lambda Functions
+    needs: changes
+    if: needs.changes.outputs.lambda == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Run tests
+        run: uv run --with pytest pytest tests/ -v
+
   deploy-infrastructure:
     name: Deploy Infrastructure & Lambdas
-    needs: changes
-    if: needs.changes.outputs.lambda == 'true' || github.event.inputs.force_lambda_deploy == 'true'
+    needs: [changes, test-lambda]
+    if: |
+      always() &&
+      (needs.changes.outputs.lambda == 'true' || github.event.inputs.force_lambda_deploy == 'true') &&
+      (needs.test-lambda.result == 'success' || needs.test-lambda.result == 'skipped')
     runs-on: ubuntu-latest
     concurrency:
       group: terraform-apply
