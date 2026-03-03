@@ -117,9 +117,8 @@
 				</Card.Content>
 			</Card.Card>
 		{:else}
-			<Card.Card>
-				<div class="overflow-x-auto">
-					<Table.Root>
+			<div class="overflow-x-auto rounded-md border">
+				<Table.Root>
 						<Table.Header>
 							<Table.Row>
 								<Table.Head>Name</Table.Head>
@@ -168,7 +167,6 @@
 						</Table.Body>
 					</Table.Root>
 				</div>
-			</Card.Card>
 		{/if}
 	</div>
 </div>

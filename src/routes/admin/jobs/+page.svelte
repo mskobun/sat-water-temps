@@ -153,7 +153,7 @@
 				</Card.Content>
 			</Card.Card>
 		{:else}
-			<Card.Card>
+			<div class="rounded-md border">
 				<JobsTable {jobs} showTaskId={true} />
 
 				<!-- Pagination controls -->
@@ -181,7 +181,7 @@
 						</Button>
 					</div>
 				</div>
-			</Card.Card>
+			</div>
 		{/if}
 	</div>
 </div>

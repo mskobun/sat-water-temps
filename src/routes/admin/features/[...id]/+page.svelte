@@ -192,7 +192,7 @@
 					</Card.Content>
 				</Card.Card>
 			{:else}
-				<Card.Card>
+				<div class="rounded-md border">
 					<JobsTable {jobs} showTaskId={true} showFeatureId={false} />
 
 					<div class="flex items-center justify-between px-4 py-3 border-t text-sm">
@@ -221,7 +221,7 @@
 							</Button>
 						</div>
 					</div>
-				</Card.Card>
+				</div>
 			{/if}
 		{/if}
 	</div>
