@@ -7,6 +7,7 @@
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Spinner } from '$lib/components/ui/spinner';
 	import JobsTable from '$lib/components/admin/JobsTable.svelte';
+	import StatBar from '$lib/components/admin/StatBar.svelte';
 	import type { Job } from '$lib/components/admin/JobsTable.svelte';
 
 	const LIMIT = 50;
@@ -118,21 +119,14 @@
 			</div>
 		</div>
 
-		<!-- Stats cards — always global, never filtered -->
-		<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-			{#each [
+		<!-- Stats — always global, never filtered -->
+		<div class="mb-6">
+			<StatBar stats={[
 				{ label: 'Total', count: statusCounts.total },
 				{ label: 'Success', count: statusCounts.success },
 				{ label: 'Failed', count: statusCounts.failed },
 				{ label: 'In Progress', count: statusCounts.started }
-			] as stat}
-				<Card.Card>
-					<Card.Content class="pt-6">
-						<div class="text-2xl font-bold">{stat.count}</div>
-						<div class="text-sm text-muted-foreground">{stat.label}</div>
-					</Card.Content>
-				</Card.Card>
-			{/each}
+			]} />
 		</div>
 
 		{#if loading && jobs.length === 0}

@@ -9,6 +9,7 @@
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Spinner } from '$lib/components/ui/spinner';
 	import JobsTable from '$lib/components/admin/JobsTable.svelte';
+	import StatBar from '$lib/components/admin/StatBar.svelte';
 	import type { Job } from '$lib/components/admin/JobsTable.svelte';
 	import { format } from 'date-fns';
 
@@ -148,19 +149,12 @@
 
 			<!-- Row 3: Stats + toolbar -->
 			<div class="flex flex-wrap items-center justify-between gap-4 mb-4">
-				<div class="flex items-center gap-5">
-					{#each [
-						{ label: 'total', count: feature.total_jobs },
-						{ label: 'success', count: feature.success_jobs },
-						{ label: 'failed', count: feature.failed_jobs },
-						{ label: 'running', count: feature.running_jobs }
-					] as stat}
-						<span class="text-sm">
-							<span class="font-bold">{stat.count}</span>
-							<span class="text-muted-foreground">{stat.label}</span>
-						</span>
-					{/each}
-				</div>
+				<StatBar stats={[
+					{ label: 'total', count: feature.total_jobs },
+					{ label: 'success', count: feature.success_jobs },
+					{ label: 'failed', count: feature.failed_jobs },
+					{ label: 'running', count: feature.running_jobs }
+				]} />
 				<div class="flex items-center gap-4">
 					<Label class="text-sm font-medium">Filter:</Label>
 					<Select.Root type="single" bind:value={filter}>

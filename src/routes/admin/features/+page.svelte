@@ -6,6 +6,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Spinner } from '$lib/components/ui/spinner';
+	import StatBar from '$lib/components/admin/StatBar.svelte';
 
 	interface Feature {
 		id: string;
@@ -82,21 +83,14 @@
 			</Button>
 		</div>
 
-		<!-- Stats cards -->
-		<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-			{#each [
+		<!-- Stats -->
+		<div class="mb-6">
+			<StatBar stats={[
 				{ label: 'Total Features', count: totalFeatures },
 				{ label: 'Lakes', count: lakeCount },
 				{ label: 'Rivers', count: riverCount },
 				{ label: 'With Data', count: withRecentData }
-			] as stat}
-				<Card.Card>
-					<Card.Content class="pt-6">
-						<div class="text-2xl font-bold">{stat.count}</div>
-						<div class="text-sm text-muted-foreground">{stat.label}</div>
-					</Card.Content>
-				</Card.Card>
-			{/each}
+			]} />
 		</div>
 
 		{#if loading && features.length === 0}

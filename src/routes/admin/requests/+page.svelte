@@ -4,6 +4,7 @@
 	import { today, getLocalTimeZone } from '@internationalized/date';
 	import type { DateRange } from 'bits-ui';
 	import * as Card from '$lib/components/ui/card';
+	import StatBar from '$lib/components/admin/StatBar.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
@@ -295,20 +296,13 @@
 			</div>
 		</div>
 
-		<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-			{#each [
+		<div class="mb-6">
+			<StatBar stats={[
 				{ label: 'Total', count: requests.length },
 				{ label: 'Pending/Submitted', count: requests.filter((r) => r.status === 'pending' || r.status === 'submitted').length },
 				{ label: 'Processing', count: requests.filter((r) => r.status === 'processing').length },
 				{ label: 'Failed', count: requests.filter((r) => r.status === 'failed').length }
-			] as stat}
-				<Card.Card>
-					<Card.Content class="pt-6">
-						<div class="text-2xl font-bold">{stat.count}</div>
-						<div class="text-sm text-muted-foreground">{stat.label}</div>
-					</Card.Content>
-				</Card.Card>
-			{/each}
+			]} />
 		</div>
 
 		{#if loading && requests.length === 0}
