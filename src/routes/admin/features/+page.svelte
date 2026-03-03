@@ -7,6 +7,7 @@
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Spinner } from '$lib/components/ui/spinner';
 	import StatBar from '$lib/components/admin/StatBar.svelte';
+	import { format, fromUnixTime } from 'date-fns';
 
 	interface Feature {
 		id: string;
@@ -51,7 +52,7 @@
 
 	function formatTimestamp(ts: number | null) {
 		if (!ts) return '-';
-		return new Date(ts).toLocaleString();
+		return format(fromUnixTime(ts), 'MMM d, yyyy HH:mm');
 	}
 
 	onMount(() => {
