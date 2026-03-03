@@ -33,6 +33,12 @@
 							Jobs
 						</a>
 						<a
+							href="/admin/features"
+							class="px-3 py-1.5 text-sm rounded-md transition-colors {$page.url.pathname.startsWith('/admin/features') ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}"
+						>
+							Features
+						</a>
+						<a
 							href="/admin/settings"
 							class="px-3 py-1.5 text-sm rounded-md transition-colors {$page.url.pathname === '/admin/settings' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}"
 						>

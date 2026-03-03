@@ -270,6 +270,111 @@ export async function getJobWithFilterStats(
   }
 }
 
+export async function getFeatures(db: D1Database) {
+  try {
+    const result = await db
+      .prepare(`
+        SELECT
+          f.id, f.name, f.location, f.latest_date, f.last_updated,
+          COUNT(j.id) as total_jobs,
+          SUM(CASE WHEN j.status = 'success' THEN 1 ELSE 0 END) as success_jobs,
+          SUM(CASE WHEN j.status = 'failed' THEN 1 ELSE 0 END) as failed_jobs,
+          SUM(CASE WHEN j.status = 'started' THEN 1 ELSE 0 END) as running_jobs,
+          (SELECT COUNT(*) FROM temperature_metadata tm WHERE tm.feature_id = f.id) as date_count
+        FROM features f
+        LEFT JOIN processing_jobs j ON j.feature_id = f.id
+        GROUP BY f.id
+        ORDER BY f.name
+      `)
+      .all();
+    return result.results || [];
+  } catch (err) {
+    console.error("D1 query error:", err);
+    return [];
+  }
+}
+
+export async function getFeatureDetail(db: D1Database, featureId: string) {
+  try {
+    const feature = await db
+      .prepare(`
+        SELECT
+          f.id, f.name, f.location, f.latest_date, f.last_updated,
+          COUNT(j.id) as total_jobs,
+          SUM(CASE WHEN j.status = 'success' THEN 1 ELSE 0 END) as success_jobs,
+          SUM(CASE WHEN j.status = 'failed' THEN 1 ELSE 0 END) as failed_jobs,
+          SUM(CASE WHEN j.status = 'started' THEN 1 ELSE 0 END) as running_jobs,
+          (SELECT COUNT(*) FROM temperature_metadata tm WHERE tm.feature_id = f.id) as date_count,
+          MAX(CASE WHEN j.status = 'success' THEN j.completed_at END) as last_success_at
+        FROM features f
+        LEFT JOIN processing_jobs j ON j.feature_id = f.id
+        WHERE f.id = ?
+        GROUP BY f.id
+      `)
+      .bind(featureId)
+      .first();
+    return feature || null;
+  } catch (err) {
+    console.error("D1 query error:", err);
+    return null;
+  }
+}
+
+export async function getJobsByFeature(
+  db: D1Database,
+  featureId: string,
+  limit: number = 50,
+  offset: number = 0,
+  status?: string
+) {
+  try {
+    let query = `
+      SELECT
+        j.id, j.job_type, j.task_id, j.feature_id, j.date, j.status,
+        j.started_at, j.completed_at, j.duration_ms, j.error_message, j.metadata,
+        tm.filter_stats
+      FROM processing_jobs j
+      LEFT JOIN temperature_metadata tm
+        ON j.feature_id = tm.feature_id AND j.date = tm.date
+      WHERE j.feature_id = ?
+    `;
+
+    if (status) {
+      query += ` AND j.status = ?`;
+    }
+
+    query += ` ORDER BY j.started_at DESC LIMIT ? OFFSET ?`;
+
+    const stmt = db.prepare(query);
+    const result = status
+      ? await stmt.bind(featureId, status, limit, offset).all()
+      : await stmt.bind(featureId, limit, offset).all();
+
+    return (result.results || []).map((job: any) => ({
+      ...job,
+      metadata: job.metadata ? JSON.parse(job.metadata) : null,
+      filter_stats: job.filter_stats ? JSON.parse(job.filter_stats) : null
+    }));
+  } catch (err) {
+    console.error("D1 query error:", err);
+    return [];
+  }
+}
+
+export async function countJobsByFeature(db: D1Database, featureId: string, status?: string) {
+  try {
+    let query = `SELECT COUNT(*) as total FROM processing_jobs WHERE feature_id = ?`;
+    if (status) query += ` AND status = ?`;
+    const result = status
+      ? await db.prepare(query).bind(featureId, status).first()
+      : await db.prepare(query).bind(featureId).first();
+    return Number(result?.total || 0);
+  } catch (err) {
+    console.error("D1 query error:", err);
+    return 0;
+  }
+}
+
 export async function getEcostressRequests(
   db: D1Database,
   limit: number = 50,
