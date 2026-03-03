@@ -1,21 +1,18 @@
 import json
 import os
-import re
-import requests
-import boto3
-import rasterio
 import numpy as np
 import pandas as pd
 import geopandas as gpd
 import io
 import matplotlib.pyplot as plt
 from PIL import Image
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-from typing import List, Dict
+from typing import Dict
 from aws_xray_sdk.core import xray_recorder
 from aws_xray_sdk.core import patch_all
-from d1 import query_d1
+from d1 import query_d1, log_job_to_d1
+from shared import get_token, create_http_session, extract_metadata
+
+import rasterio
 
 # Patch all supported libraries for automatic X-Ray tracing
 patch_all()
@@ -29,99 +26,6 @@ GLOBAL_MIN = 273.15  # Kelvin
 GLOBAL_MAX = 308.15  # Kelvin
 
 
-def create_http_session():
-    retries = Retry(
-        total=3,
-        read=3,
-        connect=3,
-        backoff_factor=0.5,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["GET"],
-    )
-    adapter = HTTPAdapter(pool_connections=16, pool_maxsize=16, max_retries=retries)
-    session = requests.Session()
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-    return session
-
-
-def get_token(user, password):
-    response = requests.post(
-        "https://appeears.earthdatacloud.nasa.gov/api/login", auth=(user, password)
-    )
-    response.raise_for_status()
-    return response.json()["token"]
-
-
-
-def log_job_to_d1(
-    job_type: str,
-    feature_id: str = None,
-    date: str = None,
-    task_id: str = None,
-    status: str = "started",
-    duration_ms: int = None,
-    error_message: str = None,
-    metadata_json: str = None,
-):
-    """Log processing job to D1 database"""
-    try:
-        import time
-
-        if status == "started":
-            sql = """
-            INSERT INTO processing_jobs 
-            (job_type, task_id, feature_id, date, status, started_at, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """
-            params = [
-                job_type,
-                task_id,
-                feature_id,
-                date,
-                status,
-                int(time.time() * 1000),
-                metadata_json,
-            ]
-            result = query_d1(sql, params)
-
-            # D1 API returns the last_row_id in the meta object
-            # Response format: {"success": true, "result": [{"meta": {"last_row_id": N}}]}
-            if result.get("success") and result.get("result"):
-                first_result = (
-                    result["result"][0]
-                    if isinstance(result["result"], list)
-                    else result["result"]
-                )
-                if first_result and "meta" in first_result:
-                    return first_result["meta"].get("last_row_id")
-        else:
-            # Update existing job
-            sql = """
-            UPDATE processing_jobs 
-            SET status = ?, completed_at = ?, duration_ms = ?, error_message = ?
-            WHERE feature_id = ? AND date = ? AND status = 'started'
-            ORDER BY started_at DESC
-            LIMIT 1
-            """
-            import time
-
-            params = [
-                status,
-                int(time.time() * 1000),
-                duration_ms,
-                error_message,
-                feature_id,
-                date,
-            ]
-            result = query_d1(sql, params)
-            if not result.get("success"):
-                print(f"Warning: Failed to update job status: {result.get('error')}")
-    except Exception as e:
-        print(f"Warning: Failed to log job to D1: {e}")
-        return None
-
-
 def insert_metadata_to_d1(
     feature_id: str,
     date: str,
@@ -130,82 +34,76 @@ def insert_metadata_to_d1(
     tif_r2_key: str,
     png_r2_keys: Dict[str, str],
 ):
-    """Insert only metadata into D1 (temperature data stays in R2)"""
-    try:
-        # Use actual R2 paths from upload
-        csv_path = csv_r2_key
-        tif_path = tif_r2_key
-        # Use relative scale PNG (main PNG)
-        png_path = png_r2_keys.get("relative", png_r2_keys.get("fixed", ""))
+    """Insert only metadata into D1 (temperature data stays in R2).
 
-        # Insert/update feature record FIRST (to satisfy foreign key constraint)
-        name, location = (
-            feature_id.split("/") if "/" in feature_id else (feature_id, "lake")
+    query_d1 raises on failure by default, so no manual success checks needed.
+    """
+    # Use actual R2 paths from upload
+    csv_path = csv_r2_key
+    tif_path = tif_r2_key
+    # Use relative scale PNG (main PNG)
+    png_path = png_r2_keys.get("relative", png_r2_keys.get("fixed", ""))
+
+    # Insert/update feature record FIRST (to satisfy foreign key constraint)
+    name, location = (
+        feature_id.split("/") if "/" in feature_id else (feature_id, "lake")
+    )
+    feature_sql = """
+    INSERT INTO features (id, name, location, latest_date, last_updated)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+        latest_date = CASE
+            WHEN excluded.latest_date > latest_date THEN excluded.latest_date
+            ELSE latest_date
+        END,
+        last_updated = excluded.last_updated
+    """
+    import time
+
+    feature_params = [feature_id, name, location, date, int(time.time())]
+
+    with xray_recorder.capture("d1_insert_feature") as subsegment:
+        subsegment.put_metadata("feature_id", feature_id)
+        query_d1(feature_sql, feature_params)
+
+    # Now insert metadata with file paths (after feature exists)
+    meta_sql = """
+    INSERT OR REPLACE INTO temperature_metadata
+    (feature_id, date, min_temp, max_temp, mean_temp, median_temp, std_dev,
+     data_points, water_pixel_count, land_pixel_count, wtoff,
+     csv_path, tif_path, png_path, filter_stats)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+
+    # Serialize filter_stats to JSON
+    filter_stats_json = json.dumps(metadata.get("filter_stats", {}))
+
+    meta_params = [
+        feature_id,
+        date,
+        metadata.get("min_temp"),
+        metadata.get("max_temp"),
+        metadata.get("mean_temp"),
+        metadata.get("median_temp"),
+        metadata.get("std_dev"),
+        metadata.get("data_points", 0),
+        metadata.get("water_pixel_count", 0),
+        metadata.get("land_pixel_count", 0),
+        1 if metadata.get("wtoff", False) else 0,
+        csv_path,
+        tif_path,
+        png_path,
+        filter_stats_json,
+    ]
+    with xray_recorder.capture("d1_insert_temperature_metadata") as subsegment:
+        subsegment.put_metadata("feature_id", feature_id)
+        subsegment.put_metadata("date", date)
+        subsegment.put_metadata(
+            "has_filter_stats", bool(filter_stats_json and filter_stats_json != "{}")
         )
-        feature_sql = """
-        INSERT INTO features (id, name, location, latest_date, last_updated)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET
-            latest_date = CASE
-                WHEN excluded.latest_date > latest_date THEN excluded.latest_date
-                ELSE latest_date
-            END,
-            last_updated = excluded.last_updated
-        """
-        import time
+        query_d1(meta_sql, meta_params)
 
-        feature_params = [feature_id, name, location, date, int(time.time())]
-
-        with xray_recorder.capture('d1_insert_feature') as subsegment:
-            subsegment.put_metadata('feature_id', feature_id)
-            feature_result = query_d1(feature_sql, feature_params)
-            if not feature_result.get("success"):
-                subsegment.put_annotation('error', True)
-                raise Exception(f"Failed to insert feature record: {feature_result.get('error')}")
-
-        # Now insert metadata with file paths (after feature exists)
-        meta_sql = """
-        INSERT OR REPLACE INTO temperature_metadata
-        (feature_id, date, min_temp, max_temp, mean_temp, median_temp, std_dev,
-         data_points, water_pixel_count, land_pixel_count, wtoff,
-         csv_path, tif_path, png_path, filter_stats)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-
-        # Serialize filter_stats to JSON
-        filter_stats_json = json.dumps(metadata.get("filter_stats", {}))
-
-        meta_params = [
-            feature_id,
-            date,
-            metadata.get("min_temp"),
-            metadata.get("max_temp"),
-            metadata.get("mean_temp"),
-            metadata.get("median_temp"),
-            metadata.get("std_dev"),
-            metadata.get("data_points", 0),
-            metadata.get("water_pixel_count", 0),
-            metadata.get("land_pixel_count", 0),
-            1 if metadata.get("wtoff", False) else 0,
-            csv_path,
-            tif_path,
-            png_path,
-            filter_stats_json,
-        ]
-        with xray_recorder.capture('d1_insert_temperature_metadata') as subsegment:
-            subsegment.put_metadata('feature_id', feature_id)
-            subsegment.put_metadata('date', date)
-            subsegment.put_metadata('has_filter_stats', bool(filter_stats_json and filter_stats_json != '{}'))
-            meta_result = query_d1(meta_sql, meta_params)
-            if not meta_result.get("success"):
-                subsegment.put_annotation('error', True)
-                raise Exception(f"Failed to insert temperature metadata: {meta_result.get('error')}")
-
-        print(f"✓ Inserted metadata to D1 with R2 paths")
-
-    except Exception as e:
-        print(f"Error inserting to D1: {e}")
-        raise  # Re-raise to fail the job properly
+    print(f"✓ Inserted metadata to D1 with R2 paths")
 
 
 def normalize(data):
@@ -266,14 +164,6 @@ def tif_to_png(tif_path, color_scale="relative"):
     return img_bytes
 
 
-def extract_metadata(filename):
-    aid_match = re.search(r"aid(\d{4})", filename)
-    date_match = re.search(r"doy(\d{13})", filename)
-    aid_number = int(aid_match.group(1)) if aid_match else None
-    date = date_match.group(1) if date_match else None
-    return aid_number, date
-
-
 def read_raster(layer_name, relevant_files):
     matches = [f for f in relevant_files if layer_name in f]
     return rasterio.open(matches[0]) if matches else None
@@ -301,10 +191,7 @@ def compute_filter_stats(filter_flags, total_pixels):
         if count > 0:  # Only store non-zero counts
             histogram[str(flag_value)] = count
 
-    return {
-        "total_pixels": int(total_pixels),
-        "histogram": histogram
-    }
+    return {"total_pixels": int(total_pixels), "histogram": histogram}
 
 
 def process_rasters(
@@ -319,7 +206,9 @@ def process_rasters(
     name, location = aid_folder_mapping.get(aid_number, (f"aid{aid_number}", "lake"))
     feature_id = f"{name}/{location}" if location != "lake" else name
 
-    print(f"  [{feature_id}] Filtering {len(selected_files)} file(s) for aid={aid_number} date={date}")
+    print(
+        f"  [{feature_id}] Filtering {len(selected_files)} file(s) for aid={aid_number} date={date}"
+    )
     relevant_files = []
     for f in selected_files:
         aid, f_date = extract_metadata(f)
@@ -327,7 +216,9 @@ def process_rasters(
             relevant_files.append(f)
 
     if not relevant_files:
-        error_msg = f"No relevant files found after filtering for aid={aid_number} date={date}"
+        error_msg = (
+            f"No relevant files found after filtering for aid={aid_number} date={date}"
+        )
         print(f"  [{feature_id}] ERROR: {error_msg}")
         raise ValueError(error_msg)
 
@@ -352,7 +243,9 @@ def process_rasters(
     if missing_layers:
         error_msg = f"Missing required layers: {', '.join(missing_layers)}"
         print(f"  [{feature_id}] ERROR: {error_msg}")
-        print(f"  [{feature_id}] Available files: {[os.path.basename(f) for f in relevant_files]}")
+        print(
+            f"  [{feature_id}] Available files: {[os.path.basename(f) for f in relevant_files]}"
+        )
         raise ValueError(error_msg)
 
     arrays = {
@@ -369,10 +262,10 @@ def process_rasters(
 
     # Processing logic (simplified adaptation from original)
     rows, cols = arrays["LST"].shape
-    
+
     # Create pixel coordinate grids
     col_idx, row_idx = np.meshgrid(np.arange(cols), np.arange(rows))
-    
+
     # Convert pixel coordinates to geographic coordinates using raster transform
     transform = LST.transform
     # rasterio.transform.xy returns (x, y) = (longitude, latitude) for each pixel
@@ -437,12 +330,16 @@ def process_rasters(
 
     print(f"Filter Statistics for {name}/{location} {date}:")
     print(f"  Total pixels: {total:,}")
-    print(f"  Valid pixels: {valid:,} ({valid/total*100:.1f}%)")
-    print(f"  Filtered: {total - valid:,} ({(total-valid)/total*100:.1f}%)")
-    print(f"    - QC filtered: {filtered_qc:,} ({filtered_qc/total*100:.1f}%)")
-    print(f"    - Cloud filtered: {filtered_cloud:,} ({filtered_cloud/total*100:.1f}%)")
+    print(f"  Valid pixels: {valid:,} ({valid / total * 100:.1f}%)")
+    print(f"  Filtered: {total - valid:,} ({(total - valid) / total * 100:.1f}%)")
+    print(f"    - QC filtered: {filtered_qc:,} ({filtered_qc / total * 100:.1f}%)")
+    print(
+        f"    - Cloud filtered: {filtered_cloud:,} ({filtered_cloud / total * 100:.1f}%)"
+    )
     if water_mask_flag:
-        print(f"    - Water mask filtered: {filtered_water:,} ({filtered_water/total*100:.1f}%)")
+        print(
+            f"    - Water mask filtered: {filtered_water:,} ({filtered_water / total * 100:.1f}%)"
+        )
 
     # Create filtered raster
     filtered_rasters = {
@@ -495,7 +392,9 @@ def process_rasters(
     # Metadata JSON
     hist = filter_stats["histogram"]
     valid_pixels = hist.get("0", 0)
-    land_pixels = sum(hist.get(str(i), 0) for i in [4, 5, 6, 7]) if water_mask_flag else 0
+    land_pixels = (
+        sum(hist.get(str(i), 0) for i in [4, 5, 6, 7]) if water_mask_flag else 0
+    )
 
     metadata = {
         "date": date,
@@ -543,6 +442,9 @@ def process_rasters(
 
 
 def handler(event, context):
+    import time
+    import boto3
+
     # SQS event structure
     print(f"Received {len(event['Records'])} SQS message(s)")
 
@@ -582,9 +484,9 @@ def handler(event, context):
 
         downloaded_files = []
 
-        with xray_recorder.capture('download_files') as subsegment:
-            subsegment.put_metadata('task_id', task_id)
-            subsegment.put_metadata('file_count', len(files_to_process))
+        with xray_recorder.capture("download_files") as subsegment:
+            subsegment.put_metadata("task_id", task_id)
+            subsegment.put_metadata("file_count", len(files_to_process))
 
             for file_info in files_to_process:
                 file_id = file_info["file_id"]
@@ -600,7 +502,9 @@ def handler(event, context):
                         f.write(chunk)
                 downloaded_files.append(local_path)
 
-            print(f"[{task_id}] Downloaded {len(downloaded_files)} file(s) successfully")
+            print(
+                f"[{task_id}] Downloaded {len(downloaded_files)} file(s) successfully"
+            )
 
         # Process
         # Need ROI mapping
@@ -620,9 +524,13 @@ def handler(event, context):
                     files_by_aid_date[key] = []
                 files_by_aid_date[key].append(f)
             else:
-                print(f"[{task_id}] WARNING: Could not extract AID/date from {os.path.basename(f)}")
+                print(
+                    f"[{task_id}] WARNING: Could not extract AID/date from {os.path.basename(f)}"
+                )
 
-        print(f"[{task_id}] Grouped files into {len(files_by_aid_date)} AID/date combination(s)")
+        print(
+            f"[{task_id}] Grouped files into {len(files_by_aid_date)} AID/date combination(s)"
+        )
 
         # R2 client
         s3_client = boto3.client(
@@ -634,24 +542,31 @@ def handler(event, context):
         )
 
         for (aid, date), files in files_by_aid_date.items():
-            import time
-
             start_time = time.time()
 
             # Get feature_id for logging
             name, location = aid_folder_mapping.get(aid, (f"aid{aid}", "lake"))
             feature_id = f"{name}/{location}" if location != "lake" else name
 
-            print(f"[{task_id}][{feature_id}] Starting processing for date {date} with {len(files)} file(s)")
+            print(
+                f"[{task_id}][{feature_id}] Starting processing for date {date} with {len(files)} file(s)"
+            )
 
-            # Log job start
-            log_job_to_d1("process", feature_id, date, task_id, "started")
+            # Log job start — fatal=False so we still attempt the actual work
+            log_job_to_d1(
+                job_type="process",
+                task_id=task_id,
+                feature_id=feature_id,
+                date=date,
+                status="started",
+                fatal=False,
+            )
 
-            with xray_recorder.capture('process_feature') as subsegment:
-                subsegment.put_metadata('task_id', task_id)
-                subsegment.put_metadata('feature_id', feature_id)
-                subsegment.put_metadata('date', date)
-                subsegment.put_metadata('file_count', len(files))
+            with xray_recorder.capture("process_feature") as subsegment:
+                subsegment.put_metadata("task_id", task_id)
+                subsegment.put_metadata("feature_id", feature_id)
+                subsegment.put_metadata("date", date)
+                subsegment.put_metadata("file_count", len(files))
 
                 try:
                     process_rasters(
@@ -667,34 +582,60 @@ def handler(event, context):
                     # Log success
                     duration_ms = int((time.time() - start_time) * 1000)
                     log_job_to_d1(
-                        "process", feature_id, date, task_id, "success", duration_ms
+                        job_type="process",
+                        task_id=task_id,
+                        feature_id=feature_id,
+                        date=date,
+                        status="success",
+                        duration_ms=duration_ms,
                     )
-                    print(f"[{task_id}][{feature_id}] ✓ Processed successfully in {duration_ms}ms")
+                    print(
+                        f"[{task_id}][{feature_id}] ✓ Processed successfully in {duration_ms}ms"
+                    )
 
                 except ValueError as e:
                     # Permanent failure (missing layers, no files) - don't retry
                     duration_ms = int((time.time() - start_time) * 1000)
                     error_msg = str(e)
                     log_job_to_d1(
-                        "process", feature_id, date, task_id, "failed", duration_ms, error_msg
+                        job_type="process",
+                        task_id=task_id,
+                        feature_id=feature_id,
+                        date=date,
+                        status="failed",
+                        duration_ms=duration_ms,
+                        error_message=error_msg,
                     )
-                    print(f"[{task_id}][{feature_id}] ✗ Permanent failure (skipping): {error_msg}")
-                    subsegment.put_annotation('error', True)
-                    subsegment.put_annotation('permanent_failure', True)
-                    subsegment.put_metadata('error_message', error_msg)
+                    print(
+                        f"[{task_id}][{feature_id}] ✗ Permanent failure (skipping): {error_msg}"
+                    )
+                    subsegment.put_annotation("error", True)
+                    subsegment.put_annotation("permanent_failure", True)
+                    subsegment.put_metadata("error_message", error_msg)
 
                 except Exception as e:
                     # Transient failure - re-raise to trigger SQS retry
                     duration_ms = int((time.time() - start_time) * 1000)
                     error_msg = str(e)
                     log_job_to_d1(
-                        "process", feature_id, date, task_id, "failed", duration_ms, error_msg
+                        job_type="process",
+                        task_id=task_id,
+                        feature_id=feature_id,
+                        date=date,
+                        status="failed",
+                        duration_ms=duration_ms,
+                        error_message=error_msg,
                     )
-                    print(f"[{task_id}][{feature_id}] ✗ Transient failure (will retry): {error_msg}")
+                    print(
+                        f"[{task_id}][{feature_id}] ✗ Transient failure (will retry): {error_msg}"
+                    )
                     import traceback
-                    print(f"[{task_id}][{feature_id}] Traceback: {traceback.format_exc()}")
-                    subsegment.put_annotation('error', True)
-                    subsegment.put_metadata('error_message', error_msg)
+
+                    print(
+                        f"[{task_id}][{feature_id}] Traceback: {traceback.format_exc()}"
+                    )
+                    subsegment.put_annotation("error", True)
+                    subsegment.put_metadata("error_message", error_msg)
                     raise
 
         # Cleanup

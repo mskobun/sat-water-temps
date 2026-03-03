@@ -1,60 +1,14 @@
 import json
 import os
-import time
 import boto3
-import requests
-from d1 import query_d1
-
-
-def get_pending_task_ids():
-    """Return list of task_ids that need polling."""
-    result = query_d1(
-        """
-        SELECT task_id FROM ecostress_requests
-        WHERE task_id IS NOT NULL
-          AND scenes_count IS NULL
-          AND dispatched_at IS NULL
-          AND error_message IS NULL
-        """,
-        [],
-    )
-    if not result:
-        return []
-    try:
-        rows = result["result"][0]["results"]
-        return [row["task_id"] for row in rows]
-    except (KeyError, IndexError):
-        return []
-
-
-def mark_dispatched(task_id):
-    query_d1(
-        "UPDATE ecostress_requests SET dispatched_at = ? WHERE task_id = ?",
-        [int(time.time() * 1000), task_id],
-    )
-
-
-def mark_error(task_id, error_message):
-    query_d1(
-        "UPDATE ecostress_requests SET error_message = ?, updated_at = ? WHERE task_id = ?",
-        [error_message, int(time.time() * 1000), task_id],
-    )
-    query_d1(
-        "UPDATE processing_jobs SET status = 'failed', completed_at = ?, error_message = ? WHERE task_id = ? AND status = 'started'",
-        [int(time.time() * 1000), error_message, task_id],
-    )
-
-
-def get_token(user, password):
-    response = requests.post(
-        "https://appeears.earthdatacloud.nasa.gov/api/login", auth=(user, password)
-    )
-    response.raise_for_status()
-    return response.json()["token"]
+from d1 import get_pending_task_ids, mark_dispatched, mark_error
+from shared import get_token
 
 
 def get_all_task_statuses(token):
     """Fetch status of all tasks for this account. Returns dict of task_id -> status."""
+    import requests
+
     headers = {"Authorization": f"Bearer {token}"}
     response = requests.get(
         "https://appeears.earthdatacloud.nasa.gov/api/task",

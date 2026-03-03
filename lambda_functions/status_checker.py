@@ -1,18 +1,7 @@
 import json
 import os
 import requests
-
-
-def get_token(user, password):
-    try:
-        response = requests.post(
-            "https://appeears.earthdatacloud.nasa.gov/api/login", auth=(user, password)
-        )
-        response.raise_for_status()
-        return response.json()["token"]
-    except Exception as e:
-        print(f"Authentication failed: {e}")
-        raise
+from shared import get_token
 
 
 def handler(event, context):

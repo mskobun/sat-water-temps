@@ -4,96 +4,14 @@ import requests
 from datetime import datetime, timedelta
 import geopandas as gpd
 import time
-from d1 import query_d1, get_setting
-
-
-def log_job_to_d1(
-    job_type: str,
-    task_id: str = None,
-    status: str = "started",
-    duration_ms: int = None,
-    error_message: str = None,
-    metadata_json: str = None,
-):
-    """Log processing job to D1 database"""
-    if status == "started":
-        sql = """
-        INSERT INTO processing_jobs
-        (job_type, task_id, status, started_at, metadata)
-        VALUES (?, ?, ?, ?, ?)
-        """
-        params = [job_type, task_id, status, int(time.time() * 1000), metadata_json]
-    else:
-        sql = """
-        UPDATE processing_jobs
-        SET status = ?, completed_at = ?, duration_ms = ?, error_message = ?
-        WHERE task_id = ? AND status = 'started'
-        """
-        params = [
-            status,
-            int(time.time() * 1000),
-            duration_ms,
-            error_message,
-            task_id,
-        ]
-
-    query_d1(sql, params)
-
-
-def log_ecostress_request(task_id, trigger_type, triggered_by, description, sd, ed, request_id=None):
-    """Log an ECOSTRESS request to the ecostress_requests table.
-    If request_id is provided (manual triggers), UPDATE the existing pending row.
-    Otherwise (timer triggers), INSERT a new row.
-    """
-    if request_id:
-        sql = """
-        UPDATE ecostress_requests
-        SET task_id = ?, updated_at = ?
-        WHERE id = ?
-        """
-        params = [task_id, int(time.time() * 1000), request_id]
-    else:
-        sql = """
-        INSERT INTO ecostress_requests
-        (task_id, trigger_type, triggered_by, description, start_date, end_date, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """
-        params = [task_id, trigger_type, triggered_by, description, sd, ed, int(time.time() * 1000)]
-    query_d1(sql, params)
-
-
-def update_ecostress_request(task_id, error_message=None):
-    """Update an ECOSTRESS request error by task_id"""
-    sql = """
-    UPDATE ecostress_requests
-    SET updated_at = ?, error_message = ?
-    WHERE task_id = ?
-    """
-    params = [int(time.time() * 1000), error_message, task_id]
-    query_d1(sql, params)
-
-
-def update_ecostress_request_by_id(request_id, error_message=None):
-    """Update an ECOSTRESS request error by row id"""
-    sql = """
-    UPDATE ecostress_requests
-    SET updated_at = ?, error_message = ?
-    WHERE id = ?
-    """
-    params = [int(time.time() * 1000), error_message, request_id]
-    query_d1(sql, params)
-
-
-def get_token(user, password):
-    try:
-        response = requests.post(
-            "https://appeears.earthdatacloud.nasa.gov/api/login", auth=(user, password)
-        )
-        response.raise_for_status()
-        return response.json()["token"]
-    except Exception as e:
-        print(f"Authentication failed: {e}")
-        raise
+from d1 import (
+    get_setting,
+    log_job_to_d1,
+    log_ecostress_request,
+    update_ecostress_request_error,
+    update_ecostress_request_by_id_error,
+)
+from shared import get_token
 
 
 def build_task_request(product, layers, roi_json, sd, ed):
@@ -184,13 +102,13 @@ def handler(event, context):
         # Log ECOSTRESS request
         log_ecostress_request(task_id, trigger_type, triggered_by, description, sd, ed, request_id=request_id)
 
-        # Log job start
+        # Log job start — fatal=False so we still attempt the actual work
         metadata = json.dumps({"start_date": sd, "end_date": ed})
-        log_job_to_d1("submit", task_id, "started", metadata_json=metadata)
+        log_job_to_d1(job_type="submit", task_id=task_id, status="started", metadata_json=metadata, fatal=False)
 
         # Log success
         duration_ms = int((time.time() - start_time) * 1000)
-        log_job_to_d1("submit", task_id, "success", duration_ms)
+        log_job_to_d1(job_type="submit", task_id=task_id, status="success", duration_ms=duration_ms)
         print(f"✓ Initiated submit job {task_id} in {duration_ms}ms")
 
         return {
@@ -201,11 +119,17 @@ def handler(event, context):
         # Log failure
         duration_ms = int((time.time() - start_time) * 1000)
         if task_id:
-            log_job_to_d1("submit", task_id, "failed", duration_ms, str(e))
-            update_ecostress_request(task_id, str(e))
+            log_job_to_d1(
+                job_type="submit",
+                task_id=task_id,
+                status="failed",
+                duration_ms=duration_ms,
+                error_message=str(e),
+            )
+            update_ecostress_request_error(task_id, str(e))
         elif request_id:
             # Manual trigger failed before getting task_id - update existing row
-            update_ecostress_request_by_id(request_id, str(e))
+            update_ecostress_request_by_id_error(request_id, str(e))
         else:
             # Timer trigger failed before getting task_id - create failed row
             log_ecostress_request(None, trigger_type, triggered_by, description, sd, ed)
