@@ -26,6 +26,7 @@ Local development uses a local D1 database with remote R2 for file access. This 
 | `npm run dev` | Frontend only (no D1/R2) at :5173 |
 | `npm run wrangler:dev` | Local D1 + remote R2 at :8788 |
 | `npm run wrangler:dev:remote` | Full prod (remote D1 + R2) at :8788 |
+| `uv run pytest tests/ -v` | Run Lambda unit tests |
 
 ### Database Commands
 

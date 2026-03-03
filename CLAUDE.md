@@ -8,6 +8,7 @@ npm run dev                    # Frontend only at http://localhost:5173
 npm run wrangler:dev           # Full stack (local D1 + remote R2) at http://localhost:8788
 npm run wrangler:dev:remote    # Full stack (prod D1 + prod R2) at http://localhost:8788
 npm run lint                   # tsc --noEmit on functions/
+uv run pytest tests/ -v        # Run Lambda unit tests
 npm run deploy                 # Deploy frontend to Cloudflare Pages
 cd terraform && terraform apply  # Deploy Lambda functions (requires AWS creds)
 ```
