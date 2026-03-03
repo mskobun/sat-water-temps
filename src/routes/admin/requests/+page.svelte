@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { CalendarDate, today, getLocalTimeZone } from '@internationalized/date';
+	import { today, getLocalTimeZone } from '@internationalized/date';
+	import type { DateRange } from 'bits-ui';
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -10,7 +11,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import * as Popover from '$lib/components/ui/popover';
 	import * as Dialog from '$lib/components/ui/dialog';
-	import { Calendar } from '$lib/components/ui/calendar';
+	import { RangeCalendar } from '$lib/components/ui/range-calendar';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Spinner } from '$lib/components/ui/spinner';
@@ -56,28 +57,18 @@
 
 	// Trigger dialog state
 	let dialogOpen = $state(false);
-	let triggerStartDate = $state<CalendarDate | undefined>(undefined);
-	let triggerEndDate = $state<CalendarDate | undefined>(undefined);
+	let triggerDateRange = $state<DateRange>({ start: undefined, end: undefined });
 	let triggerDescription = $state('');
 	let triggerLoading = $state(false);
 	let triggerError = $state('');
 	let triggerSuccess = $state('');
-	let calendarStartOpen = $state(false);
-	let calendarEndOpen = $state(false);
-
-	function formatCalendarDate(d: CalendarDate | undefined): string {
-		if (!d) return '';
-		return `${d.year}-${String(d.month).padStart(2, '0')}-${String(d.day).padStart(2, '0')}`;
-	}
-
-	const triggerStartFormatted = $derived(formatCalendarDate(triggerStartDate));
-	const triggerEndFormatted = $derived(formatCalendarDate(triggerEndDate));
+	let calendarOpen = $state(false);
 
 	const dayCount = $derived(() => {
-		if (!triggerStartDate || !triggerEndDate) return 0;
-		const start = new Date(triggerStartFormatted + 'T00:00:00');
-		const end = new Date(triggerEndFormatted + 'T00:00:00');
-		return Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
+		const { start, end } = triggerDateRange;
+		if (!start || !end) return 0;
+		const tz = getLocalTimeZone();
+		return Math.round((end.toDate(tz).getTime() - start.toDate(tz).getTime()) / 86400000) + 1;
 	});
 
 	async function fetchRequests() {
@@ -132,7 +123,7 @@
 	}
 
 	async function handleTrigger() {
-		if (!triggerStartFormatted || !triggerEndFormatted) return;
+		if (!triggerDateRange.start || !triggerDateRange.end) return;
 
 		triggerLoading = true;
 		triggerError = '';
@@ -143,8 +134,8 @@
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
-					startDate: triggerStartFormatted,
-					endDate: triggerEndFormatted,
+					startDate: triggerDateRange.start!.toString(),
+					endDate: triggerDateRange.end!.toString(),
 					description: triggerDescription || undefined
 				})
 			});
@@ -157,8 +148,7 @@
 				triggerSuccess = `${data.count} request(s) recorded. ${data.warning}`;
 			} else {
 				triggerSuccess = data.message || `Created ${data.count} request(s)`;
-				triggerStartDate = undefined;
-				triggerEndDate = undefined;
+				triggerDateRange = { start: undefined, end: undefined };
 				triggerDescription = '';
 				fetchRequests();
 				setTimeout(() => { dialogOpen = false; triggerSuccess = ''; }, 2000);
@@ -210,58 +200,37 @@
 						</Dialog.Description>
 					</Dialog.Header>
 					<div class="flex flex-col gap-4 py-2">
-						<div class="grid grid-cols-2 gap-3">
-							<div class="flex flex-col gap-1.5">
-								<Label>Start Date</Label>
-								<Popover.Root bind:open={calendarStartOpen}>
-									<Popover.Trigger>
-										{#snippet children()}
-											<Button variant="outline" class="w-full justify-start text-left font-normal">
-												{#if triggerStartDate}
-													{triggerStartFormatted}
-												{:else}
-													<span class="text-muted-foreground">Start</span>
-												{/if}
-											</Button>
-										{/snippet}
-									</Popover.Trigger>
-									<Popover.Content class="w-auto p-0" align="start">
-										<Calendar
-											type="single"
-											bind:value={triggerStartDate}
-											maxValue={today(getLocalTimeZone())}
-											onValueChange={() => { calendarStartOpen = false; }}
-										/>
-									</Popover.Content>
-								</Popover.Root>
-							</div>
-							<div class="flex flex-col gap-1.5">
-								<Label>End Date</Label>
-								<Popover.Root bind:open={calendarEndOpen}>
-									<Popover.Trigger>
-										{#snippet children()}
-											<Button variant="outline" class="w-full justify-start text-left font-normal">
-												{#if triggerEndDate}
-													{triggerEndFormatted}
-												{:else}
-													<span class="text-muted-foreground">End</span>
-												{/if}
-											</Button>
-										{/snippet}
-									</Popover.Trigger>
-									<Popover.Content class="w-auto p-0" align="start">
-										<Calendar
-											type="single"
-											bind:value={triggerEndDate}
-											minValue={triggerStartDate}
-											maxValue={today(getLocalTimeZone())}
-											onValueChange={() => { calendarEndOpen = false; }}
-										/>
-									</Popover.Content>
-								</Popover.Root>
-							</div>
+						<div class="flex flex-col gap-1.5">
+							<Label>Date Range</Label>
+							<Popover.Root bind:open={calendarOpen}>
+								<Popover.Trigger>
+									{#snippet children()}
+										<Button variant="outline" class="w-full justify-start text-left font-normal">
+											{#if triggerDateRange.start && triggerDateRange.end}
+												{triggerDateRange.start} – {triggerDateRange.end}
+											{:else if triggerDateRange.start}
+												{triggerDateRange.start} – …
+											{:else}
+												<span class="text-muted-foreground">Select date range</span>
+											{/if}
+										</Button>
+									{/snippet}
+								</Popover.Trigger>
+								<Popover.Content class="w-auto p-0" align="start">
+									<RangeCalendar
+										bind:value={triggerDateRange}
+										maxValue={today(getLocalTimeZone())}
+										captionLayout="dropdown"
+										onValueChange={(v) => {
+											if (v.start && v.end) {
+												calendarOpen = false;
+											}
+										}}
+									/>
+								</Popover.Content>
+							</Popover.Root>
 						</div>
-						{#if triggerStartDate && triggerEndDate}
+						{#if triggerDateRange.start && triggerDateRange.end}
 							<p class="text-sm text-muted-foreground">
 								{dayCount()} request(s) will be created
 							</p>
@@ -288,7 +257,7 @@
 					</div>
 					<Dialog.Footer>
 						<Button variant="outline" onclick={() => { dialogOpen = false; }}>Cancel</Button>
-						<Button onclick={handleTrigger} disabled={triggerLoading || !triggerStartDate || !triggerEndDate}>
+						<Button onclick={handleTrigger} disabled={triggerLoading || !triggerDateRange.start || !triggerDateRange.end}>
 							{#if triggerLoading}
 								<Spinner class="size-4 mr-2" />
 							{/if}
