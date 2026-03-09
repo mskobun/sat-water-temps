@@ -3,10 +3,12 @@
 	import { page } from '$app/stores';
 	import { Button } from '$lib/components/ui/button';
 	import * as Popover from '$lib/components/ui/popover';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import { Separator } from '$lib/components/ui/separator';
 	import UserIcon from '@lucide/svelte/icons/user';
 
 	let session = $derived($page.data.session);
+	let aboutOpen = $state(false);
 
 	function handleSignOut() {
 		signOut({ callbackUrl: '/admin/login' });
@@ -58,9 +60,25 @@
 			>
 				Source Code
 			</a>
-			<span class="block w-full text-left text-sm py-1.5 px-2 rounded text-muted-foreground cursor-default">
-				About (coming soon)
-			</span>
+			<button
+				onclick={() => (aboutOpen = true)}
+				class="w-full text-left text-sm py-1.5 px-2 rounded hover:bg-muted"
+			>
+				About
+			</button>
 		</Popover.Content>
 	</Popover.Root>
 </div>
+
+<Dialog.Root bind:open={aboutOpen}>
+	<Dialog.Content class="sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>Satellite Water Temperature Monitoring</Dialog.Title>
+			<Dialog.Description>
+				This map shows water bodies monitored with ECOSTRESS satellite data. Click a polygon to
+				view temperature time series and thermal imagery. Data is updated periodically from NASA
+				AppEEARS.
+			</Dialog.Description>
+		</Dialog.Header>
+	</Dialog.Content>
+</Dialog.Root>
