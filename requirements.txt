@@ -15,8 +15,6 @@ botocore==1.42.50
     #   s3transfer
 certifi==2026.1.4
     # via
-    #   pyogrio
-    #   pyproj
     #   rasterio
     #   requests
 charset-normalizer==3.4.4
@@ -32,8 +30,6 @@ cligj==0.7.2
     # via rasterio
 cmap==0.7.2
     # via sat-water-temps (pyproject.toml)
-geopandas==1.0.1
-    # via sat-water-temps (pyproject.toml)
 idna==3.11
     # via requests
 importlib-metadata==8.7.1
@@ -46,27 +42,14 @@ numpy==2.0.2
     # via
     #   sat-water-temps (pyproject.toml)
     #   cmap
-    #   geopandas
     #   pandas
-    #   pyogrio
     #   rasterio
-    #   shapely
-packaging==26.0
-    # via
-    #   geopandas
-    #   pyogrio
 pandas==2.3.3
-    # via
-    #   sat-water-temps (pyproject.toml)
-    #   geopandas
+    # via sat-water-temps (pyproject.toml)
 pillow==11.3.0
     # via sat-water-temps (pyproject.toml)
-pyogrio==0.11.1
-    # via geopandas
 pyparsing==3.3.2
     # via rasterio
-pyproj==3.6.1
-    # via geopandas
 python-dateutil==2.9.0.post0
     # via
     #   botocore
@@ -81,8 +64,6 @@ requests==2.32.5
     # via sat-water-temps (pyproject.toml)
 s3transfer==0.16.0
     # via boto3
-shapely==2.0.7
-    # via geopandas
 six==1.17.0
     # via python-dateutil
 tzdata==2025.3

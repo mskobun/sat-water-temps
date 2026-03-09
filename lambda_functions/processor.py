@@ -2,7 +2,6 @@ import json
 import os
 import numpy as np
 import pandas as pd
-import geopandas as gpd
 import io
 from cmap import Colormap
 from PIL import Image
@@ -35,10 +34,12 @@ def _get_aid_folder_mapping():
     """Load and cache ROI polygon mapping. Persists across warm Lambda invocations."""
     global _aid_folder_mapping
     if _aid_folder_mapping is None:
-        roi = gpd.read_file("static/polygons_new.geojson")
+        with open("static/polygons_new.geojson") as f:
+            roi = json.load(f)
         _aid_folder_mapping = {}
-        for idx, row in roi.iterrows():
-            _aid_folder_mapping[int(idx + 1)] = (row["name"], row["location"])
+        for idx, feature in enumerate(roi["features"]):
+            props = feature["properties"]
+            _aid_folder_mapping[int(idx + 1)] = (props["name"], props["location"])
     return _aid_folder_mapping
 
 

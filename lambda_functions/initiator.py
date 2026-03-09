@@ -2,7 +2,6 @@ import json
 import os
 import requests
 from datetime import datetime, timedelta
-import geopandas as gpd
 import time
 from d1 import (
     get_setting,
@@ -66,8 +65,8 @@ def handler(event, context):
     headers = {"Authorization": f"Bearer {token}"}
 
     # Load ROI
-    roi = gpd.read_file(roi_path)
-    roi_json = roi.__geo_interface__
+    with open(roi_path) as f:
+        roi_json = json.load(f)
 
     # Dates — delay is configurable via admin settings (default 2 days for ECOSTRESS latency)
     delay_days = int(get_setting("data_delay_days", default=2))
