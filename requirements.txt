@@ -30,34 +30,23 @@ click-plugins==1.1.1.2
     # via rasterio
 cligj==0.7.2
     # via rasterio
-contourpy==1.3.0
-    # via matplotlib
-cycler==0.12.1
-    # via matplotlib
-fonttools==4.60.2
-    # via matplotlib
+cmap==0.7.2
+    # via sat-water-temps (pyproject.toml)
 geopandas==1.0.1
     # via sat-water-temps (pyproject.toml)
 idna==3.11
     # via requests
 importlib-metadata==8.7.1
     # via rasterio
-importlib-resources==6.5.2
-    # via matplotlib
 jmespath==1.1.0
     # via
     #   boto3
     #   botocore
-kiwisolver==1.4.7
-    # via matplotlib
-matplotlib==3.9.4
-    # via sat-water-temps (pyproject.toml)
 numpy==2.0.2
     # via
     #   sat-water-temps (pyproject.toml)
-    #   contourpy
+    #   cmap
     #   geopandas
-    #   matplotlib
     #   pandas
     #   pyogrio
     #   rasterio
@@ -65,26 +54,22 @@ numpy==2.0.2
 packaging==26.0
     # via
     #   geopandas
-    #   matplotlib
     #   pyogrio
 pandas==2.3.3
     # via
     #   sat-water-temps (pyproject.toml)
     #   geopandas
 pillow==11.3.0
-    # via matplotlib
+    # via sat-water-temps (pyproject.toml)
 pyogrio==0.11.1
     # via geopandas
 pyparsing==3.3.2
-    # via
-    #   matplotlib
-    #   rasterio
+    # via rasterio
 pyproj==3.6.1
     # via geopandas
 python-dateutil==2.9.0.post0
     # via
     #   botocore
-    #   matplotlib
     #   pandas
 python-dotenv==1.2.1
     # via sat-water-temps (pyproject.toml)
@@ -109,6 +94,4 @@ urllib3==1.26.20
 wrapt==2.1.1
     # via aws-xray-sdk
 zipp==3.23.0
-    # via
-    #   importlib-metadata
-    #   importlib-resources
+    # via importlib-metadata

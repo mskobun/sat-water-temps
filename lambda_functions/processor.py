@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 import io
-import matplotlib.pyplot as plt
+from cmap import Colormap
 from PIL import Image
 from typing import Dict
 from aws_xray_sdk.core import xray_recorder
@@ -166,7 +166,7 @@ def tif_to_png(tif_path, color_scale="relative"):
                 np.uint8
             )
             alpha_mask = np.where(band <= GLOBAL_MIN, 0, 255).astype(np.uint8)
-            cmap = plt.get_cmap("jet")
+            cmap = Colormap("jet")
             rgba_img = cmap(norm_band / 255.0)
             rgba_img = (rgba_img * 255).astype(np.uint8)
             rgba_img[..., 3] = alpha_mask
@@ -174,7 +174,7 @@ def tif_to_png(tif_path, color_scale="relative"):
             bands = [dataset.read(band) for band in range(1, num_bands + 1)]
             norm_bands, alpha_mask = zip(*[normalize(band) for band in bands])
             norm_band = norm_bands[0]
-            cmap = plt.get_cmap("jet")
+            cmap = Colormap("jet")
             rgba_img = cmap(norm_band / 255.0)
             rgba_img = (rgba_img * 255).astype(np.uint8)
             rgba_img[..., 3] = alpha_mask[0]
