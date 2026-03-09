@@ -26,7 +26,7 @@
 
 {#if visible}
 	<div
-		class="fixed bottom-4 left-4 w-[min(400px)]"
+		class="fixed bottom-20 md:bottom-4 left-4 w-[min(400px)]"
 		role="region"
 		aria-label="About this project"
 	>

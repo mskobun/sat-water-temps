@@ -5,13 +5,18 @@
 import { MapLibre, GeoJSONSource, FillLayer, LineLayer } from 'svelte-maplibre-gl';
 import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, FilterSpecification } from 'maplibre-gl';
 	import * as Sidebar from '$lib/components/ui/sidebar';
+	import * as Drawer from '$lib/components/ui/drawer';
 	import { Button } from '$lib/components/ui/button';
 	import FeatureSidebar from '$lib/components/FeatureSidebar.svelte';
 	import FeatureSearch from '$lib/components/FeatureSearch.svelte';
 	import IntroCard from '$lib/components/IntroCard.svelte';
 	import UserMenu from '$lib/components/UserMenu.svelte';
+	import { IsMobile } from '$lib/hooks/is-mobile.svelte';
 	import type { Snippet } from 'svelte';
 	import XIcon from '@lucide/svelte/icons/x';
+	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
+
+	const isMobile = new IsMobile();
 
 	let { children }: { children: Snippet } = $props();
 
@@ -86,6 +91,28 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 
 	// Sidebar is open when there's a selected feature
 	let sidebarOpen = $derived(!!selectedFeature);
+
+	// Drawer open state for mobile — opens when a feature is selected, but can be
+	// dismissed independently (user can still view the heatmap on the map).
+	let drawerOpen = $state(false);
+	let previousMobileFeatureId: string | null = null;
+	$effect(() => {
+		const id = selectedFeature?.id ?? null;
+		// Open drawer when a new feature is selected (or first selection)
+		if (id && id !== previousMobileFeatureId) {
+			drawerOpen = true;
+		}
+		// Close drawer when feature is deselected
+		if (!id) {
+			drawerOpen = false;
+		}
+		previousMobileFeatureId = id;
+	});
+
+	function handleDrawerOpenChange(open: boolean) {
+		drawerOpen = open;
+		// Don't navigate away — keep feature selected so user can explore the heatmap
+	}
 
 	// Track previous feature ID to detect transitions
 	let previousFeatureId: string | null = null;
@@ -228,6 +255,23 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 	// All user interactions just change the URL
 	function handleMapClick(e: MapMouseEvent) {
 		if (!map) return;
+
+		// On mobile, tapping the heatmap shows a temperature tooltip
+		if (isMobile.current && map.getLayer('temperature-layer')) {
+			const tempFeatures = map.queryRenderedFeatures(e.point, { layers: ['temperature-layer'] });
+			if (tempFeatures && tempFeatures.length > 0) {
+				const temp = tempFeatures[0].properties?.temperature;
+				if (temp != null) {
+					hoveredTemp = temp;
+					tooltipX = e.point.x;
+					tooltipY = e.point.y;
+					return;
+				}
+			}
+			// Tapped outside heatmap — dismiss tooltip
+			hoveredTemp = null;
+		}
+
 		if (!map.getLayer('polygons-fill')) return;
 
 		const features = map.queryRenderedFeatures(e.point, { layers: ['polygons-fill'] });
@@ -502,8 +546,8 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 
 <Sidebar.Provider open={sidebarOpen} onOpenChange={(open) => { if (!open) handleSidebarClose(); }}>
 	<div class="flex h-screen w-full">
-		<!-- Feature Sidebar (left side) – only in DOM when a feature is selected -->
-		{#if selectedFeature}
+		<!-- Feature Sidebar (desktop only) – only in DOM when a feature is selected -->
+		{#if selectedFeature && !isMobile.current}
 			<Sidebar.Sidebar side="left" collapsible="offcanvas" class="border-r w-full sm:max-w-md">
 				<Sidebar.Header class="flex flex-row items-center justify-between gap-2 px-4 py-3 border-b shrink-0 bg-background">
 					<span class="font-semibold text-foreground truncate">
@@ -551,6 +595,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 					maxZoom={19}
 					onclick={handleMapClick}
 					onmousemove={handleMouseMove}
+					onmovestart={() => { hoveredTemp = null; }}
 					onload={handleMapLoad}
 				>
 					{#if geojsonData}
@@ -635,6 +680,66 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 
 		</main>
 	</div>
+
+	<!-- Mobile: bottom bar + drawer -->
+	{#if isMobile.current && selectedFeature}
+		<!-- Bottom bar (always visible when feature selected, acts as drawer trigger) -->
+		{#if !drawerOpen}
+			<button
+				class="fixed bottom-0 inset-x-0 z-40 flex items-center gap-3 px-4 py-3 bg-background border-t shadow-lg"
+				onclick={() => { drawerOpen = true; }}
+			>
+				<ChevronUpIcon class="size-5 text-muted-foreground shrink-0" />
+				<span class="font-semibold text-foreground truncate flex-1 text-left">
+					{selectedFeature.name ?? selectedFeature.id ?? 'Water body'}
+				</span>
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					class="shrink-0"
+					onclick={(e: MouseEvent) => { e.stopPropagation(); handleSidebarClose(); }}
+				>
+					<XIcon class="size-4" />
+					<span class="sr-only">Close</span>
+				</Button>
+			</button>
+		{/if}
+
+		<!-- Drawer (slides up with full feature details) -->
+		<Drawer.Root open={drawerOpen} onOpenChange={handleDrawerOpenChange}>
+			<Drawer.Content class="max-h-[85vh]">
+				<Drawer.Header class="flex flex-row items-center justify-between gap-2 px-4 py-3 border-b">
+					<Drawer.Title class="font-semibold text-foreground truncate">
+						{selectedFeature.name ?? selectedFeature.id ?? 'Water body'}
+					</Drawer.Title>
+					<Button variant="ghost" size="icon-sm" onclick={() => handleSidebarClose()} class="shrink-0">
+						<XIcon class="size-4" />
+						<span class="sr-only">Close</span>
+					</Button>
+				</Drawer.Header>
+				<div class="overflow-y-auto flex-1 min-h-0">
+					<FeatureSidebar
+						featureId={selectedFeature.id}
+						featureName={selectedFeature.name ?? ''}
+						isOpen={true}
+						initialDate={urlDate}
+						bind:selectedDate
+						bind:selectedColorScale
+						bind:currentUnit
+						{relativeMin}
+						{relativeMax}
+						{avgTemp}
+						{histogramData}
+						{waterOff}
+						on:close={handleSidebarClose}
+						on:dateChange={handleDateChange}
+						on:colorScaleChange={handleColorScaleChange}
+						on:tempFilterChange={handleTempFilterChange}
+					/>
+				</div>
+			</Drawer.Content>
+		</Drawer.Root>
+	{/if}
 
 	<!-- Hidden slot for child pages (they don't render anything) -->
 	<div class="hidden">
