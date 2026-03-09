@@ -8,14 +8,17 @@
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import { Separator } from '$lib/components/ui/separator';
 	import { Slider } from '$lib/components/ui/slider';
+	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { cn } from '$lib/utils.js';
 	import ThermometerIcon from '@lucide/svelte/icons/thermometer';
 	import PaletteIcon from '@lucide/svelte/icons/palette';
 	import BarChart3Icon from '@lucide/svelte/icons/bar-chart-3';
 	import DownloadIcon from '@lucide/svelte/icons/download';
+	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import FilterIcon from '@lucide/svelte/icons/filter';
 	import { BarChart } from 'layerchart';
 	import { scaleBand } from 'd3-scale';
+	import { page } from '$app/stores';
 
 	export let featureId: string;
 	export let featureName: string = '';
@@ -32,6 +35,8 @@
 	// Water off status (passed from parent, fetched with temperature data)
 	export let waterOff: boolean = false;
 	export let initialDate: string = '';
+
+	$: session = $page.data.session;
 
 	const dispatch = createEventDispatcher<{
 		close: void;
@@ -223,13 +228,39 @@
 	{:else}
 		<ScrollArea class="flex-1">
 			<div class="p-4 space-y-6">
-				<!-- Summary line -->
-				<p class="text-sm text-muted-foreground">
-					{dates.length} observation{dates.length === 1 ? '' : 's'}
-					{#if selectedDate}
-						· {formatShortDate(selectedDate)}
-					{/if}
-				</p>
+				<!-- Summary & actions -->
+				<div class="flex items-center justify-between gap-2">
+					<p class="text-sm text-muted-foreground">
+						{dates.length} observation{dates.length === 1 ? '' : 's'}
+						{#if selectedDate}
+							· {formatShortDate(selectedDate)}
+						{/if}
+					</p>
+					<Tooltip.Provider>
+						<div class="flex items-center gap-1 shrink-0">
+							{#if session?.user}
+								<Tooltip.Root>
+									<Tooltip.Trigger>
+										<Button variant="ghost" size="icon-sm" onclick={() => goto(`/admin/features/${featureId}`)}>
+											<SettingsIcon class="size-3.5" />
+											<span class="sr-only">Manage in admin</span>
+										</Button>
+									</Tooltip.Trigger>
+									<Tooltip.Content>Manage in admin</Tooltip.Content>
+								</Tooltip.Root>
+							{/if}
+							<Tooltip.Root>
+								<Tooltip.Trigger>
+									<Button variant="ghost" size="icon-sm" onclick={() => goto(`/archive/${featureId}`)}>
+										<DownloadIcon class="size-3.5" />
+										<span class="sr-only">Archive & download</span>
+									</Button>
+								</Tooltip.Trigger>
+								<Tooltip.Content>Archive & download</Tooltip.Content>
+							</Tooltip.Root>
+						</div>
+					</Tooltip.Provider>
+				</div>
 
 			{#if waterOff}
 				<Alert variant="destructive" class="py-2">
@@ -415,14 +446,7 @@
 					</div>
 				</div>
 
-				<Separator />
-
-				<!-- Primary CTA -->
-				<Button class="w-full" variant="default" onclick={() => goto(`/archive/${featureId}`)}>
-					<DownloadIcon class="size-4 mr-2" />
-					View archive &amp; download
-				</Button>
-			</div>
+				</div>
 		</ScrollArea>
 	{/if}
 </div>
