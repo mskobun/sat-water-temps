@@ -4,11 +4,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import { format, parse } from 'date-fns';
-
-	interface FilterStats {
-		total_pixels: number;
-		histogram: Record<string, number>;
-	}
+	import { parseFilterStats, type FilterStats } from '$lib/filter-stats';
 
 	export interface Job {
 		id: number;
@@ -35,23 +31,6 @@
 		showFeatureId?: boolean;
 	} = $props();
 
-	function getStatsFromHistogram(stats: FilterStats) {
-		const hist = stats.histogram;
-		const valid = hist['0'] || 0;
-		let filtered_qc = 0;
-		let filtered_cloud = 0;
-		let filtered_water = 0;
-		let filtered_nodata = 0;
-		for (let i = 0; i < 16; i++) {
-			const count = hist[i.toString()] || 0;
-			if (i & 1) filtered_qc += count;
-			if (i & 2) filtered_cloud += count;
-			if (i & 4) filtered_water += count;
-			if (i & 8) filtered_nodata += count;
-		}
-		return { valid, filtered_qc, filtered_cloud, filtered_water, filtered_nodata, total: stats.total_pixels };
-	}
-
 	function formatDate(timestamp: number) {
 		return format(new Date(timestamp), 'dd/MM/yyyy HH:mm:ss');
 	}
@@ -69,20 +48,20 @@
 
 	function formatFilterSummary(stats: FilterStats | null): string {
 		if (!stats) return '-';
-		const { valid, total } = getStatsFromHistogram(stats);
+		const { valid, total } = parseFilterStats(stats);
 		const pctFiltered = total > 0 ? (((total - valid) / total) * 100).toFixed(1) : '0.0';
 		return `${pctFiltered}% filtered`;
 	}
 
 	function getFilterBreakdown(stats: FilterStats | null): string {
 		if (!stats) return '';
-		const { filtered_qc, filtered_cloud, filtered_water, filtered_nodata, total } = getStatsFromHistogram(stats);
+		const { filtered_by_qc, filtered_by_cloud, filtered_by_water, filtered_by_nodata, total } = parseFilterStats(stats);
 		if (total === 0) return '';
 		const parts = [];
-		if (filtered_nodata > 0) parts.push(`NoData: ${((filtered_nodata / total) * 100).toFixed(1)}%`);
-		if (filtered_qc > 0) parts.push(`QC: ${((filtered_qc / total) * 100).toFixed(1)}%`);
-		if (filtered_cloud > 0) parts.push(`Cloud: ${((filtered_cloud / total) * 100).toFixed(1)}%`);
-		if (filtered_water > 0) parts.push(`Water: ${((filtered_water / total) * 100).toFixed(1)}%`);
+		if (filtered_by_nodata > 0) parts.push(`NoData: ${((filtered_by_nodata / total) * 100).toFixed(1)}%`);
+		if (filtered_by_qc > 0) parts.push(`QC: ${((filtered_by_qc / total) * 100).toFixed(1)}%`);
+		if (filtered_by_cloud > 0) parts.push(`Cloud: ${((filtered_by_cloud / total) * 100).toFixed(1)}%`);
+		if (filtered_by_water > 0) parts.push(`Water: ${((filtered_by_water / total) * 100).toFixed(1)}%`);
 		return parts.join(', ');
 	}
 

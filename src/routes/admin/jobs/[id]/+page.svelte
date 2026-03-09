@@ -6,67 +6,12 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Spinner } from '$lib/components/ui/spinner';
-	import * as Table from '$lib/components/ui/table';
 	import { Progress } from '$lib/components/ui/progress';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import CircleHelpIcon from '@lucide/svelte/icons/circle-help';
 	import MapIcon from '@lucide/svelte/icons/map';
-
-	interface FilterStats {
-		total_pixels: number;
-		histogram: Record<string, number>;
-	}
-
-	// Compute all statistics from bit flag histogram
-	// Bit 0 = QC, Bit 1 = Cloud, Bit 2 = Water, Bit 3 = NoData
-	function computeStats(stats: FilterStats) {
-		const hist = stats.histogram;
-		const total = stats.total_pixels;
-
-		let filtered_by_qc = 0;
-		let filtered_by_cloud = 0;
-		let filtered_by_water = 0;
-		let filtered_by_nodata = 0;
-
-		for (let i = 0; i < 16; i++) {
-			const count = hist[i.toString()] || 0;
-			if (i & 1) filtered_by_qc += count;
-			if (i & 2) filtered_by_cloud += count;
-			if (i & 4) filtered_by_water += count;
-			if (i & 8) filtered_by_nodata += count;
-		}
-
-		const valid = hist['0'] || 0;
-		const filtered = total - valid;
-
-		// Combination counts (collapse +nodata variants)
-		const qc_only = (hist['1'] || 0) + (hist['9'] || 0);
-		const cloud_only = (hist['2'] || 0) + (hist['10'] || 0);
-		const qc_cloud = (hist['3'] || 0) + (hist['11'] || 0);
-		const water_only = (hist['4'] || 0) + (hist['12'] || 0);
-		const qc_water = (hist['5'] || 0) + (hist['13'] || 0);
-		const cloud_water = (hist['6'] || 0) + (hist['14'] || 0);
-		const all_three = (hist['7'] || 0) + (hist['15'] || 0);
-		const nodata_only = hist['8'] || 0;
-
-		return {
-			total,
-			valid,
-			filtered,
-			filtered_by_qc,
-			filtered_by_cloud,
-			filtered_by_water,
-			filtered_by_nodata,
-			qc_only,
-			cloud_only,
-			water_only,
-			qc_cloud,
-			qc_water,
-			cloud_water,
-			all_three,
-			nodata_only
-		};
-	}
+	import * as Table from '$lib/components/ui/table';
+	import { parseFilterStats, getFilterCombinations, type FilterStats } from '$lib/filter-stats';
 
 	interface Job {
 		id: number;
@@ -88,7 +33,8 @@
 	let error = $state('');
 
 	const jobId = $derived($page.params.id);
-	const stats = $derived(job?.filter_stats ? computeStats(job.filter_stats) : null);
+	const stats = $derived(job?.filter_stats ? parseFilterStats(job.filter_stats) : null);
+	const combinations = $derived(job?.filter_stats ? getFilterCombinations(job.filter_stats) : []);
 
 	async function fetchJob() {
 		try {
@@ -367,81 +313,32 @@
 					</div>
 
 					<!-- Filter Combinations -->
-					<div class="space-y-4">
-						<h4 class="font-semibold text-sm">Filter Combinations</h4>
-						<div class="rounded-md border">
-							<Table.Root>
-								<Table.Header>
-									<Table.Row>
-										<Table.Head>Combination</Table.Head>
-										<Table.Head class="text-right">Pixels</Table.Head>
-										<Table.Head class="text-right">Percentage</Table.Head>
-									</Table.Row>
-								</Table.Header>
-								<Table.Body>
-									<Table.Row>
-										<Table.Cell class="font-medium">QC only</Table.Cell>
-										<Table.Cell class="text-right">{formatNumber(stats.qc_only)}</Table.Cell>
-										<Table.Cell class="text-right">
-											{calcPercent(stats.qc_only, stats.total).toFixed(2)}%
-										</Table.Cell>
-									</Table.Row>
-									<Table.Row>
-										<Table.Cell class="font-medium">Cloud only</Table.Cell>
-										<Table.Cell class="text-right">{formatNumber(stats.cloud_only)}</Table.Cell>
-										<Table.Cell class="text-right">
-											{calcPercent(stats.cloud_only, stats.total).toFixed(2)}%
-										</Table.Cell>
-									</Table.Row>
-									<Table.Row>
-										<Table.Cell class="font-medium">Water only</Table.Cell>
-										<Table.Cell class="text-right">{formatNumber(stats.water_only)}</Table.Cell>
-										<Table.Cell class="text-right">
-											{calcPercent(stats.water_only, stats.total).toFixed(2)}%
-										</Table.Cell>
-									</Table.Row>
-									<Table.Row>
-										<Table.Cell class="font-medium">QC + Cloud</Table.Cell>
-										<Table.Cell class="text-right">{formatNumber(stats.qc_cloud)}</Table.Cell>
-										<Table.Cell class="text-right">
-											{calcPercent(stats.qc_cloud, stats.total).toFixed(2)}%
-										</Table.Cell>
-									</Table.Row>
-									<Table.Row>
-										<Table.Cell class="font-medium">QC + Water</Table.Cell>
-										<Table.Cell class="text-right">{formatNumber(stats.qc_water)}</Table.Cell>
-										<Table.Cell class="text-right">
-											{calcPercent(stats.qc_water, stats.total).toFixed(2)}%
-										</Table.Cell>
-									</Table.Row>
-									<Table.Row>
-										<Table.Cell class="font-medium">Cloud + Water</Table.Cell>
-										<Table.Cell class="text-right">{formatNumber(stats.cloud_water)}</Table.Cell>
-										<Table.Cell class="text-right">
-											{calcPercent(stats.cloud_water, stats.total).toFixed(2)}%
-										</Table.Cell>
-									</Table.Row>
-									<Table.Row>
-										<Table.Cell class="font-medium">All three (QC + Cloud + Water)</Table.Cell>
-										<Table.Cell class="text-right">{formatNumber(stats.all_three)}</Table.Cell>
-										<Table.Cell class="text-right">
-											{calcPercent(stats.all_three, stats.total).toFixed(2)}%
-										</Table.Cell>
-									</Table.Row>
-									{#if stats.nodata_only > 0}
+					{#if combinations.length > 0}
+						<div class="space-y-4">
+							<h4 class="font-semibold text-sm">Filter Combinations</h4>
+							<div class="rounded-md border">
+								<Table.Root>
+									<Table.Header>
 										<Table.Row>
-											<Table.Cell class="font-medium">NoData only</Table.Cell>
-											<Table.Cell class="text-right">{formatNumber(stats.nodata_only)}</Table.Cell>
-											<Table.Cell class="text-right">
-												{calcPercent(stats.nodata_only, stats.total).toFixed(2)}%
-											</Table.Cell>
+											<Table.Head>Combination</Table.Head>
+											<Table.Head class="text-right">Pixels</Table.Head>
+											<Table.Head class="text-right">Percentage</Table.Head>
 										</Table.Row>
-									{/if}
-								</Table.Body>
-							</Table.Root>
+									</Table.Header>
+									<Table.Body>
+										{#each combinations as combo}
+											<Table.Row>
+												<Table.Cell class="font-medium">{combo.label}</Table.Cell>
+												<Table.Cell class="text-right">{formatNumber(combo.count)}</Table.Cell>
+												<Table.Cell class="text-right">{combo.pct.toFixed(2)}%</Table.Cell>
+											</Table.Row>
+										{/each}
+									</Table.Body>
+								</Table.Root>
+							</div>
 						</div>
-					</div>
-				</Card.Content>
+					{/if}
+					</Card.Content>
 			</Card.Card>
 		{:else}
 			<Card.Card>
