@@ -17,7 +17,7 @@
 	<Popover.Root>
 		<Popover.Trigger>
 			{#snippet child({ props })}
-				<Button variant="outline" size="icon" class="h-10 w-10 shadow-sm" {...props}>
+				<Button variant="secondary" size="icon" class="h-10 w-10 shadow-sm" {...props}>
 					<UserIcon class="size-4" />
 					<span class="sr-only">User menu</span>
 				</Button>
