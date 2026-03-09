@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
-	import { goto } from '$app/navigation';
 	import * as Select from '$lib/components/ui/select';
 	import { Button } from '$lib/components/ui/button';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
@@ -241,7 +240,7 @@
 							{#if session?.user}
 								<Tooltip.Root>
 									<Tooltip.Trigger>
-										<Button variant="ghost" size="icon-sm" onclick={() => goto(`/admin/features/${featureId}`)}>
+										<Button variant="ghost" size="icon-sm" href={`/admin/features/${featureId}`}>
 											<SettingsIcon class="size-3.5" />
 											<span class="sr-only">Manage in admin</span>
 										</Button>
@@ -251,7 +250,7 @@
 							{/if}
 							<Tooltip.Root>
 								<Tooltip.Trigger>
-									<Button variant="ghost" size="icon-sm" onclick={() => goto(`/archive/${featureId}`)}>
+									<Button variant="ghost" size="icon-sm" href={`/archive/${featureId}`}>
 										<DownloadIcon class="size-3.5" />
 										<span class="sr-only">Archive & download</span>
 									</Button>

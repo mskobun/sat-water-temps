@@ -8,6 +8,8 @@
 	import { Spinner } from '$lib/components/ui/spinner';
 	import * as Table from '$lib/components/ui/table';
 	import { Progress } from '$lib/components/ui/progress';
+	import * as Tooltip from '$lib/components/ui/tooltip';
+	import CircleHelpIcon from '@lucide/svelte/icons/circle-help';
 
 	interface FilterStats {
 		total_pixels: number;
@@ -15,25 +17,36 @@
 	}
 
 	// Compute all statistics from bit flag histogram
+	// Bit 0 = QC, Bit 1 = Cloud, Bit 2 = Water, Bit 3 = NoData
 	function computeStats(stats: FilterStats) {
 		const hist = stats.histogram;
 		const total = stats.total_pixels;
 
-		// Bit 0 = QC, Bit 1 = Cloud, Bit 2 = Water
-		const valid = hist['0'] || 0;
-		const qc_only = hist['1'] || 0;
-		const cloud_only = hist['2'] || 0;
-		const qc_cloud = hist['3'] || 0;
-		const water_only = hist['4'] || 0;
-		const qc_water = hist['5'] || 0;
-		const cloud_water = hist['6'] || 0;
-		const all_three = hist['7'] || 0;
+		let filtered_by_qc = 0;
+		let filtered_by_cloud = 0;
+		let filtered_by_water = 0;
+		let filtered_by_nodata = 0;
 
-		// Overlapping totals
-		const filtered_by_qc = qc_only + qc_cloud + qc_water + all_three;
-		const filtered_by_cloud = cloud_only + qc_cloud + cloud_water + all_three;
-		const filtered_by_water = water_only + qc_water + cloud_water + all_three;
+		for (let i = 0; i < 16; i++) {
+			const count = hist[i.toString()] || 0;
+			if (i & 1) filtered_by_qc += count;
+			if (i & 2) filtered_by_cloud += count;
+			if (i & 4) filtered_by_water += count;
+			if (i & 8) filtered_by_nodata += count;
+		}
+
+		const valid = hist['0'] || 0;
 		const filtered = total - valid;
+
+		// Combination counts (collapse +nodata variants)
+		const qc_only = (hist['1'] || 0) + (hist['9'] || 0);
+		const cloud_only = (hist['2'] || 0) + (hist['10'] || 0);
+		const qc_cloud = (hist['3'] || 0) + (hist['11'] || 0);
+		const water_only = (hist['4'] || 0) + (hist['12'] || 0);
+		const qc_water = (hist['5'] || 0) + (hist['13'] || 0);
+		const cloud_water = (hist['6'] || 0) + (hist['14'] || 0);
+		const all_three = (hist['7'] || 0) + (hist['15'] || 0);
+		const nodata_only = hist['8'] || 0;
 
 		return {
 			total,
@@ -42,13 +55,15 @@
 			filtered_by_qc,
 			filtered_by_cloud,
 			filtered_by_water,
+			filtered_by_nodata,
 			qc_only,
 			cloud_only,
 			water_only,
 			qc_cloud,
 			qc_water,
 			cloud_water,
-			all_three
+			all_three,
+			nodata_only
 		};
 	}
 
@@ -204,6 +219,7 @@
 		</Card.Card>
 
 		<!-- Filter Statistics Card -->
+		<Tooltip.Provider>
 		{#if stats}
 			<Card.Card>
 				<Card.Header>
@@ -232,7 +248,18 @@
 						<!-- QC Filter -->
 						<div class="space-y-2">
 							<div class="flex justify-between text-sm">
-								<span class="text-muted-foreground">Quality Control (QC)</span>
+								<span class="text-muted-foreground inline-flex items-center gap-1">
+									Quality Control (QC)
+									<Tooltip.Root>
+										<Tooltip.Trigger>
+											<CircleHelpIcon class="size-3.5 text-muted-foreground/60" />
+										</Tooltip.Trigger>
+										<Tooltip.Content side="right" class="max-w-xs text-xs">
+											Pixels with invalid ECOSTRESS QC flags (e.g. 15, 2501, 65535).
+											<a href="https://lpdaac.usgs.gov/documents/423/ECO2_User_Guide_V1.pdf" target="_blank" rel="noopener" class="underline ml-1">ECOSTRESS QC docs</a>
+										</Tooltip.Content>
+									</Tooltip.Root>
+								</span>
 								<span class="font-medium">
 									{formatNumber(stats.filtered_by_qc)} pixels ({calcPercent(
 										stats.filtered_by_qc,
@@ -246,7 +273,18 @@
 						<!-- Cloud Filter -->
 						<div class="space-y-2">
 							<div class="flex justify-between text-sm">
-								<span class="text-muted-foreground">Cloud Cover</span>
+								<span class="text-muted-foreground inline-flex items-center gap-1">
+									Cloud Cover
+									<Tooltip.Root>
+										<Tooltip.Trigger>
+											<CircleHelpIcon class="size-3.5 text-muted-foreground/60" />
+										</Tooltip.Trigger>
+										<Tooltip.Content side="right" class="max-w-xs text-xs">
+											Pixels flagged as cloud-contaminated by the ECOSTRESS cloud mask layer.
+											<a href="https://www.earthdata.nasa.gov/data/catalog/lpcloud-eco-l2-cloud-002" target="_blank" rel="noopener" class="underline ml-1">ECO_L2_CLOUD product</a>
+										</Tooltip.Content>
+									</Tooltip.Root>
+								</span>
 								<span class="font-medium">
 									{formatNumber(stats.filtered_by_cloud)} pixels ({calcPercent(
 										stats.filtered_by_cloud,
@@ -260,7 +298,18 @@
 						<!-- Water Mask Filter -->
 						<div class="space-y-2">
 							<div class="flex justify-between text-sm">
-								<span class="text-muted-foreground">Water Mask (Non-water pixels)</span>
+								<span class="text-muted-foreground inline-flex items-center gap-1">
+									Water Mask (Non-water pixels)
+									<Tooltip.Root>
+										<Tooltip.Trigger>
+											<CircleHelpIcon class="size-3.5 text-muted-foreground/60" />
+										</Tooltip.Trigger>
+										<Tooltip.Content side="right" class="max-w-xs text-xs">
+											Non-water pixels removed using the ECOSTRESS water body detection layer (wt != 1).
+											<a href="https://www.earthdata.nasa.gov/data/catalog/lpcloud-eco-l2-lste-002" target="_blank" rel="noopener" class="underline ml-1">ECO_L2_LSTE product</a>
+										</Tooltip.Content>
+									</Tooltip.Root>
+								</span>
 								<span class="font-medium">
 									{formatNumber(stats.filtered_by_water)} pixels ({calcPercent(
 										stats.filtered_by_water,
@@ -270,6 +319,33 @@
 							</div>
 							<Progress value={calcPercent(stats.filtered_by_water, stats.total)} class="h-2" />
 						</div>
+
+						<!-- NoData / Swath Coverage -->
+						{#if stats.filtered_by_nodata > 0}
+							<div class="space-y-2">
+								<div class="flex justify-between text-sm">
+									<span class="text-muted-foreground inline-flex items-center gap-1">
+										NoData (Outside swath)
+										<Tooltip.Root>
+											<Tooltip.Trigger>
+												<CircleHelpIcon class="size-3.5 text-muted-foreground/60" />
+											</Tooltip.Trigger>
+											<Tooltip.Content side="right" class="max-w-xs text-xs">
+												Pixels inside the polygon with no LST data — the satellite swath did not cover this part of the water body during this overpass.
+												<a href="https://www.earthdata.nasa.gov/data/instruments/ecostress" target="_blank" rel="noopener" class="underline ml-1">ECOSTRESS instrument</a>
+											</Tooltip.Content>
+										</Tooltip.Root>
+									</span>
+									<span class="font-medium">
+										{formatNumber(stats.filtered_by_nodata)} pixels ({calcPercent(
+											stats.filtered_by_nodata,
+											stats.total
+										).toFixed(1)}%)
+									</span>
+								</div>
+								<Progress value={calcPercent(stats.filtered_by_nodata, stats.total)} class="h-2" />
+							</div>
+						{/if}
 					</div>
 
 					<!-- Filter Combinations -->
@@ -334,6 +410,15 @@
 											{calcPercent(stats.all_three, stats.total).toFixed(2)}%
 										</Table.Cell>
 									</Table.Row>
+									{#if stats.nodata_only > 0}
+										<Table.Row>
+											<Table.Cell class="font-medium">NoData only</Table.Cell>
+											<Table.Cell class="text-right">{formatNumber(stats.nodata_only)}</Table.Cell>
+											<Table.Cell class="text-right">
+												{calcPercent(stats.nodata_only, stats.total).toFixed(2)}%
+											</Table.Cell>
+										</Table.Row>
+									{/if}
 								</Table.Body>
 							</Table.Root>
 						</div>
@@ -347,5 +432,6 @@
 				</Card.Content>
 			</Card.Card>
 		{/if}
+		</Tooltip.Provider>
 	{/if}
 </div>

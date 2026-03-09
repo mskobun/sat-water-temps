@@ -212,16 +212,81 @@ def upload_to_r2(s3_client, bucket_name, key, file_path, content_type=None):
     print(f"Uploaded {file_path} to {key}")
 
 
-def compute_filter_stats(filter_flags, total_pixels):
-    """Compute filter statistics as bit flag histogram"""
-    # Create histogram of bit flag values (0-7)
+def compute_filter_stats(filter_flags, total_pixels, padding_count=0):
+    """Compute filter statistics as bit flag histogram.
+
+    total_pixels counts only pixels inside the polygon (excludes grid padding).
+    padding_count is tracked separately for reference.
+    """
+    # Create histogram of bit flag values (0-15, 4 bits)
     histogram = {}
-    for flag_value in range(8):
+    for flag_value in range(16):
         count = int(np.sum(filter_flags == flag_value))
         if count > 0:  # Only store non-zero counts
             histogram[str(flag_value)] = count
 
-    return {"total_pixels": int(total_pixels), "histogram": histogram}
+    stats = {"total_pixels": int(total_pixels), "histogram": histogram}
+    if padding_count > 0:
+        stats["padding_count"] = padding_count
+    return stats
+
+
+def apply_filters(df, water_mask_flag):
+    """Apply all pixel filters and return (filter_flags, suffix, padding_count).
+
+    Drops padding pixels (outside polygon) from df before filtering.
+    Padding is identified by QC fill values (NaN or -99999).
+
+    Pixels inside the polygon with no LST data (swath gaps) are kept
+    and tracked as bit 3 (NoData).
+
+    Mutates df in place (adds *_filter columns, drops padding rows).
+    Bit 0 = QC, Bit 1 = Cloud, Bit 2 = Water, Bit 3 = NoData (swath gap).
+    """
+    # Drop padding pixels outside polygon (QC fill value = -99999 or NaN)
+    padding_mask = df["QC"].isna() | (df["QC"] == -99999)
+    padding_count = int(padding_mask.sum())
+    df.drop(df.index[padding_mask], inplace=True)
+    df.reset_index(drop=True, inplace=True)
+
+    filter_flags = np.zeros(len(df), dtype=np.uint8)
+
+    # Bit 3: NoData / swath gap (inside polygon but no LST)
+    nodata_mask = df["LST"].isna() | (df["LST"] <= 0)
+    filter_flags = np.where(nodata_mask, filter_flags | 8, filter_flags)
+
+    for col in ["LST", "LST_err", "QC", "EmisWB", "height"]:
+        df[f"{col}_filter"] = np.where(nodata_mask, np.nan, df[col])
+
+    # Bit 0: QC filtering
+    qc_mask = df["QC"].isin(INVALID_QC_VALUES)
+    filter_flags = np.where(qc_mask, filter_flags | 1, filter_flags)
+
+    for col in ["LST", "LST_err", "QC", "EmisWB", "height"]:
+        df[f"{col}_filter"] = np.where(qc_mask, np.nan, df[f"{col}_filter"])
+
+    # Bit 1: Cloud filtering
+    cloud_mask = df["cloud"] == 1
+    filter_flags = np.where(cloud_mask, filter_flags | 2, filter_flags)
+
+    for col in ["LST", "LST_err", "QC", "EmisWB", "height"]:
+        df[f"{col}_filter"] = np.where(cloud_mask, np.nan, df[f"{col}_filter"])
+
+    suffix = ""
+    if water_mask_flag:
+        # Bit 2: Water mask — keep only water pixels
+        water_mask = df["wt"] == 0
+        filter_flags = np.where(water_mask, filter_flags | 4, filter_flags)
+
+        for col in [
+            "LST_filter", "LST_err_filter", "QC_filter",
+            "EmisWB_filter", "height_filter",
+        ]:
+            df[col] = np.where(water_mask, np.nan, df[col])
+    else:
+        suffix = "_wtoff"
+
+    return filter_flags, suffix, padding_count
 
 
 def process_rasters(
@@ -309,59 +374,30 @@ def process_rasters(
         }
     )
 
-    # Create filter tracking array (1 byte per pixel, 3 bits used)
-    filter_flags = np.zeros(len(df), dtype=np.uint8)
-
-    # Filter by QC and cloud first
+    # Track original grid indices before dropping nodata rows
+    df["_grid_idx"] = np.arange(len(df))
+    total_grid_pixels = len(df)
     water_mask_flag = df["wt"].isin([1]).any()
+    filter_flags, suffix, padding_count = apply_filters(df, water_mask_flag)
 
-    # QC filtering (bit 0)
-    qc_mask = df["QC"].isin(INVALID_QC_VALUES)
-    filter_flags = np.where(qc_mask, filter_flags | 1, filter_flags)
-
-    for col in ["LST", "LST_err", "QC", "EmisWB", "height"]:
-        df[f"{col}_filter"] = np.where(qc_mask, np.nan, df[col])
-
-    # Cloud filtering (bit 1)
-    cloud_mask = df["cloud"] == 1
-    filter_flags = np.where(cloud_mask, filter_flags | 2, filter_flags)
-
-    for col in ["LST", "LST_err", "QC", "EmisWB", "height"]:
-        df[f"{col}_filter"] = np.where(cloud_mask, np.nan, df[f"{col}_filter"])
-
-    suffix = ""
-    if water_mask_flag:
-        # Water detected - filter to keep only water pixels (bit 2)
-        water_mask = df["wt"] == 0
-        filter_flags = np.where(water_mask, filter_flags | 4, filter_flags)
-
-        for col in [
-            "LST_filter",
-            "LST_err_filter",
-            "QC_filter",
-            "EmisWB_filter",
-            "height_filter",
-        ]:
-            df[f"{col}"] = np.where(water_mask, np.nan, df[col])
-    else:
-        # No water detected - keep all data but flag as unreliable
-        suffix = "_wtoff"
-
-    # Compute filter statistics
-    filter_stats = compute_filter_stats(filter_flags, len(df))
+    # Compute filter statistics (total_pixels = pixels inside polygon only)
+    filter_stats = compute_filter_stats(filter_flags, len(df), padding_count)
 
     # Log to CloudWatch (compute stats from histogram for display)
     hist = filter_stats["histogram"]
     total = filter_stats["total_pixels"]
     valid = hist.get("0", 0)
-    filtered_qc = sum(hist.get(str(i), 0) for i in [1, 3, 5, 7])  # Bit 0 set
-    filtered_cloud = sum(hist.get(str(i), 0) for i in [2, 3, 6, 7])  # Bit 1 set
-    filtered_water = sum(hist.get(str(i), 0) for i in [4, 5, 6, 7])  # Bit 2 set
+    filtered_qc = sum(hist.get(str(i), 0) for i in range(16) if i & 1)  # Bit 0 set
+    filtered_cloud = sum(hist.get(str(i), 0) for i in range(16) if i & 2)  # Bit 1 set
+    filtered_water = sum(hist.get(str(i), 0) for i in range(16) if i & 4)  # Bit 2 set
+    filtered_nodata = sum(hist.get(str(i), 0) for i in range(16) if i & 8)  # Bit 3 set
 
     print(f"Filter Statistics for {name}/{location} {date}:")
-    print(f"  Total pixels: {total:,}")
+    print(f"  Grid pixels: {total_grid_pixels:,} (padding: {padding_count:,})")
+    print(f"  Polygon pixels: {total:,}")
     print(f"  Valid pixels: {valid:,} ({valid / total * 100:.1f}%)")
     print(f"  Filtered: {total - valid:,} ({(total - valid) / total * 100:.1f}%)")
+    print(f"    - NoData (swath gap): {filtered_nodata:,} ({filtered_nodata / total * 100:.1f}%)")
     print(f"    - QC filtered: {filtered_qc:,} ({filtered_qc / total * 100:.1f}%)")
     print(
         f"    - Cloud filtered: {filtered_cloud:,} ({filtered_cloud / total * 100:.1f}%)"
@@ -371,14 +407,13 @@ def process_rasters(
             f"    - Water mask filtered: {filtered_water:,} ({filtered_water / total * 100:.1f}%)"
         )
 
-    # Create filtered raster
-    filtered_rasters = {
-        "LST": df["LST_filter"].values.reshape(rows, cols).astype(np.float32),
-        "LST_err": df["LST_err_filter"].values.reshape(rows, cols).astype(np.float32),
-        "QC": df["QC_filter"].values.reshape(rows, cols).astype(np.float32),
-        "EmisWB": df["EmisWB_filter"].values.reshape(rows, cols).astype(np.float32),
-        "height": df["height_filter"].values.reshape(rows, cols).astype(np.float32),
-    }
+    # Reconstruct filtered rasters on the original grid (nodata rows become NaN)
+    grid_size = rows * cols
+    filtered_rasters = {}
+    for col_name in ["LST", "LST_err", "QC", "EmisWB", "height"]:
+        full = np.full(grid_size, np.nan, dtype=np.float32)
+        full[df["_grid_idx"].values] = df[f"{col_name}_filter"].values.astype(np.float32)
+        filtered_rasters[col_name] = full.reshape(rows, cols)
 
     base_name = f"{name}_{location}_{date}_filter{suffix}"
     filter_tif_path = os.path.join(work_dir, f"{base_name}.tif")
@@ -423,7 +458,7 @@ def process_rasters(
     hist = filter_stats["histogram"]
     valid_pixels = hist.get("0", 0)
     land_pixels = (
-        sum(hist.get(str(i), 0) for i in [4, 5, 6, 7]) if water_mask_flag else 0
+        sum(hist.get(str(i), 0) for i in range(16) if i & 4) if water_mask_flag else 0
     )
 
     metadata = {

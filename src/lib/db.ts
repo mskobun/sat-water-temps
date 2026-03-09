@@ -197,6 +197,17 @@ export async function countJobsByFilter(db: D1Database, status?: string) {
   }
 }
 
+/**
+ * Parse filter_stats JSON. Old 3-bit histograms (no buckets >= 8) pass through
+ * as-is — nodata wasn't tracked so there's no reliable way to infer it.
+ */
+function parseFilterStats(
+  raw: unknown,
+) {
+  if (!raw) return null;
+  return JSON.parse(raw as string);
+}
+
 export async function getProcessingJobs(
   db: D1Database,
   limit: number = 50,
@@ -228,8 +239,8 @@ export async function getProcessingJobs(
     // Parse JSON metadata and filter_stats
     return (result.results || []).map((job: any) => ({
       ...job,
-      metadata: job.metadata ? JSON.parse(job.metadata) : null,
-      filter_stats: job.filter_stats ? JSON.parse(job.filter_stats) : null
+      metadata: job.metadata ? JSON.parse(job.metadata as string) : null,
+      filter_stats: parseFilterStats(job.filter_stats)
     }));
   } catch (err) {
     console.error("D1 query error:", err);
@@ -261,8 +272,8 @@ export async function getJobWithFilterStats(
     // Parse JSON fields
     return {
       ...job,
-      metadata: job.metadata ? JSON.parse(job.metadata) : null,
-      filter_stats: job.filter_stats ? JSON.parse(job.filter_stats) : null
+      metadata: job.metadata ? JSON.parse(job.metadata as string) : null,
+      filter_stats: parseFilterStats(job.filter_stats)
     };
   } catch (err) {
     console.error("D1 query error:", err);

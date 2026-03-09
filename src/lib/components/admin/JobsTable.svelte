@@ -38,10 +38,18 @@
 	function getStatsFromHistogram(stats: FilterStats) {
 		const hist = stats.histogram;
 		const valid = hist['0'] || 0;
-		const filtered_qc = [1, 3, 5, 7].reduce((sum, i) => sum + (hist[i.toString()] || 0), 0);
-		const filtered_cloud = [2, 3, 6, 7].reduce((sum, i) => sum + (hist[i.toString()] || 0), 0);
-		const filtered_water = [4, 5, 6, 7].reduce((sum, i) => sum + (hist[i.toString()] || 0), 0);
-		return { valid, filtered_qc, filtered_cloud, filtered_water, total: stats.total_pixels };
+		let filtered_qc = 0;
+		let filtered_cloud = 0;
+		let filtered_water = 0;
+		let filtered_nodata = 0;
+		for (let i = 0; i < 16; i++) {
+			const count = hist[i.toString()] || 0;
+			if (i & 1) filtered_qc += count;
+			if (i & 2) filtered_cloud += count;
+			if (i & 4) filtered_water += count;
+			if (i & 8) filtered_nodata += count;
+		}
+		return { valid, filtered_qc, filtered_cloud, filtered_water, filtered_nodata, total: stats.total_pixels };
 	}
 
 	function formatDate(timestamp: number) {
@@ -68,9 +76,10 @@
 
 	function getFilterBreakdown(stats: FilterStats | null): string {
 		if (!stats) return '';
-		const { filtered_qc, filtered_cloud, filtered_water, total } = getStatsFromHistogram(stats);
+		const { filtered_qc, filtered_cloud, filtered_water, filtered_nodata, total } = getStatsFromHistogram(stats);
 		if (total === 0) return '';
 		const parts = [];
+		if (filtered_nodata > 0) parts.push(`NoData: ${((filtered_nodata / total) * 100).toFixed(1)}%`);
 		if (filtered_qc > 0) parts.push(`QC: ${((filtered_qc / total) * 100).toFixed(1)}%`);
 		if (filtered_cloud > 0) parts.push(`Cloud: ${((filtered_cloud / total) * 100).toFixed(1)}%`);
 		if (filtered_water > 0) parts.push(`Water: ${((filtered_water / total) * 100).toFixed(1)}%`);
