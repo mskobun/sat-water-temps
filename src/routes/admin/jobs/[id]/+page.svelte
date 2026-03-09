@@ -10,6 +10,7 @@
 	import { Progress } from '$lib/components/ui/progress';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import CircleHelpIcon from '@lucide/svelte/icons/circle-help';
+	import MapIcon from '@lucide/svelte/icons/map';
 
 	interface FilterStats {
 		total_pixels: number;
@@ -146,7 +147,12 @@
 			<h1 class="text-3xl font-bold">Job Details</h1>
 			<p class="text-muted-foreground">Job #{jobId}</p>
 		</div>
-		<Button variant="outline" href="/admin/jobs">Back to Jobs</Button>
+		{#if job?.status === 'success' && job.feature_id && job.date}
+			<Button variant="outline" href="/feature/{job.feature_id}?date={job.date}">
+				<MapIcon class="size-4 mr-2" />
+				View on Map
+			</Button>
+		{/if}
 	</div>
 
 	{#if loading}
@@ -167,43 +173,55 @@
 				<Card.Title>Job Information</Card.Title>
 			</Card.Header>
 			<Card.Content class="space-y-4">
-				<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-					<div>
-						<p class="text-sm text-muted-foreground">Status</p>
-						<Badge variant={getStatusVariant(job.status)} class="mt-1">{job.status}</Badge>
-					</div>
-					<div>
-						<p class="text-sm text-muted-foreground">Type</p>
-						<p class="font-medium">{job.job_type}</p>
-					</div>
-					<div>
-						<p class="text-sm text-muted-foreground">Feature</p>
-						<p class="font-medium">{job.feature_id || '-'}</p>
-					</div>
-					<div>
-						<p class="text-sm text-muted-foreground">Date</p>
-						<p class="font-medium">{job.date || '-'}</p>
-					</div>
-				</div>
-
-				<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-					<div>
-						<p class="text-sm text-muted-foreground">Started</p>
-						<p class="font-medium text-sm">{formatDate(job.started_at)}</p>
-					</div>
-					<div>
-						<p class="text-sm text-muted-foreground">Completed</p>
-						<p class="font-medium text-sm">
-							{job.completed_at ? formatDate(job.completed_at) : '-'}
-						</p>
-					</div>
-					<div>
-						<p class="text-sm text-muted-foreground">Duration</p>
-						<p class="font-medium">{formatDuration(job.duration_ms)}</p>
-					</div>
-					<div>
-						<p class="text-sm text-muted-foreground">Task ID</p>
-						<p class="font-mono text-xs">{job.task_id?.slice(0, 12) || '-'}...</p>
+				<div class="flex gap-6">
+					{#if job.status === 'success' && job.feature_id && job.date}
+						<a href="/feature/{job.feature_id}?date={job.date}" class="shrink-0 self-start">
+							<img
+								src="/api/feature/{job.feature_id}/tif/{job.date}/relative"
+								alt="{job.feature_id} {job.date}"
+								class="w-28 h-28 rounded-md border object-cover bg-muted hover:ring-2 hover:ring-ring transition-all"
+							/>
+						</a>
+					{/if}
+					<div class="flex-1 space-y-4">
+						<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+							<div>
+								<p class="text-sm text-muted-foreground">Status</p>
+								<Badge variant={getStatusVariant(job.status)} class="mt-1">{job.status}</Badge>
+							</div>
+							<div>
+								<p class="text-sm text-muted-foreground">Type</p>
+								<p class="font-medium">{job.job_type}</p>
+							</div>
+							<div>
+								<p class="text-sm text-muted-foreground">Feature</p>
+								<p class="font-medium">{job.feature_id || '-'}</p>
+							</div>
+							<div>
+								<p class="text-sm text-muted-foreground">Date</p>
+								<p class="font-medium">{job.date || '-'}</p>
+							</div>
+						</div>
+						<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+							<div>
+								<p class="text-sm text-muted-foreground">Started</p>
+								<p class="font-medium text-sm">{formatDate(job.started_at)}</p>
+							</div>
+							<div>
+								<p class="text-sm text-muted-foreground">Completed</p>
+								<p class="font-medium text-sm">
+									{job.completed_at ? formatDate(job.completed_at) : '-'}
+								</p>
+							</div>
+							<div>
+								<p class="text-sm text-muted-foreground">Duration</p>
+								<p class="font-medium">{formatDuration(job.duration_ms)}</p>
+							</div>
+							<div>
+								<p class="text-sm text-muted-foreground">Task ID</p>
+								<p class="font-mono text-xs break-all">{job.task_id || '-'}</p>
+							</div>
+						</div>
 					</div>
 				</div>
 
