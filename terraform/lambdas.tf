@@ -156,7 +156,10 @@ resource "aws_iam_access_key" "cloudflare_invoker_key" {
 
 # SQS Trigger for Processor Lambda
 resource "aws_lambda_event_source_mapping" "sqs_trigger" {
-  event_source_arn = aws_sqs_queue.eco_processing_queue.arn
-  function_name    = aws_lambda_function.processor_lambda.arn
-  batch_size       = 1
+  event_source_arn                   = aws_sqs_queue.eco_processing_queue.arn
+  function_name                      = aws_lambda_function.processor_lambda.arn
+  batch_size                         = 5
+  maximum_batching_window_in_seconds = 10
+
+  function_response_types = ["ReportBatchItemFailures"]
 }

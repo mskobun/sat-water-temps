@@ -12,6 +12,7 @@ from aws_xray_sdk.core import patch_all
 from d1 import query_d1, log_job_to_d1
 from shared import get_token, create_http_session, extract_metadata
 
+import boto3
 import rasterio
 
 # Patch all supported libraries for automatic X-Ray tracing
@@ -24,6 +25,35 @@ HTTP_READ_TIMEOUT = 120
 DOWNLOAD_CHUNK_SIZE = 64 * 1024
 GLOBAL_MIN = 273.15  # Kelvin
 GLOBAL_MAX = 308.15  # Kelvin
+
+# Module-level caches (persist across warm invocations)
+_aid_folder_mapping = None
+_s3_client = None
+
+
+def _get_aid_folder_mapping():
+    """Load and cache ROI polygon mapping. Persists across warm Lambda invocations."""
+    global _aid_folder_mapping
+    if _aid_folder_mapping is None:
+        roi = gpd.read_file("static/polygons_new.geojson")
+        _aid_folder_mapping = {}
+        for idx, row in roi.iterrows():
+            _aid_folder_mapping[int(idx + 1)] = (row["name"], row["location"])
+    return _aid_folder_mapping
+
+
+def _get_s3_client():
+    """Create and cache R2 S3 client. Persists across warm Lambda invocations."""
+    global _s3_client
+    if _s3_client is None:
+        _s3_client = boto3.client(
+            "s3",
+            endpoint_url=os.environ.get("R2_ENDPOINT"),
+            aws_access_key_id=os.environ.get("R2_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.environ.get("R2_SECRET_ACCESS_KEY"),
+            region_name="auto",
+        )
+    return _s3_client
 
 
 def insert_metadata_to_d1(
@@ -441,47 +471,36 @@ def process_rasters(
     )
 
 
-def handler(event, context):
+def _process_record(record, token, session, aid_folder_mapping, s3_client, bucket_name):
+    """Process a single SQS record. Returns (message_id, success) tuple."""
     import time
-    import boto3
+    import shutil
+    import traceback
 
-    # SQS event structure
-    print(f"Received {len(event['Records'])} SQS message(s)")
+    message_id = record["messageId"]
+    body = json.loads(record["body"])
+    task_id = body.get("task_id")
 
-    for record in event["Records"]:
-        body = json.loads(record["body"])
-        task_id = body.get("task_id")
+    if not task_id:
+        print(f"[UNKNOWN] Skipping message {message_id}: no task_id in body")
+        return message_id, True  # Don't retry malformed messages
 
-        if not task_id:
-            print(f"[UNKNOWN] Skipping message: no task_id in body")
-            continue
+    print(f"[{task_id}] Processing SQS message {message_id}")
 
-        print(f"[{task_id}] Processing SQS message")
+    headers = {"Authorization": f"Bearer {token}"}
+    url = f"https://appeears.earthdatacloud.nasa.gov/api/bundle/{task_id}"
 
-        user = os.environ.get("APPEEARS_USER")
-        password = os.environ.get("APPEEARS_PASS")
-        r2_endpoint = os.environ.get("R2_ENDPOINT")
-        bucket_name = os.environ.get("R2_BUCKET_NAME", "multitifs")
-        r2_key = os.environ.get("R2_ACCESS_KEY_ID")
-        r2_secret = os.environ.get("R2_SECRET_ACCESS_KEY")
+    work_dir = f"/tmp/{task_id}_{message_id}"
+    os.makedirs(work_dir, exist_ok=True)
 
-        token = get_token(user, password)
-        headers = {"Authorization": f"Bearer {token}"}
+    files_to_process = body.get("files", [])
+    if not files_to_process:
+        print(f"[{task_id}] ERROR: No files provided in SQS message body")
+        return message_id, True  # Don't retry empty messages
 
-        # Download
-        url = f"https://appeears.earthdatacloud.nasa.gov/api/bundle/{task_id}"
-        session = create_http_session()
+    print(f"[{task_id}] Downloading {len(files_to_process)} file(s)")
 
-        work_dir = f"/tmp/{task_id}"
-        os.makedirs(work_dir, exist_ok=True)
-        # Use provided files list
-        files_to_process = body.get("files", [])
-        if not files_to_process:
-            print(f"[{task_id}] ERROR: No files provided in SQS message body")
-            continue
-
-        print(f"[{task_id}] Downloading {len(files_to_process)} file(s)")
-
+    try:
         downloaded_files = []
 
         with xray_recorder.capture("download_files") as subsegment:
@@ -493,7 +512,6 @@ def handler(event, context):
                 filename = file_info["file_name"]
                 local_path = os.path.join(work_dir, filename)
 
-                # Download file
                 d_url = f"{url}/{file_id}"
                 print(f"[{task_id}] Downloading: {filename}")
                 r = session.get(d_url, headers=headers, stream=True)
@@ -502,19 +520,9 @@ def handler(event, context):
                         f.write(chunk)
                 downloaded_files.append(local_path)
 
-            print(
-                f"[{task_id}] Downloaded {len(downloaded_files)} file(s) successfully"
-            )
+            print(f"[{task_id}] Downloaded {len(downloaded_files)} file(s) successfully")
 
-        # Process
-        # Need ROI mapping
-        roi_path = "static/polygons_new.geojson"
-        roi = gpd.read_file(roi_path)
-        aid_folder_mapping = {}
-        for idx, row in roi.iterrows():
-            aid_folder_mapping[int(idx + 1)] = (row["name"], row["location"])
-
-        # Group by AID and Date (should be just one group now, but keeping logic safe)
+        # Group by AID and Date (should be just one group, but keeping logic safe)
         files_by_aid_date = {}
         for f in downloaded_files:
             aid, date = extract_metadata(f)
@@ -524,35 +532,18 @@ def handler(event, context):
                     files_by_aid_date[key] = []
                 files_by_aid_date[key].append(f)
             else:
-                print(
-                    f"[{task_id}] WARNING: Could not extract AID/date from {os.path.basename(f)}"
-                )
+                print(f"[{task_id}] WARNING: Could not extract AID/date from {os.path.basename(f)}")
 
-        print(
-            f"[{task_id}] Grouped files into {len(files_by_aid_date)} AID/date combination(s)"
-        )
-
-        # R2 client
-        s3_client = boto3.client(
-            "s3",
-            endpoint_url=r2_endpoint,
-            aws_access_key_id=r2_key,
-            aws_secret_access_key=r2_secret,
-            region_name="auto",
-        )
+        print(f"[{task_id}] Grouped files into {len(files_by_aid_date)} AID/date combination(s)")
 
         for (aid, date), files in files_by_aid_date.items():
             start_time = time.time()
 
-            # Get feature_id for logging
             name, location = aid_folder_mapping.get(aid, (f"aid{aid}", "lake"))
             feature_id = f"{name}/{location}" if location != "lake" else name
 
-            print(
-                f"[{task_id}][{feature_id}] Starting processing for date {date} with {len(files)} file(s)"
-            )
+            print(f"[{task_id}][{feature_id}] Starting processing for date {date} with {len(files)} file(s)")
 
-            # Log job start — fatal=False so we still attempt the actual work
             log_job_to_d1(
                 job_type="process",
                 task_id=task_id,
@@ -570,16 +561,10 @@ def handler(event, context):
 
                 try:
                     process_rasters(
-                        aid,
-                        date,
-                        files,
-                        aid_folder_mapping,
-                        work_dir,
-                        s3_client,
-                        bucket_name,
+                        aid, date, files, aid_folder_mapping,
+                        work_dir, s3_client, bucket_name,
                     )
 
-                    # Log success
                     duration_ms = int((time.time() - start_time) * 1000)
                     log_job_to_d1(
                         job_type="process",
@@ -589,9 +574,7 @@ def handler(event, context):
                         status="success",
                         duration_ms=duration_ms,
                     )
-                    print(
-                        f"[{task_id}][{feature_id}] ✓ Processed successfully in {duration_ms}ms"
-                    )
+                    print(f"[{task_id}][{feature_id}] ✓ Processed successfully in {duration_ms}ms")
 
                 except ValueError as e:
                     # Permanent failure (missing layers, no files) - don't retry
@@ -606,15 +589,13 @@ def handler(event, context):
                         duration_ms=duration_ms,
                         error_message=error_msg,
                     )
-                    print(
-                        f"[{task_id}][{feature_id}] ✗ Permanent failure (skipping): {error_msg}"
-                    )
+                    print(f"[{task_id}][{feature_id}] ✗ Permanent failure (skipping): {error_msg}")
                     subsegment.put_annotation("error", True)
                     subsegment.put_annotation("permanent_failure", True)
                     subsegment.put_metadata("error_message", error_msg)
 
                 except Exception as e:
-                    # Transient failure - re-raise to trigger SQS retry
+                    # Transient failure - report as failed for SQS retry
                     duration_ms = int((time.time() - start_time) * 1000)
                     error_msg = str(e)
                     log_job_to_d1(
@@ -626,23 +607,60 @@ def handler(event, context):
                         duration_ms=duration_ms,
                         error_message=error_msg,
                     )
-                    print(
-                        f"[{task_id}][{feature_id}] ✗ Transient failure (will retry): {error_msg}"
-                    )
-                    import traceback
-
-                    print(
-                        f"[{task_id}][{feature_id}] Traceback: {traceback.format_exc()}"
-                    )
+                    print(f"[{task_id}][{feature_id}] ✗ Transient failure (will retry): {error_msg}")
+                    print(f"[{task_id}][{feature_id}] Traceback: {traceback.format_exc()}")
                     subsegment.put_annotation("error", True)
                     subsegment.put_metadata("error_message", error_msg)
-                    raise
+                    return message_id, False  # Signal failure for batch item reporting
 
-        # Cleanup
-        import shutil
+        return message_id, True
 
-        shutil.rmtree(work_dir)
-        print(f"[{task_id}] Cleaned up work directory")
+    except Exception as e:
+        print(f"[{task_id}] ✗ Record-level failure: {e}")
+        print(f"[{task_id}] Traceback: {traceback.format_exc()}")
+        return message_id, False
 
-    print(f"Handler completed successfully")
-    return {"statusCode": 200}
+    finally:
+        # Cleanup work directory
+        if os.path.exists(work_dir):
+            shutil.rmtree(work_dir)
+            print(f"[{task_id}] Cleaned up work directory")
+
+
+def handler(event, context):
+    import time
+
+    records = event["Records"]
+    print(f"Received {len(records)} SQS message(s)")
+
+    # Shared resources across all records in this batch
+    user = os.environ.get("APPEEARS_USER")
+    password = os.environ.get("APPEEARS_PASS")
+    bucket_name = os.environ.get("R2_BUCKET_NAME", "multitifs")
+
+    token = get_token(user, password)
+    session = create_http_session()
+    aid_folder_mapping = _get_aid_folder_mapping()
+    s3_client = _get_s3_client()
+
+    # Process each record, tracking failures for partial batch reporting
+    failed_message_ids = []
+
+    for record in records:
+        message_id, success = _process_record(
+            record, token, session, aid_folder_mapping, s3_client, bucket_name,
+        )
+        if not success:
+            failed_message_ids.append(message_id)
+
+    if failed_message_ids:
+        print(f"Batch complete: {len(failed_message_ids)}/{len(records)} failed, will be retried")
+    else:
+        print(f"Batch complete: all {len(records)} message(s) processed successfully")
+
+    # Return partial batch failure response (requires ReportBatchItemFailures on the event source)
+    return {
+        "batchItemFailures": [
+            {"itemIdentifier": mid} for mid in failed_message_ids
+        ]
+    }
