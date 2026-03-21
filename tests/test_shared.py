@@ -4,7 +4,25 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lambda_functions"))
 
-from shared import extract_metadata
+from shared import extract_metadata, to_sort_date
+
+
+class TestToSortDate:
+    def test_iso_passthrough(self):
+        assert to_sort_date("2024-12-27") == "2024-12-27"
+
+    def test_doy_jan_1(self):
+        assert to_sort_date("2024001120000") == "2024-01-01"
+
+    def test_doy_dec_27(self):
+        assert to_sort_date("2024362041923") == "2024-12-27"
+
+    def test_doy_leap_year(self):
+        assert to_sort_date("2024366000000") == "2024-12-31"
+
+    def test_cross_format_comparison(self):
+        """Landsat ISO and ECOSTRESS DOY for the same date should produce equal sort keys."""
+        assert to_sort_date("2024-12-27") == to_sort_date("2024362041923")
 
 
 class TestExtractMetadata:

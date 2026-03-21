@@ -8,6 +8,7 @@
 	import { Spinner } from '$lib/components/ui/spinner';
 	import StatBar from '$lib/components/admin/StatBar.svelte';
 	import { format, fromUnixTime } from 'date-fns';
+	import { formatShortDate } from '$lib/date-utils';
 
 	interface Feature {
 		id: string;
@@ -140,9 +141,9 @@
 										</div>
 									</Table.Cell>
 									<Table.Cell class="font-mono text-sm">{feature.id}</Table.Cell>
-									<Table.Cell class="text-sm"
-										>{feature.latest_date || '-'}</Table.Cell
-									>
+								<Table.Cell class="text-sm"
+									>{feature.latest_date ? formatShortDate(feature.latest_date) : '-'}</Table.Cell
+								>
 									<Table.Cell class="text-sm">{feature.date_count}</Table.Cell>
 									<Table.Cell class="text-sm">
 										<span class="font-medium"

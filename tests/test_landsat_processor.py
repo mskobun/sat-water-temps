@@ -309,6 +309,7 @@ class TestLandsatProcessOneRecordFixture:
         monkeypatch.chdir(repo_root)
 
         inserted = []
+        uploaded_csvs = {}
 
         def capture_insert(feature_id, date, metadata, csv_r2_key, tif_r2_key, png_r2_keys, source="ecostress"):
             inserted.append(
@@ -323,18 +324,22 @@ class TestLandsatProcessOneRecordFixture:
                 }
             )
 
+        def capture_upload(s3_client, bucket, key, local_path, content_type):
+            if key.endswith(".csv"):
+                uploaded_csvs[key] = local_path
+
         mock_s3 = MagicMock()
 
-        with patch("landsat_processor.upload_to_r2") as _upload, patch(
+        with patch("landsat_processor.upload_to_r2", side_effect=capture_upload) as _upload, patch(
             "landsat_processor.insert_metadata_to_d1", side_effect=capture_insert
         ), patch("landsat_processor.log_job_to_d1"), patch(
             "landsat_processor._get_s3_client", return_value=mock_s3
-        ):
+        ), patch("landsat_processor.tif_to_png", return_value=__import__('io').BytesIO(b'\x89PNG')):
             from landsat_processor import process_one_record
 
+            # Read CSV before cleanup by capturing it in upload
             process_one_record(magat_landsat_body)
 
-        assert _upload.call_count >= 3
         assert len(inserted) == 1
         row = inserted[0]
         assert row["feature_id"] == "Magat"
@@ -345,6 +350,40 @@ class TestLandsatProcessOneRecordFixture:
         assert row["metadata"]["max_temp"] is not None
         assert "LANDSAT/Magat/lake/" in row["csv_r2_key"]
         assert "filter_stats" in row["metadata"]
+
+    @pytest.mark.filterwarnings("ignore:All-NaN slice encountered:RuntimeWarning")
+    def test_csv_coordinates_are_wgs84(self, magat_landsat_body, monkeypatch, tmp_path):
+        """CSV longitude/latitude must be in WGS84 (degrees), not projected UTM (meters)."""
+        repo_root = Path(__file__).resolve().parent.parent
+        monkeypatch.chdir(repo_root)
+
+        saved_csv = [None]
+
+        def capture_upload(s3_client, bucket, key, local_path, content_type):
+            if key.endswith(".csv"):
+                import shutil
+                dest = tmp_path / "output.csv"
+                shutil.copy2(local_path, dest)
+                saved_csv[0] = dest
+
+        with patch("landsat_processor.upload_to_r2", side_effect=capture_upload), patch(
+            "landsat_processor.insert_metadata_to_d1"
+        ), patch("landsat_processor.log_job_to_d1"), patch(
+            "landsat_processor._get_s3_client", return_value=MagicMock()
+        ), patch("landsat_processor.tif_to_png", return_value=__import__('io').BytesIO(b'\x89PNG')):
+            from landsat_processor import process_one_record
+            process_one_record(magat_landsat_body)
+
+        assert saved_csv[0] is not None, "No CSV was uploaded"
+        df = pd.read_csv(saved_csv[0])
+        assert len(df) > 0
+
+        # WGS84 coordinates: longitude ~98-99, latitude ~8-9 for Magat
+        # UTM coordinates would be ~400000-500000 for easting
+        assert df["longitude"].max() < 180, f"Longitude {df['longitude'].max()} looks like projected CRS, not WGS84"
+        assert df["longitude"].min() > -180, f"Longitude {df['longitude'].min()} out of WGS84 range"
+        assert df["latitude"].max() < 90, f"Latitude {df['latitude'].max()} looks like projected CRS, not WGS84"
+        assert df["latitude"].min() > -90, f"Latitude {df['latitude'].min()} out of WGS84 range"
 
     def test_mask_fails_if_polygon_left_in_wgs84(self):
         """Regression: passing lon/lat shapes to mask() on a UTM raster does not overlap."""

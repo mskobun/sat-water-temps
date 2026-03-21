@@ -2,6 +2,7 @@
 
 import type { D1Database, R2Bucket } from '@cloudflare/workers-types';
 import Papa from 'papaparse';
+import { compareDates } from '$lib/date-utils';
 
 type GeoPoint = { lng: number; lat: number; temperature: number };
 
@@ -133,12 +134,16 @@ export async function getFeatureDates(db: D1Database, featureId: string) {
   try {
     const result = await db
       .prepare(
-        "SELECT date, source FROM temperature_metadata WHERE feature_id = ? ORDER BY date DESC"
+        "SELECT date, source FROM temperature_metadata WHERE feature_id = ?"
       )
       .bind(featureId)
       .all();
 
-    return result.results?.map((r: any) => ({ date: r.date, source: String(r.source || 'ecostress') })) || [];
+    const entries = result.results?.map((r: any) => ({ date: r.date, source: String(r.source || 'ecostress') })) || [];
+    // Sort chronologically (descending) — can't rely on SQL ORDER BY since
+    // ECOSTRESS DOY and Landsat ISO strings don't sort correctly together.
+    entries.sort((a, b) => compareDates(b.date, a.date));
+    return entries;
   } catch (err) {
     console.error("D1 query error:", err);
     return [];
@@ -147,13 +152,18 @@ export async function getFeatureDates(db: D1Database, featureId: string) {
 
 export async function getLatestDate(db: D1Database, featureId: string): Promise<string | null> {
   try {
+    // Query temperature_metadata directly and sort in application code.
+    // features.latest_date uses SQL string comparison which breaks across
+    // ECOSTRESS DOY ("2024362041923") and Landsat ISO ("2024-12-27") formats.
     const result = await db
-      .prepare("SELECT latest_date FROM features WHERE id = ?")
+      .prepare("SELECT date FROM temperature_metadata WHERE feature_id = ?")
       .bind(featureId)
-      .first();
+      .all();
 
-    const latest = result?.latest_date;
-    return latest != null ? String(latest) : null;
+    const dates = (result.results || []).map((r: any) => String(r.date));
+    if (dates.length === 0) return null;
+    dates.sort((a, b) => compareDates(b, a));
+    return dates[0];
   } catch (err) {
     console.error("D1 query error:", err);
     return null;
@@ -364,8 +374,8 @@ export async function getJobsByFeature(
 
     return (result.results || []).map((job: any) => ({
       ...job,
-      metadata: job.metadata ? JSON.parse(job.metadata) : null,
-      filter_stats: job.filter_stats ? JSON.parse(job.filter_stats) : null
+      metadata: job.metadata ? JSON.parse(job.metadata as string) : null,
+      filter_stats: parseFilterStats(job.filter_stats)
     }));
   } catch (err) {
     console.error("D1 query error:", err);
@@ -482,8 +492,8 @@ export async function getLandsatRunDetail(
       },
       jobs: (jobs.results || []).map((job: any) => ({
         ...job,
-        metadata: job.metadata ? JSON.parse(job.metadata) : null,
-        filter_stats: job.filter_stats ? JSON.parse(job.filter_stats) : null
+        metadata: job.metadata ? JSON.parse(job.metadata as string) : null,
+        filter_stats: parseFilterStats(job.filter_stats)
       }))
     };
   } catch (err) {
@@ -529,8 +539,8 @@ export async function getEcostressRequestDetail(
       request,
       jobs: (jobs.results || []).map((job: any) => ({
         ...job,
-        metadata: job.metadata ? JSON.parse(job.metadata) : null,
-        filter_stats: job.filter_stats ? JSON.parse(job.filter_stats) : null
+        metadata: job.metadata ? JSON.parse(job.metadata as string) : null,
+        filter_stats: parseFilterStats(job.filter_stats)
       }))
     };
   } catch (err) {

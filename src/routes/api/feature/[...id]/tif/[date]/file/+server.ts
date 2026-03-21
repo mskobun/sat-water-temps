@@ -13,11 +13,11 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 	}
 
 	const featureId = params.id;
-	const doy = params.doy;
+	const date = params.date;
 
 	const meta = await db
 		.prepare('SELECT tif_path FROM temperature_metadata WHERE feature_id = ? AND date = ?')
-		.bind(featureId, doy)
+		.bind(featureId, date)
 		.first();
 
 	if (!meta?.tif_path) {
@@ -36,7 +36,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 		});
 	}
 
-	const filename = key.split('/').pop() ?? `${doy}_filter_relative.tif`;
+	const filename = key.split('/').pop() ?? `${date}_filter_relative.tif`;
 	return new Response(obj.body as BodyInit, {
 		headers: {
 			'content-type': 'application/octet-stream',

@@ -539,9 +539,9 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 		return '°F';
 	});
 	
-	let sourceLabel = $derived(dataSource === 'landsat' ? ' · Landsat' : dataSource === 'ecostress' ? ' · ECO' : '');
+	let tooltipSourceLabel = $derived(dataSource === 'landsat' ? ' · Landsat' : dataSource === 'ecostress' ? ' · ECOSTRESS' : '');
 	let tooltipTempDisplay = $derived(
-		hoveredTemp != null ? convertTemp(hoveredTemp).toFixed(1) + unitSymbol + sourceLabel : ''
+		hoveredTemp != null ? convertTemp(hoveredTemp).toFixed(1) + unitSymbol + tooltipSourceLabel : ''
 	);
 </script>
 

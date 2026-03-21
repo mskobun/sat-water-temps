@@ -256,9 +256,13 @@ def process_one_record(body):
             for i in range(5):
                 dst.write(bands[i], i + 1)
 
-        # Generate CSV
+        # Generate CSV — coordinates must be WGS84 (lon/lat) for the frontend.
+        # Landsat rasters are in a projected CRS (e.g. UTM), so we must reproject.
         row_idx, col_idx = np.meshgrid(np.arange(rows), np.arange(cols), indexing="ij")
-        lons, lats = rasterio.transform.xy(st_transform, row_idx.flatten(), col_idx.flatten())
+        xs, ys = rasterio.transform.xy(st_transform, row_idx.flatten(), col_idx.flatten())
+
+        from rasterio.warp import transform as warp_transform
+        lons, lats = warp_transform(st_meta["crs"], "EPSG:4326", xs, ys)
 
         df = pd.DataFrame({
             "longitude": lons,

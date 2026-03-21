@@ -12,15 +12,14 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 	}
 
 	const featureId = params.id;
-	const doy = params.doy;
+	const date = params.date;
 	const scale = params.scale;
 	
-	// Get the stored png_path from database and replace scale suffix
 	let pngKey = "";
 	try {
 		const meta = await db.prepare(
 			"SELECT png_path FROM temperature_metadata WHERE feature_id = ? AND date = ?"
-		).bind(featureId, doy).first();
+		).bind(featureId, date).first();
 		
 		if (!meta?.png_path) {
 			return new Response(JSON.stringify({ error: 'Metadata not found' }), { 

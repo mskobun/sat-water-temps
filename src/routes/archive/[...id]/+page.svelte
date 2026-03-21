@@ -4,31 +4,11 @@
 	import * as Card from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Spinner } from '$lib/components/ui/spinner';
+	import { formatDateTime, sourceLabel } from '$lib/date-utils';
 
 	const featureId = $page.params.id;
 	let entries: Array<{ date: string; source: string }> = [];
 	let loading = true;
-
-	function isIsoDate(date: string): boolean {
-		return date.length === 10 && date[4] === '-';
-	}
-
-	function formatDateTime(date: string): string {
-		if (isIsoDate(date)) {
-			const [year, month, day] = date.split('-');
-			return `${day}/${month}/${year}`;
-		}
-		const year = date.substring(0, 4);
-		const doy = parseInt(date.substring(4, 7), 10);
-		const hours = date.substring(7, 9);
-		const minutes = date.substring(9, 11);
-		const seconds = date.substring(11, 13);
-		const dateObj = new Date(parseInt(year), 0);
-		dateObj.setDate(doy);
-		const day = String(dateObj.getDate()).padStart(2, '0');
-		const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-		return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
-	}
 
 	onMount(async () => {
 		try {
@@ -90,9 +70,9 @@
 									>
 										{formatDateTime(entry.date)}
 									</span>
-									<span class="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium shrink-0 {entry.source === 'landsat' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300' : 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300'}">
-										{entry.source === 'landsat' ? 'Landsat' : 'ECO'}
-									</span>
+								<span class="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium shrink-0 {entry.source === 'landsat' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300' : 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300'}">
+									{sourceLabel(entry.source)}
+								</span>
 								</div>
 								<div class="flex flex-col gap-1">
 									<Button

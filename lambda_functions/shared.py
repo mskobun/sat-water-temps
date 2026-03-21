@@ -1,4 +1,6 @@
 import re
+from datetime import datetime, timedelta
+
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -37,3 +39,18 @@ def extract_metadata(filename):
     aid_number = int(aid_match.group(1)) if aid_match else None
     date = date_match.group(1) if date_match else None
     return aid_number, date
+
+
+def to_sort_date(date_str):
+    """Convert any date string to YYYY-MM-DD for chronological comparison.
+
+    Handles both ECOSTRESS DOY format ("2024362041923") and Landsat ISO
+    format ("2024-12-27").  The returned value is suitable for SQL string
+    comparison (ORDER BY, >, <) across both satellite types.
+    """
+    if len(date_str) == 10 and date_str[4] == "-":
+        return date_str
+    year = int(date_str[:4])
+    doy = int(date_str[4:7])
+    d = datetime(year, 1, 1) + timedelta(days=doy - 1)
+    return d.strftime("%Y-%m-%d")

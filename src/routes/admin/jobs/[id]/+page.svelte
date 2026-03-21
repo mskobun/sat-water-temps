@@ -33,6 +33,7 @@
 	let error = $state('');
 
 	const jobId = $derived($page.params.id);
+	const isLandsat = $derived(job?.job_type?.startsWith('landsat') ?? false);
 	const stats = $derived(job?.filter_stats ? parseFilterStats(job.filter_stats) : null);
 	const combinations = $derived(job?.filter_stats ? getFilterCombinations(job.filter_stats) : []);
 
@@ -219,8 +220,13 @@
 											<CircleHelpIcon class="size-3.5 text-muted-foreground/60" />
 										</Tooltip.Trigger>
 										<Tooltip.Content side="right" class="max-w-xs text-xs">
-											Pixels with invalid ECOSTRESS QC flags (e.g. 15, 2501, 65535).
-											<a href="https://lpdaac.usgs.gov/documents/423/ECO2_User_Guide_V1.pdf" target="_blank" rel="noopener" class="underline ml-1">ECOSTRESS QC docs</a>
+											{#if isLandsat}
+												Fill pixels and invalid data identified via the Landsat QA_PIXEL bitmask.
+												<a href="https://www.usgs.gov/landsat-missions/landsat-collection-2-quality-assessment-bands" target="_blank" rel="noopener" class="underline ml-1">Landsat QA docs</a>
+											{:else}
+												Pixels with invalid ECOSTRESS QC flags (e.g. 15, 2501, 65535).
+												<a href="https://lpdaac.usgs.gov/documents/423/ECO2_User_Guide_V1.pdf" target="_blank" rel="noopener" class="underline ml-1">ECOSTRESS QC docs</a>
+											{/if}
 										</Tooltip.Content>
 									</Tooltip.Root>
 								</span>
@@ -244,8 +250,13 @@
 											<CircleHelpIcon class="size-3.5 text-muted-foreground/60" />
 										</Tooltip.Trigger>
 										<Tooltip.Content side="right" class="max-w-xs text-xs">
-											Pixels flagged as cloud-contaminated by the ECOSTRESS cloud mask layer.
-											<a href="https://www.earthdata.nasa.gov/data/catalog/lpcloud-eco-l2-cloud-002" target="_blank" rel="noopener" class="underline ml-1">ECO_L2_CLOUD product</a>
+											{#if isLandsat}
+												Pixels flagged as cloud, dilated cloud, or cloud shadow by the Landsat QA_PIXEL band.
+												<a href="https://www.usgs.gov/landsat-missions/landsat-collection-2-quality-assessment-bands" target="_blank" rel="noopener" class="underline ml-1">Landsat QA docs</a>
+											{:else}
+												Pixels flagged as cloud-contaminated by the ECOSTRESS cloud mask layer.
+												<a href="https://www.earthdata.nasa.gov/data/catalog/lpcloud-eco-l2-cloud-002" target="_blank" rel="noopener" class="underline ml-1">ECO_L2_CLOUD product</a>
+											{/if}
 										</Tooltip.Content>
 									</Tooltip.Root>
 								</span>
@@ -269,8 +280,13 @@
 											<CircleHelpIcon class="size-3.5 text-muted-foreground/60" />
 										</Tooltip.Trigger>
 										<Tooltip.Content side="right" class="max-w-xs text-xs">
-											Non-water pixels removed using the ECOSTRESS water body detection layer (wt != 1).
-											<a href="https://www.earthdata.nasa.gov/data/catalog/lpcloud-eco-l2-lste-002" target="_blank" rel="noopener" class="underline ml-1">ECO_L2_LSTE product</a>
+											{#if isLandsat}
+												Non-water pixels removed using the Landsat QA_PIXEL water bit (bit 7).
+												<a href="https://www.usgs.gov/landsat-missions/landsat-collection-2-quality-assessment-bands" target="_blank" rel="noopener" class="underline ml-1">Landsat QA docs</a>
+											{:else}
+												Non-water pixels removed using the ECOSTRESS water body detection layer (wt != 1).
+												<a href="https://www.earthdata.nasa.gov/data/catalog/lpcloud-eco-l2-lste-002" target="_blank" rel="noopener" class="underline ml-1">ECO_L2_LSTE product</a>
+											{/if}
 										</Tooltip.Content>
 									</Tooltip.Root>
 								</span>
@@ -295,8 +311,12 @@
 												<CircleHelpIcon class="size-3.5 text-muted-foreground/60" />
 											</Tooltip.Trigger>
 											<Tooltip.Content side="right" class="max-w-xs text-xs">
-												Pixels inside the polygon with no LST data — the satellite swath did not cover this part of the water body during this overpass.
-												<a href="https://www.earthdata.nasa.gov/data/instruments/ecostress" target="_blank" rel="noopener" class="underline ml-1">ECOSTRESS instrument</a>
+												{#if isLandsat}
+													Fill pixels or areas with no valid surface temperature data in the Landsat scene.
+												{:else}
+													Pixels inside the polygon with no LST data — the satellite swath did not cover this part of the water body during this overpass.
+													<a href="https://www.earthdata.nasa.gov/data/instruments/ecostress" target="_blank" rel="noopener" class="underline ml-1">ECOSTRESS instrument</a>
+												{/if}
 											</Tooltip.Content>
 										</Tooltip.Root>
 									</span>

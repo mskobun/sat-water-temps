@@ -11,10 +11,9 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 	}
 
 	const featureId = params.id;
-	const doy = params.doy;
+	const date = params.date;
 	
-	// Raster bounds are now stored in D1, no need to pass from client
-	const result = await queryTemperatureData(db, r2, featureId, doy);
+	const result = await queryTemperatureData(db, r2, featureId, date);
 
 	if (!result) {
 		return json({ error: 'Temperature data not found' }, { status: 404 });

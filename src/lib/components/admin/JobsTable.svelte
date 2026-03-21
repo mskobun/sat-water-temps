@@ -3,7 +3,8 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Badge } from '$lib/components/ui/badge';
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
-	import { format, parse } from 'date-fns';
+	import { format } from 'date-fns';
+	import { formatShortDate as formatDateShort } from '$lib/date-utils';
 	import { parseFilterStats, type FilterStats } from '$lib/filter-stats';
 
 	export interface Job {
@@ -36,13 +37,7 @@
 	}
 
 	function formatJobDate(dateStr: string) {
-		// Landsat dates are YYYY-MM-DD, ECOSTRESS dates are yyyyDDD (Julian)
-		if (dateStr.includes('-')) {
-			const d = parse(dateStr, 'yyyy-MM-dd', new Date());
-			return format(d, 'd MMM yyyy');
-		}
-		const d = parse(dateStr.slice(0, 7), 'yyyyDDD', new Date());
-		return format(d, 'd MMM yyyy');
+		return formatDateShort(dateStr);
 	}
 
 	function formatDuration(ms: number | null) {

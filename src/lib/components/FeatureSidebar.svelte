@@ -9,6 +9,7 @@
 	import { Slider } from '$lib/components/ui/slider';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { cn } from '$lib/utils.js';
+	import { formatDateTime, formatShortDate, sourceLabel } from '$lib/date-utils';
 	import ThermometerIcon from '@lucide/svelte/icons/thermometer';
 	import PaletteIcon from '@lucide/svelte/icons/palette';
 	import BarChart3Icon from '@lucide/svelte/icons/bar-chart-3';
@@ -77,41 +78,6 @@
 		max: convertTemp(relativeMax, currentUnit),
 		avg: convertTemp(avgTemp, currentUnit)
 	} : null;
-
-	function isIsoDate(date: string): boolean {
-		return date.length === 10 && date[4] === '-';
-	}
-
-	function formatDateTime(date: string): string {
-		if (isIsoDate(date)) {
-			// Landsat: YYYY-MM-DD
-			const [year, month, day] = date.split('-');
-			return `${day}/${month}/${year}`;
-		}
-		// ECOSTRESS: 13-digit DOY format
-		const year = date.substring(0, 4);
-		const doy = parseInt(date.substring(4, 7), 10);
-		const hours = date.substring(7, 9);
-		const minutes = date.substring(9, 11);
-		const seconds = date.substring(11, 13);
-		const dateObj = new Date(parseInt(year), 0);
-		dateObj.setDate(doy);
-		const day = String(dateObj.getDate()).padStart(2, '0');
-		const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-		return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
-	}
-
-	function formatShortDate(date: string): string {
-		if (isIsoDate(date)) {
-			const dateObj = new Date(date + 'T00:00:00');
-			return dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-		}
-		const year = date.substring(0, 4);
-		const doy = parseInt(date.substring(4, 7), 10);
-		const dateObj = new Date(parseInt(year), 0);
-		dateObj.setDate(doy);
-		return dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-	}
 
 	function getSourceForDate(date: string): string {
 		const entry = dateEntries.find(e => e.date === date);
@@ -269,7 +235,7 @@
 						{/if}
 						{#if dataSource}
 							<span class="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium {dataSource === 'landsat' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300' : 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300'}">
-								{dataSource === 'landsat' ? 'Landsat' : 'ECOSTRESS'}
+								{sourceLabel(dataSource)}
 							</span>
 						{/if}
 					</p>
