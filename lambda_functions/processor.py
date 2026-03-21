@@ -18,6 +18,7 @@ import rasterio
 patch_all()
 
 # Constants
+R2_PREFIX = "ECO"
 INVALID_QC_VALUES = {15, 2501, 3525, 65535}
 HTTP_CONNECT_TIMEOUT = 10
 HTTP_READ_TIMEOUT = 120
@@ -72,8 +73,9 @@ def insert_metadata_to_d1(
     # Use actual R2 paths from upload
     csv_path = csv_r2_key
     tif_path = tif_r2_key
-    # Use relative scale PNG (main PNG)
-    png_path = png_r2_keys.get("relative", png_r2_keys.get("fixed", ""))
+    # Store base path (without scale suffix) so API can append _${scale}.png
+    full_png_path = png_r2_keys.get("relative", png_r2_keys.get("fixed", ""))
+    png_path = full_png_path.replace("_relative.png", "").replace("_fixed.png", "")
 
     # Insert/update feature record FIRST (to satisfy foreign key constraint)
     name, location = (
@@ -428,13 +430,13 @@ def process_rasters(
             dst.write(data, idx)
 
     # Upload TIF
-    tif_key = f"ECO/{name}/{location}/{base_name}.tif"
+    tif_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.tif"
     upload_to_r2(s3_client, bucket_name, tif_key, filter_tif_path, "image/tiff")
 
     # CSV (keep for archive downloads)
     df.dropna(subset=["LST_filter"], inplace=True)
     df.to_csv(filter_csv_path, index=False)
-    csv_key = f"ECO/{name}/{location}/{base_name}.csv"
+    csv_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.csv"
     upload_to_r2(s3_client, bucket_name, csv_key, filter_csv_path, "text/csv")
 
     # PNGs for all scales
@@ -445,7 +447,7 @@ def process_rasters(
             png_path = os.path.join(work_dir, f"{base_name}_{scale}.png")
             with open(png_path, "wb") as f:
                 f.write(png_bytes.getvalue())
-            png_key = f"ECO/{name}/{location}/{base_name}_{scale}.png"
+            png_key = f"{R2_PREFIX}/{name}/{location}/{base_name}_{scale}.png"
             upload_to_r2(s3_client, bucket_name, png_key, png_path, "image/png")
             png_r2_keys[scale] = png_key
         except Exception as e:
@@ -479,32 +481,13 @@ def process_rasters(
     metadata_path = os.path.join(work_dir, f"{base_name}_metadata.json")
     with open(metadata_path, "w") as f:
         json.dump(metadata, f)
-    meta_key = f"ECO/{name}/{location}/metadata/{base_name}_metadata.json"
+    meta_key = f"{R2_PREFIX}/{name}/{location}/metadata/{base_name}_metadata.json"
     upload_to_r2(s3_client, bucket_name, meta_key, metadata_path, "application/json")
 
     # Insert metadata into D1 with actual R2 paths
     feature_id = f"{name}/{location}" if location != "lake" else name
     insert_metadata_to_d1(feature_id, date, metadata, csv_key, tif_key, png_r2_keys)
 
-    # Update index (keep for backward compatibility during transition)
-    index_key = f"ECO/{name}/{location}/index.json"
-    try:
-        existing = s3_client.get_object(Bucket=bucket_name, Key=index_key)
-        index_json = json.loads(existing["Body"].read().decode("utf-8"))
-    except Exception:
-        index_json = {"dates": [], "latest_date": None}
-    if date not in index_json.get("dates", []):
-        index_json["dates"].append(date)
-    index_json["dates"] = sorted(index_json["dates"], reverse=True)
-    index_json["latest_date"] = (
-        max(index_json["dates"]) if index_json["dates"] else date
-    )
-    s3_client.put_object(
-        Bucket=bucket_name,
-        Key=index_key,
-        Body=json.dumps(index_json),
-        ContentType="application/json",
-    )
 
 
 def _process_record(record, token, session, aid_folder_mapping, s3_client, bucket_name):

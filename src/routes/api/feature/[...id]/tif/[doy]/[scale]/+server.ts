@@ -29,8 +29,8 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 			});
 		}
 		
-		// Replace the scale suffix (stored path uses 'relative')
-		pngKey = String(meta.png_path).replace('_relative.png', `_${scale}.png`);
+		// Append scale suffix to base path (stored without scale or extension)
+		pngKey = `${meta.png_path}_${scale}.png`;
 	} catch (err) {
 		console.error('Error fetching metadata:', err);
 		return new Response(JSON.stringify({ error: 'Database error' }), { 

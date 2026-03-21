@@ -24,9 +24,9 @@ CREATE TABLE IF NOT EXISTS temperature_metadata (
   water_pixel_count INTEGER,
   land_pixel_count INTEGER,
   wtoff BOOLEAN DEFAULT 0,
-  csv_path TEXT, -- R2 path: {feature_id}/csv/{date}.csv
-  tif_path TEXT, -- R2 path: {feature_id}/tif/{date}.tif
-  png_path TEXT, -- R2 path: {feature_id}/png/{date}.png
+  csv_path TEXT, -- R2 path: ECO/{name}/{location}/{name}_{location}_{date}_filter.csv
+  tif_path TEXT, -- R2 path: ECO/{name}/{location}/{name}_{location}_{date}_filter.tif
+  png_path TEXT, -- R2 base path: ECO/{name}/{location}/{name}_{location}_{date}_filter (append _{scale}.png)
   created_at INTEGER DEFAULT (unixepoch()),
   PRIMARY KEY (feature_id, date),
   FOREIGN KEY (feature_id) REFERENCES features(id)
