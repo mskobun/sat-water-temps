@@ -491,7 +491,10 @@
 						<Table.Body>
 							{#each requests as req}
 								{@const r = req as LandsatRun}
-								<Table.Row class="hover:bg-muted/50">
+								<Table.Row
+									class="cursor-pointer hover:bg-muted/50"
+									onclick={() => goto(`/admin/requests/${r.id}?source=landsat`)}
+								>
 									<Table.Cell>
 										<Badge variant={getTriggerVariant(r.trigger_type)}>{r.trigger_type}</Badge>
 									</Table.Cell>

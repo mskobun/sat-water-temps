@@ -445,6 +445,53 @@ export async function getLandsatRuns(
   }
 }
 
+export async function getLandsatRunDetail(
+  db: D1Database,
+  id: number
+) {
+  try {
+    const run = await db
+      .prepare(`SELECT * FROM landsat_runs WHERE id = ?`)
+      .bind(id)
+      .first();
+
+    if (!run) return null;
+
+    // Find processing jobs for this Landsat run by matching date range and source
+    const jobs = await db
+      .prepare(`
+        SELECT j.id, j.job_type, j.task_id, j.feature_id, j.date, j.status,
+               j.started_at, j.completed_at, j.duration_ms, j.error_message, j.metadata,
+               tm.filter_stats
+        FROM processing_jobs j
+        LEFT JOIN temperature_metadata tm
+          ON j.feature_id = tm.feature_id AND j.date = tm.date
+        WHERE j.job_type = 'landsat_process'
+          AND j.date >= ?
+          AND j.date <= ?
+          AND j.started_at >= ?
+        ORDER BY j.started_at DESC
+      `)
+      .bind(run.start_date, run.end_date, run.created_at)
+      .all();
+
+    return {
+      request: {
+        ...run,
+        status: run.error_message ? 'failed' : (run.scenes_submitted != null && (run.scenes_submitted as number) > 0 ? 'completed' : 'pending'),
+      },
+      jobs: (jobs.results || []).map((job: any) => ({
+        ...job,
+        metadata: job.metadata ? JSON.parse(job.metadata) : null,
+        filter_stats: job.filter_stats ? JSON.parse(job.filter_stats) : null
+      }))
+    };
+  } catch (err) {
+    console.error("D1 query error:", err);
+    return null;
+  }
+}
+
 export async function getEcostressRequestDetail(
   db: D1Database,
   id: number

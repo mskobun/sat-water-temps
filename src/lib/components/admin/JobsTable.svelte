@@ -36,6 +36,11 @@
 	}
 
 	function formatJobDate(dateStr: string) {
+		// Landsat dates are YYYY-MM-DD, ECOSTRESS dates are yyyyDDD (Julian)
+		if (dateStr.includes('-')) {
+			const d = parse(dateStr, 'yyyy-MM-dd', new Date());
+			return format(d, 'd MMM yyyy');
+		}
 		const d = parse(dateStr.slice(0, 7), 'yyyyDDD', new Date());
 		return format(d, 'd MMM yyyy');
 	}

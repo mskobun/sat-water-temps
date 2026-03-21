@@ -97,7 +97,7 @@ def apply_landsat_filters(lst_kelvin, qa_pixel):
 def _open_cog(href):
     """Open a COG from S3 with requester-pays."""
     aws_session = AWSSession(boto3.Session(), requester_pays=True)
-    env = rasterio.Env(AWSSession=aws_session)
+    env = rasterio.Env(AWSSession=aws_session, AWS_REQUEST_PAYER='requester')
     env.__enter__()
     return rasterio.open(href)
 
@@ -153,7 +153,7 @@ def process_one_record(body):
         # Open all ST_B10 and QA_PIXEL rasters with requester-pays session
         aws_session = AWSSession(boto3.Session(), requester_pays=True)
 
-        with rasterio.Env(AWSSession=aws_session):
+        with rasterio.Env(AWSSession=aws_session, AWS_REQUEST_PAYER='requester'):
             # Read and mosaic ST_B10
             st_datasets = []
             qa_pixel_datasets = []

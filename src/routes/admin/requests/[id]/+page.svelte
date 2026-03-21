@@ -11,41 +11,46 @@
 
 	const POLL_INTERVAL = 30_000;
 
-	interface EcostressRequest {
+	interface RequestDetail {
 		id: number;
-		task_id: string | null;
+		task_id?: string | null;
 		trigger_type: string;
 		triggered_by: string | null;
 		description: string | null;
 		start_date: string;
 		end_date: string;
 		status: string;
-		scenes_count: number | null;
+		scenes_count?: number | null;
+		scenes_submitted?: number | null;
 		created_at: number;
 		updated_at: number | null;
 		error_message: string | null;
 	}
 
-	let request = $state<EcostressRequest | null>(null);
+	let source = $derived($page.url.searchParams.get('source') || 'ecostress');
+	let isLandsat = $derived(source === 'landsat');
+
+	let request = $state<RequestDetail | null>(null);
 	let jobs = $state<Job[]>([]);
 	let loading = $state(true);
 	let error = $state('');
 	let updatedAt = $state('');
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
-	// Reprocess state
+	// Reprocess state (ECOSTRESS only)
 	let reprocessLoading = $state(false);
 	let reprocessError = $state('');
 	let reprocessSuccess = $state('');
 
 	async function fetchDetail() {
 		try {
-			const response = await fetch(`/api/admin/requests/${$page.params.id}`);
+			const sourceParam = source !== 'ecostress' ? `?source=${source}` : '';
+			const response = await fetch(`/api/admin/requests/${$page.params.id}${sourceParam}`);
 			if (!response.ok) {
 				error = response.status === 404 ? 'Request not found' : 'Failed to fetch request';
 				return;
 			}
-			const data = (await response.json()) as { request: EcostressRequest; jobs: Job[] };
+			const data = (await response.json()) as { request: RequestDetail; jobs: Job[] };
 			request = data.request;
 			jobs = data.jobs || [];
 			error = '';
@@ -124,6 +129,7 @@
 		request ? Date.now() - request.created_at > THIRTY_DAYS_MS : false
 	);
 
+	let scenesLabel = $derived(isLandsat ? (request?.scenes_submitted ?? '-') : (request?.scenes_count ?? '-'));
 	let successCount = $derived(jobs.filter((j) => j.status === 'success').length);
 	let failedCount = $derived(jobs.filter((j) => j.status === 'failed').length);
 	let runningCount = $derived(jobs.filter((j) => j.status === 'started').length);
@@ -138,7 +144,7 @@
 </script>
 
 <svelte:head>
-	<title>Request #{$page.params.id} - Admin</title>
+	<title>{isLandsat ? 'Landsat' : 'ECOSTRESS'} Request #{$page.params.id} - Admin</title>
 </svelte:head>
 
 <div class="min-h-screen bg-background text-foreground">
@@ -147,7 +153,9 @@
 			<a href="/admin/requests" class="text-sm text-muted-foreground hover:text-foreground mb-2 inline-block">
 				&larr; Back to Requests
 			</a>
-			<h1 class="text-3xl font-bold">Request #{$page.params.id}</h1>
+			<h1 class="text-3xl font-bold">
+				{isLandsat ? 'Landsat' : 'ECOSTRESS'} Request #{$page.params.id}
+			</h1>
 		</div>
 
 		{#if loading && !request}
@@ -238,7 +246,7 @@
 						<dl class="space-y-3 text-sm">
 							<div>
 								<dt class="text-muted-foreground">Scenes</dt>
-								<dd class="text-2xl font-bold">{request.scenes_count ?? '-'}</dd>
+								<dd class="text-2xl font-bold">{scenesLabel}</dd>
 							</div>
 							<div>
 								<dt class="text-muted-foreground">Total Jobs</dt>
@@ -263,7 +271,7 @@
 				</Card.Card>
 			</div>
 
-			{#if request.task_id}
+			{#if !isLandsat && request.task_id}
 				<div class="mb-6">
 					<Card.Card>
 						<Card.Header>
