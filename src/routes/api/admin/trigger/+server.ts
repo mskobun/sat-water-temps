@@ -1,5 +1,6 @@
 import { json } from '@sveltejs/kit';
 import { AwsClient } from 'aws4fetch';
+import type { D1Database } from '@cloudflare/workers-types';
 import type { RequestHandler } from './$types';
 
 const MAX_RANGE_DAYS = 60;
@@ -23,59 +24,18 @@ function enumerateDays(start: string, end: string): string[] {
 	return days;
 }
 
-export const POST: RequestHandler = async ({ request, locals, platform }) => {
-	const db = platform?.env?.DB;
-	if (!db) {
-		return json({ error: 'Database not available' }, { status: 500 });
-	}
-
-	const session = await locals.auth();
-	if (!session?.user) {
-		return json({ error: 'Unauthorized' }, { status: 401 });
-	}
-
-	const body = await request.json();
-	const { startDate, endDate, description } = body as {
-		startDate?: string;
-		endDate?: string;
-		description?: string;
-	};
-
-	if (!startDate || !endDate) {
-		return json({ error: 'startDate and endDate are required' }, { status: 400 });
-	}
-
-	const startMatch = parseDate(startDate);
-	const endMatch = parseDate(endDate);
-	if (!startMatch || !endMatch) {
-		return json({ error: 'Invalid date format. Expected YYYY-MM-DD.' }, { status: 400 });
-	}
-
-	if (endDate < startDate) {
-		return json({ error: 'endDate must not be before startDate' }, { status: 400 });
-	}
-
+async function triggerEcostress(
+	db: D1Database,
+	aws: AwsClient | undefined,
+	lambdaUrl: string | undefined,
+	startDate: string,
+	endDate: string,
+	description: string | undefined,
+	userEmail: string
+) {
 	const days = enumerateDays(startDate, endDate);
 	if (days.length > MAX_RANGE_DAYS) {
 		return json({ error: `Date range too large. Maximum ${MAX_RANGE_DAYS} days.` }, { status: 400 });
-	}
-
-	const userEmail = session.user.email || 'unknown';
-
-	const lambdaUrl = platform?.env?.LAMBDA_INITIATOR_URL;
-	const awsKeyId = platform?.env?.AWS_ACCESS_KEY_ID;
-	const awsSecret = platform?.env?.AWS_SECRET_ACCESS_KEY;
-	const awsRegion = platform?.env?.AWS_LAMBDA_REGION || 'us-west-2';
-	const hasLambdaCreds = !!(lambdaUrl && awsKeyId && awsSecret);
-
-	let aws: AwsClient | undefined;
-	if (hasLambdaCreds) {
-		aws = new AwsClient({
-			accessKeyId: awsKeyId,
-			secretAccessKey: awsSecret,
-			region: awsRegion,
-			service: 'lambda'
-		});
 	}
 
 	const ids: number[] = [];
@@ -87,7 +47,6 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		const appearsDate = toAppearsDate(dayMatch);
 		const dayDesc = description ? `${description} (${appearsDate})` : `Manual trigger for ${appearsDate}`;
 
-		// Insert request row
 		const result = await db
 			.prepare(`
 				INSERT INTO ecostress_requests
@@ -100,7 +59,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		const requestId = result.meta.last_row_id;
 		ids.push(requestId);
 
-		if (!aws) continue;
+		if (!aws || !lambdaUrl) continue;
 
 		try {
 			const lambdaPayload = {
@@ -139,9 +98,144 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		}
 	}
 
-	if (!hasLambdaCreds) {
+	return { ids, errors, successful, count: days.length };
+}
+
+async function triggerLandsat(
+	db: D1Database,
+	aws: AwsClient | undefined,
+	lambdaUrl: string | undefined,
+	startDate: string,
+	endDate: string,
+	description: string | undefined,
+	userEmail: string
+) {
+	const days = enumerateDays(startDate, endDate);
+	if (days.length > MAX_RANGE_DAYS) {
+		return json({ error: `Date range too large. Maximum ${MAX_RANGE_DAYS} days.` }, { status: 400 });
+	}
+
+	const desc = description || `Manual Landsat trigger for ${startDate} to ${endDate}`;
+
+	const result = await db
+		.prepare(`
+			INSERT INTO landsat_runs
+			(trigger_type, triggered_by, description, start_date, end_date, created_at)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`)
+		.bind('manual', userEmail, desc, startDate, endDate, Date.now())
+		.run();
+
+	const runId = result.meta.last_row_id;
+
+	if (!aws || !lambdaUrl) {
+		return { ids: [runId], errors: [], successful: 0, count: 1, noLambda: true };
+	}
+
+	try {
+		const lambdaPayload = {
+			start_date: startDate,
+			end_date: endDate,
+			trigger_type: 'manual',
+			triggered_by: userEmail,
+			description: desc,
+			run_id: runId
+		};
+
+		const response = await aws.fetch(lambdaUrl, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(lambdaPayload)
+		});
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			const msg = `Lambda failed: ${response.status} ${errorText}`;
+			await db
+				.prepare(`UPDATE landsat_runs SET error_message = ?, updated_at = ? WHERE id = ?`)
+				.bind(msg, Date.now(), runId)
+				.run();
+			return { ids: [runId], errors: [msg], successful: 0, count: 1 };
+		}
+
+		return { ids: [runId], errors: [], successful: 1, count: 1 };
+	} catch (err) {
+		const msg = `Lambda error: ${err instanceof Error ? err.message : String(err)}`;
+		await db
+			.prepare(`UPDATE landsat_runs SET error_message = ?, updated_at = ? WHERE id = ?`)
+			.bind(msg, Date.now(), runId)
+			.run();
+		return { ids: [runId], errors: [msg], successful: 0, count: 1 };
+	}
+}
+
+export const POST: RequestHandler = async ({ request, locals, platform }) => {
+	const db = platform?.env?.DB;
+	if (!db) {
+		return json({ error: 'Database not available' }, { status: 500 });
+	}
+
+	const session = await locals.auth();
+	if (!session?.user) {
+		return json({ error: 'Unauthorized' }, { status: 401 });
+	}
+
+	const body = await request.json();
+	const { startDate, endDate, description, source } = body as {
+		startDate?: string;
+		endDate?: string;
+		description?: string;
+		source?: 'ecostress' | 'landsat';
+	};
+
+	if (!startDate || !endDate) {
+		return json({ error: 'startDate and endDate are required' }, { status: 400 });
+	}
+
+	const startMatch = parseDate(startDate);
+	const endMatch = parseDate(endDate);
+	if (!startMatch || !endMatch) {
+		return json({ error: 'Invalid date format. Expected YYYY-MM-DD.' }, { status: 400 });
+	}
+
+	if (endDate < startDate) {
+		return json({ error: 'endDate must not be before startDate' }, { status: 400 });
+	}
+
+	const userEmail = session.user.email || 'unknown';
+	const isLandsat = source === 'landsat';
+
+	const lambdaUrl = isLandsat
+		? platform?.env?.LAMBDA_LANDSAT_INITIATOR_URL
+		: platform?.env?.LAMBDA_INITIATOR_URL;
+	const awsKeyId = platform?.env?.AWS_ACCESS_KEY_ID;
+	const awsSecret = platform?.env?.AWS_SECRET_ACCESS_KEY;
+	const awsRegion = platform?.env?.AWS_LAMBDA_REGION || 'us-west-2';
+	const hasLambdaCreds = !!(lambdaUrl && awsKeyId && awsSecret);
+
+	let aws: AwsClient | undefined;
+	if (hasLambdaCreds) {
+		aws = new AwsClient({
+			accessKeyId: awsKeyId,
+			secretAccessKey: awsSecret,
+			region: awsRegion,
+			service: 'lambda'
+		});
+	}
+
+	const result = isLandsat
+		? await triggerLandsat(db, aws, lambdaUrl, startDate, endDate, description, userEmail)
+		: await triggerEcostress(db, aws, lambdaUrl, startDate, endDate, description, userEmail);
+
+	// If triggerEcostress/triggerLandsat returned a Response (validation error), pass through
+	if (result instanceof Response) return result;
+
+	const { ids, errors, successful, count } = result;
+	const noLambda = 'noLambda' in result && result.noLambda;
+
+	if (!hasLambdaCreds || noLambda) {
 		return json({
-			count: days.length,
+			count,
 			successful: 0,
 			failed: 0,
 			ids,
@@ -152,11 +246,11 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 	const failed = errors.length;
 	const message = failed > 0
-		? `Created ${days.length} request(s): ${successful} succeeded, ${failed} failed`
-		: `Created ${days.length} request(s) successfully`;
+		? `Created ${count} request(s): ${successful} succeeded, ${failed} failed`
+		: `Created ${count} request(s) successfully`;
 
 	return json({
-		count: days.length,
+		count,
 		successful,
 		failed,
 		ids,

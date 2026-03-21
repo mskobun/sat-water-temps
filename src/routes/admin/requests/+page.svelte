@@ -19,6 +19,8 @@
 
 	const POLL_INTERVAL = 30_000;
 
+	type Source = 'ecostress' | 'landsat';
+
 	interface EcostressRequest {
 		id: number;
 		task_id: string | null;
@@ -38,6 +40,19 @@
 		running_jobs: number;
 	}
 
+	interface LandsatRun {
+		id: number;
+		trigger_type: string;
+		triggered_by: string | null;
+		description: string | null;
+		start_date: string;
+		end_date: string;
+		scenes_submitted: number | null;
+		created_at: number;
+		updated_at: number | null;
+		error_message: string | null;
+	}
+
 	const filterOptions = [
 		{ value: 'all', label: 'All Requests' },
 		{ value: 'pending', label: 'Pending' },
@@ -48,7 +63,8 @@
 		{ value: 'failed', label: 'Failed' }
 	];
 
-	let requests = $state<EcostressRequest[]>([]);
+	let source = $state<Source>('ecostress');
+	let requests = $state<(EcostressRequest | LandsatRun)[]>([]);
 	let loading = $state(true);
 	let error = $state('');
 	let filter = $state('all');
@@ -58,6 +74,7 @@
 
 	// Trigger dialog state
 	let dialogOpen = $state(false);
+	let triggerSource = $state<Source>('ecostress');
 	let triggerDateRange = $state<DateRange>({ start: undefined, end: undefined });
 	let triggerDescription = $state('');
 	let triggerLoading = $state(false);
@@ -74,9 +91,12 @@
 
 	async function fetchRequests() {
 		try {
-			const statusParam = filter !== 'all' ? `?status=${filter}` : '';
-			const response = await fetch(`/api/admin/requests${statusParam}`);
-			const data = (await response.json()) as { requests?: EcostressRequest[] };
+			const params = new URLSearchParams();
+			if (filter !== 'all') params.set('status', filter);
+			params.set('source', source);
+			const qs = params.toString();
+			const response = await fetch(`/api/admin/requests?${qs}`);
+			const data = (await response.json()) as { requests?: (EcostressRequest | LandsatRun)[] };
 			requests = data.requests || [];
 			error = '';
 			updatedAt = new Date().toLocaleTimeString();
@@ -123,6 +143,12 @@
 		}
 	}
 
+	function getLandsatStatus(run: LandsatRun): string {
+		if (run.error_message) return 'failed';
+		if (run.scenes_submitted != null && run.scenes_submitted > 0) return 'completed';
+		return 'pending';
+	}
+
 	async function handleTrigger() {
 		if (!triggerDateRange.start || !triggerDateRange.end) return;
 
@@ -137,7 +163,8 @@
 				body: JSON.stringify({
 					startDate: triggerDateRange.start!.toString(),
 					endDate: triggerDateRange.end!.toString(),
-					description: triggerDescription || undefined
+					description: triggerDescription || undefined,
+					source: triggerSource
 				})
 			});
 
@@ -162,8 +189,15 @@
 		}
 	}
 
+	function switchSource(newSource: Source) {
+		source = newSource;
+		filter = 'all';
+		loading = true;
+		requests = [];
+	}
+
 	$effect(() => {
-		if (filter) fetchRequests();
+		if (source || filter) fetchRequests();
 	});
 
 	onMount(() => {
@@ -175,15 +209,21 @@
 </script>
 
 <svelte:head>
-	<title>ECOSTRESS Requests - Admin</title>
+	<title>Processing Requests - Admin</title>
 </svelte:head>
 
 <div class="min-h-screen bg-background text-foreground">
 	<div class="container mx-auto p-6 max-w-7xl">
 		<div class="mb-6 flex items-start justify-between">
 			<div>
-				<h1 class="text-3xl font-bold mb-2">ECOSTRESS Requests</h1>
-				<p class="text-muted-foreground">Track AppEEARS task submissions and their processing results</p>
+				<h1 class="text-3xl font-bold mb-2">Processing Requests</h1>
+				<p class="text-muted-foreground">
+					{#if source === 'ecostress'}
+						Track AppEEARS task submissions and their processing results
+					{:else}
+						Track Landsat scene scanning and processing runs
+					{/if}
+				</p>
 			</div>
 
 			<!-- Trigger Processing Dialog -->
@@ -197,10 +237,27 @@
 					<Dialog.Header>
 						<Dialog.Title>Manual Processing Trigger</Dialog.Title>
 						<Dialog.Description>
-							Submit AppEEARS task(s) for the selected date range. One request per day will be created.
+							{#if triggerSource === 'ecostress'}
+								Submit AppEEARS task(s) for the selected date range. One request per day will be created.
+							{:else}
+								Scan for Landsat scenes in the selected date range and queue them for processing.
+							{/if}
 						</Dialog.Description>
 					</Dialog.Header>
 					<div class="flex flex-col gap-4 py-2">
+						<div class="flex flex-col gap-1.5">
+							<Label>Source</Label>
+							<div class="flex gap-1 rounded-md border p-1">
+								<button
+									class="flex-1 rounded px-3 py-1.5 text-sm font-medium transition-colors {triggerSource === 'ecostress' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+									onclick={() => { triggerSource = 'ecostress'; }}
+								>ECOSTRESS</button>
+								<button
+									class="flex-1 rounded px-3 py-1.5 text-sm font-medium transition-colors {triggerSource === 'landsat' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+									onclick={() => { triggerSource = 'landsat'; }}
+								>Landsat</button>
+							</div>
+						</div>
 						<div class="flex flex-col gap-1.5">
 							<Label>Date Range</Label>
 							<Popover.Root bind:open={calendarOpen}>
@@ -233,7 +290,11 @@
 						</div>
 						{#if triggerDateRange.start && triggerDateRange.end}
 							<p class="text-sm text-muted-foreground">
-								{dayCount()} request(s) will be created
+								{#if triggerSource === 'ecostress'}
+									{dayCount()} request(s) will be created
+								{:else}
+									1 Landsat scan will be created for {dayCount()} day(s)
+								{/if}
 							</p>
 						{/if}
 						<div class="flex flex-col gap-1.5">
@@ -269,6 +330,18 @@
 			</Dialog.Root>
 		</div>
 
+		<!-- Source tabs -->
+		<div class="flex gap-1 rounded-md border p-1 w-fit mb-6">
+			<button
+				class="rounded px-4 py-1.5 text-sm font-medium transition-colors {source === 'ecostress' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+				onclick={() => switchSource('ecostress')}
+			>ECOSTRESS</button>
+			<button
+				class="rounded px-4 py-1.5 text-sm font-medium transition-colors {source === 'landsat' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+				onclick={() => switchSource('landsat')}
+			>Landsat</button>
+		</div>
+
 		<!-- Lightweight filter toolbar -->
 		<div class="flex flex-wrap items-center justify-between gap-4 mb-6">
 			<div class="flex items-center gap-4">
@@ -296,14 +369,24 @@
 			</div>
 		</div>
 
-		<div class="mb-6">
-			<StatBar stats={[
-				{ label: 'Total', count: requests.length },
-				{ label: 'Pending/Submitted', count: requests.filter((r) => r.status === 'pending' || r.status === 'submitted').length },
-				{ label: 'Processing', count: requests.filter((r) => r.status === 'processing').length },
-				{ label: 'Failed', count: requests.filter((r) => r.status === 'failed').length }
-			]} />
-		</div>
+		{#if source === 'ecostress'}
+			<div class="mb-6">
+				<StatBar stats={[
+					{ label: 'Total', count: requests.length },
+					{ label: 'Pending/Submitted', count: requests.filter((r) => 'status' in r && (r.status === 'pending' || r.status === 'submitted')).length },
+					{ label: 'Processing', count: requests.filter((r) => 'status' in r && r.status === 'processing').length },
+					{ label: 'Failed', count: requests.filter((r) => 'status' in r && r.status === 'failed').length }
+				]} />
+			</div>
+		{:else}
+			<div class="mb-6">
+				<StatBar stats={[
+					{ label: 'Total', count: requests.length },
+					{ label: 'With Scenes', count: requests.filter((r) => 'scenes_submitted' in r && r.scenes_submitted != null && r.scenes_submitted > 0).length },
+					{ label: 'Failed', count: requests.filter((r) => 'error_message' in r && r.error_message != null).length }
+				]} />
+			</div>
+		{/if}
 
 		{#if loading && requests.length === 0}
 			<Card.Card>
@@ -322,7 +405,7 @@
 					No requests found. Requests will appear here once the pipeline runs or you trigger one manually.
 				</Card.Content>
 			</Card.Card>
-		{:else}
+		{:else if source === 'ecostress'}
 			<div class="overflow-x-auto rounded-md border">
 				<Table.Root>
 						<Table.Header>
@@ -338,46 +421,91 @@
 						</Table.Header>
 						<Table.Body>
 							{#each requests as req}
+								{@const r = req as EcostressRequest}
 								<Table.Row
 									class="cursor-pointer hover:bg-muted/50"
-									onclick={() => goto(`/admin/requests/${req.id}`)}
+									onclick={() => goto(`/admin/requests/${r.id}`)}
 								>
 									<Table.Cell>
-										<Badge variant={getTriggerVariant(req.trigger_type)}>{req.trigger_type}</Badge>
+										<Badge variant={getTriggerVariant(r.trigger_type)}>{r.trigger_type}</Badge>
 									</Table.Cell>
 									<Table.Cell>
-										<Badge variant={getStatusVariant(req.status)}>{formatStatus(req.status)}</Badge>
+										<Badge variant={getStatusVariant(r.status)}>{formatStatus(r.status)}</Badge>
 									</Table.Cell>
 									<Table.Cell class="text-sm">
-										<div>{req.start_date}</div>
-										{#if req.start_date !== req.end_date}
-											<div class="text-xs text-muted-foreground">to {req.end_date}</div>
+										<div>{r.start_date}</div>
+										{#if r.start_date !== r.end_date}
+											<div class="text-xs text-muted-foreground">to {r.end_date}</div>
 										{/if}
 									</Table.Cell>
 									<Table.Cell class="text-sm max-w-xs truncate">
-										{req.description || '-'}
+										{r.description || '-'}
 									</Table.Cell>
 									<Table.Cell class="text-sm">
-										{req.scenes_count ?? '-'}
+										{r.scenes_count ?? '-'}
 									</Table.Cell>
 									<Table.Cell class="text-sm">
-										{#if req.total_jobs > 0}
+										{#if r.total_jobs > 0}
 											<div>
-												<span class="text-green-600 font-medium">{req.success_jobs}</span>
-												<span class="text-muted-foreground"> / {req.total_jobs}</span>
+												<span class="text-green-600 font-medium">{r.success_jobs}</span>
+												<span class="text-muted-foreground"> / {r.total_jobs}</span>
 											</div>
-											{#if req.failed_jobs > 0}
-												<div class="text-xs text-destructive">{req.failed_jobs} failed</div>
+											{#if r.failed_jobs > 0}
+												<div class="text-xs text-destructive">{r.failed_jobs} failed</div>
 											{/if}
-											{#if req.running_jobs > 0}
-												<div class="text-xs text-blue-600">{req.running_jobs} running</div>
+											{#if r.running_jobs > 0}
+												<div class="text-xs text-blue-600">{r.running_jobs} running</div>
 											{/if}
 										{:else}
 											<span class="text-muted-foreground">-</span>
 										{/if}
 									</Table.Cell>
 									<Table.Cell class="text-sm text-muted-foreground">
-										{formatDate(req.created_at)}
+										{formatDate(r.created_at)}
+									</Table.Cell>
+								</Table.Row>
+							{/each}
+						</Table.Body>
+					</Table.Root>
+				</div>
+		{:else}
+			<div class="overflow-x-auto rounded-md border">
+				<Table.Root>
+						<Table.Header>
+							<Table.Row>
+								<Table.Head>Trigger</Table.Head>
+								<Table.Head>Status</Table.Head>
+								<Table.Head>Date Range</Table.Head>
+								<Table.Head>Description</Table.Head>
+								<Table.Head>Scenes</Table.Head>
+								<Table.Head>Created</Table.Head>
+							</Table.Row>
+						</Table.Header>
+						<Table.Body>
+							{#each requests as req}
+								{@const r = req as LandsatRun}
+								<Table.Row class="hover:bg-muted/50">
+									<Table.Cell>
+										<Badge variant={getTriggerVariant(r.trigger_type)}>{r.trigger_type}</Badge>
+									</Table.Cell>
+									<Table.Cell>
+										{@const status = getLandsatStatus(r)}
+										<Badge variant={getStatusVariant(status)}>{formatStatus(status)}</Badge>
+									</Table.Cell>
+									<Table.Cell class="text-sm">
+										<div>{r.start_date}</div>
+										{#if r.start_date !== r.end_date}
+											<div class="text-xs text-muted-foreground">to {r.end_date}</div>
+										{/if}
+									</Table.Cell>
+									<Table.Cell class="text-sm max-w-xs truncate">
+										{r.description || '-'}
+									</Table.Cell>
+									<Table.Cell class="text-sm">
+										{r.scenes_submitted ?? '-'}
+									</Table.Cell>
+									<Table.Cell class="text-sm text-muted-foreground">
+										{formatDate(r.created_at)}
 									</Table.Cell>
 								</Table.Row>
 							{/each}

@@ -24,6 +24,11 @@ output "initiator_function_url" {
   description = "Function URL for the initiator Lambda (manual triggers)"
 }
 
+output "landsat_initiator_function_url" {
+  value       = aws_lambda_function_url.landsat_initiator_url.function_url
+  description = "Function URL for the Landsat initiator Lambda (manual triggers)"
+}
+
 output "cloudflare_invoker_access_key_id" {
   value       = aws_iam_access_key.cloudflare_invoker_key.id
   description = "Access key ID for Cloudflare to invoke Lambda"

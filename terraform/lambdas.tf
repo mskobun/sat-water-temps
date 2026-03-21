@@ -144,7 +144,10 @@ resource "aws_iam_user_policy" "cloudflare_invoker_policy" {
       {
         Effect   = "Allow"
         Action   = ["lambda:InvokeFunctionUrl", "lambda:InvokeFunction"]
-        Resource = aws_lambda_function.initiator_lambda.arn
+        Resource = [
+          aws_lambda_function.initiator_lambda.arn,
+          aws_lambda_function.landsat_initiator_lambda.arn
+        ]
       }
     ]
   })
@@ -152,6 +155,27 @@ resource "aws_iam_user_policy" "cloudflare_invoker_policy" {
 
 resource "aws_iam_access_key" "cloudflare_invoker_key" {
   user = aws_iam_user.cloudflare_invoker.name
+}
+
+# Lambda Function URL for Landsat initiator manual triggers from admin UI
+resource "aws_lambda_function_url" "landsat_initiator_url" {
+  function_name      = aws_lambda_function.landsat_initiator_lambda.function_name
+  authorization_type = "AWS_IAM"
+}
+
+resource "aws_lambda_permission" "allow_cf_invoker_landsat_url" {
+  statement_id           = "AllowCfInvokerLandsatFunctionUrl"
+  action                 = "lambda:InvokeFunctionUrl"
+  function_name          = aws_lambda_function.landsat_initiator_lambda.function_name
+  principal              = aws_iam_user.cloudflare_invoker.arn
+  function_url_auth_type = "AWS_IAM"
+}
+
+resource "aws_lambda_permission" "allow_cf_invoker_landsat_function" {
+  statement_id  = "AllowCfInvokerLandsatInvokeFunction"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.landsat_initiator_lambda.function_name
+  principal     = aws_iam_user.cloudflare_invoker.arn
 }
 
 # SQS Trigger for Processor Lambda

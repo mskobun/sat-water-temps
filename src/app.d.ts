@@ -24,6 +24,7 @@ declare global {
 				AWS_ACCESS_KEY_ID: string;
 				AWS_SECRET_ACCESS_KEY: string;
 				LAMBDA_INITIATOR_URL: string;
+				LAMBDA_LANDSAT_INITIATOR_URL: string;
 				AWS_LAMBDA_REGION: string;
 			};
 			context: {

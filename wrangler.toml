@@ -24,3 +24,4 @@ database_id = "6fbaa491-9631-4afa-9c8f-0e7b4c133fd5"
 [vars]
 COGNITO_REGION = "ap-southeast-1"
 AWS_LAMBDA_REGION = "us-west-2"
+# LAMBDA_LANDSAT_INITIATOR_URL = "" # Set after: terraform -chdir=terraform output -raw landsat_initiator_function_url

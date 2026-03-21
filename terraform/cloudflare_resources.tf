@@ -66,6 +66,10 @@ resource "cloudflare_pages_project" "static" {
           value = aws_lambda_function_url.initiator_url.function_url
           type  = "secret_text"
         }
+        LAMBDA_LANDSAT_INITIATOR_URL = {
+          value = aws_lambda_function_url.landsat_initiator_url.function_url
+          type  = "secret_text"
+        }
         AWS_LAMBDA_REGION = {
           value = var.aws_region
           type  = "plain_text"
@@ -127,6 +131,10 @@ resource "cloudflare_pages_project" "static" {
         }
         LAMBDA_INITIATOR_URL = {
           value = aws_lambda_function_url.initiator_url.function_url
+          type  = "secret_text"
+        }
+        LAMBDA_LANDSAT_INITIATOR_URL = {
+          value = aws_lambda_function_url.landsat_initiator_url.function_url
           type  = "secret_text"
         }
         AWS_LAMBDA_REGION = {

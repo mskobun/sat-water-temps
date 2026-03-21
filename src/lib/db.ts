@@ -421,6 +421,30 @@ export async function getEcostressRequests(
   }
 }
 
+export async function getLandsatRuns(
+  db: D1Database,
+  limit: number = 50,
+  status?: string
+) {
+  try {
+    let query = `SELECT * FROM landsat_runs`;
+
+    if (status) {
+      query += ` WHERE error_message IS ${status === 'failed' ? 'NOT NULL' : 'NULL'}`;
+    }
+
+    query += ` ORDER BY created_at DESC LIMIT ?`;
+
+    const stmt = db.prepare(query);
+    const result = await stmt.bind(limit).all();
+
+    return result.results || [];
+  } catch (err) {
+    console.error("D1 query error:", err);
+    return [];
+  }
+}
+
 export async function getEcostressRequestDetail(
   db: D1Database,
   id: number
