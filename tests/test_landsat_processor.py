@@ -3,6 +3,8 @@ import os
 import sys
 import json
 import tempfile
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
@@ -12,6 +14,9 @@ from rasterio.transform import from_bounds
 from rasterio.crs import CRS
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lambda_functions"))
+
+# Real ST_B10 + QA_PIXEL window crops from USGS Landsat C2 L2 ST (see fixture README).
+LANDSAT_FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "landsat_lc09_116048_20241227"
 
 from landsat_processor import (
     apply_landsat_filters,
@@ -268,3 +273,91 @@ class TestFilterStatsIntegration:
         # At least some valid (flag 0) and some filtered pixels
         assert stats["histogram"].get("0", 0) > 0
         assert stats["histogram"].get("0", 0) < ROWS * COLS
+
+
+class TestLandsatProcessOneRecordFixture:
+    """End-to-end processor test using real Landsat COG windows (EPSG:32651) + WGS84 polygons."""
+
+    @pytest.fixture
+    def magat_landsat_body(self):
+        st_path = LANDSAT_FIXTURE_DIR / "ST_B10.tif"
+        qa_path = LANDSAT_FIXTURE_DIR / "QA_PIXEL.tif"
+        assert st_path.is_file(), f"Missing fixture: {st_path}"
+        assert qa_path.is_file(), f"Missing fixture: {qa_path}"
+        return {
+            "source": "landsat",
+            "aid": 1,
+            "date": "2024-12-27",
+            "name": "Magat",
+            "location": "lake",
+            "scenes": [
+                {
+                    "scene_id": "LC09_L2SP_116048_20241227_20241228_02_T1",
+                    "hrefs": {
+                        "lwir11": str(st_path),
+                        "qa_pixel": str(qa_path),
+                    },
+                    "cloud_cover": 11.47,
+                }
+            ],
+        }
+
+    @pytest.mark.filterwarnings("ignore:All-NaN slice encountered:RuntimeWarning")
+    def test_process_one_record_completes_with_real_cog_fixture(self, magat_landsat_body, monkeypatch):
+        """WGS84 polygon must clip UTM Landsat rasters without 'Input shapes do not overlap raster'."""
+        repo_root = Path(__file__).resolve().parent.parent
+        monkeypatch.chdir(repo_root)
+
+        inserted = []
+
+        def capture_insert(feature_id, date, metadata, csv_r2_key, tif_r2_key, png_r2_keys, source="ecostress"):
+            inserted.append(
+                {
+                    "feature_id": feature_id,
+                    "date": date,
+                    "metadata": metadata,
+                    "csv_r2_key": csv_r2_key,
+                    "tif_r2_key": tif_r2_key,
+                    "png_r2_keys": png_r2_keys,
+                    "source": source,
+                }
+            )
+
+        mock_s3 = MagicMock()
+
+        with patch("landsat_processor.upload_to_r2") as _upload, patch(
+            "landsat_processor.insert_metadata_to_d1", side_effect=capture_insert
+        ), patch("landsat_processor.log_job_to_d1"), patch(
+            "landsat_processor._get_s3_client", return_value=mock_s3
+        ):
+            from landsat_processor import process_one_record
+
+            process_one_record(magat_landsat_body)
+
+        assert _upload.call_count >= 3
+        assert len(inserted) == 1
+        row = inserted[0]
+        assert row["feature_id"] == "Magat"
+        assert row["source"] == "landsat"
+        assert row["metadata"]["date"] == "2024-12-27"
+        assert row["metadata"]["data_points"] > 0
+        assert row["metadata"]["min_temp"] is not None
+        assert row["metadata"]["max_temp"] is not None
+        assert "LANDSAT/Magat/lake/" in row["csv_r2_key"]
+        assert "filter_stats" in row["metadata"]
+
+    def test_mask_fails_if_polygon_left_in_wgs84(self):
+        """Regression: passing lon/lat shapes to mask() on a UTM raster does not overlap."""
+        import json
+        from shapely.geometry import shape, mapping
+        from rasterio.mask import mask
+
+        st_path = LANDSAT_FIXTURE_DIR / "ST_B10.tif"
+        with open(Path(__file__).resolve().parent.parent / "static" / "polygons_new.geojson") as f:
+            roi = json.load(f)
+        polygon_geom = shape(roi["features"][0]["geometry"])
+        wgs_shapes = [mapping(polygon_geom)]
+
+        with rasterio.open(st_path) as src:
+            with pytest.raises(ValueError, match="do not overlap"):
+                mask(src, wgs_shapes, crop=True)
