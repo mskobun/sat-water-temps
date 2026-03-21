@@ -19,6 +19,7 @@ import rasterio
 from rasterio.merge import merge
 from rasterio.mask import mask
 from rasterio.session import AWSSession
+from rasterio.warp import transform_geom
 from shapely.geometry import shape, mapping
 
 from processor import (
@@ -148,7 +149,11 @@ def process_one_record(body):
         with open("static/polygons_new.geojson") as f:
             roi = json.load(f)
         polygon_geom = shape(roi["features"][aid - 1]["geometry"])
-        polygon_geojson = [mapping(polygon_geom)]
+        # GeoJSON polygons are WGS84; Landsat ST products are projected (e.g. UTM).
+        # rasterio.mask expects shapes in the raster CRS — without reprojection,
+        # coordinates are misinterpreted and mask() raises "Input shapes do not overlap raster".
+        def _geom_for_raster(crs):
+            return transform_geom("EPSG:4326", crs, mapping(polygon_geom))
 
         # Open all ST_B10 and QA_PIXEL rasters with requester-pays session
         aws_session = AWSSession(boto3.Session(), requester_pays=True)
@@ -195,9 +200,11 @@ def process_one_record(body):
                     dst.write(qa_mosaic)
                 qa_src = rasterio.open(qa_path)
 
-            # Clip to polygon
-            st_clipped, st_transform = mask(st_src, polygon_geojson, crop=True)
-            qa_clipped, _ = mask(qa_src, polygon_geojson, crop=True, nodata=0)
+            # Clip to polygon (geometry must match raster CRS)
+            st_shapes = [_geom_for_raster(st_src.crs)]
+            st_clipped, st_transform = mask(st_src, st_shapes, crop=True)
+            qa_shapes = [_geom_for_raster(qa_src.crs)]
+            qa_clipped, _ = mask(qa_src, qa_shapes, crop=True, nodata=0)
 
             st_meta = st_src.meta.copy()
             st_meta.update(
