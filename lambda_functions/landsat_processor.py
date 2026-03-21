@@ -9,6 +9,7 @@ For each (AID, date) message:
 """
 
 import json
+import math
 import os
 import time
 
@@ -308,6 +309,13 @@ def process_one_record(body):
         valid_pixels = hist.get("0", 0)
         land_pixels = sum(hist.get(str(i), 0) for i in range(16) if i & 4) if has_water else 0
 
+        # Approximate WGS84 pixel size (degrees) from UTM cell size (meters)
+        mid_lat = polygon_geom.centroid.y
+        pixel_m = abs(st_transform.a)
+        pixel_deg_x = pixel_m / (111320 * math.cos(math.radians(mid_lat)))
+        pixel_deg_y = pixel_m / 110540
+        pixel_size_deg = (pixel_deg_x + pixel_deg_y) / 2.0
+
         metadata = {
             "date": date,
             "min_temp": float(np.nanmin(filtered_lst)) if not np.all(np.isnan(filtered_lst)) else None,
@@ -317,6 +325,7 @@ def process_one_record(body):
             "land_pixel_count": land_pixels,
             "wtoff": not has_water,
             "filter_stats": filter_stats,
+            "pixel_size": float(pixel_size_deg),
         }
 
         # Upload metadata JSON

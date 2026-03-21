@@ -48,6 +48,8 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 	let histogramData: Array<{ range: string; count: number }> = $state([]);
 	let waterOff = $state(false);
 	let dataSource = $state('');
+	/** Degrees (WGS84) from D1 when ingested; null uses client-side heuristic */
+	let pixelSizeDeg = $state<number | null>(null);
 	const globalMin = 273.15;
 	const globalMax = 308.15;
 
@@ -170,6 +172,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 			tempFilterMin = null;
 			tempFilterMax = null;
 			dataSource = '';
+			pixelSizeDeg = null;
 		} else if (currentFeatureId && previousFeatureId && currentFeatureId !== previousFeatureId) {
 			// Switching features: just zoom to new feature
 			if (bounds) {
@@ -187,6 +190,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 			tempFilterMin = null;
 			tempFilterMax = null;
 			dataSource = '';
+			pixelSizeDeg = null;
 		}
 
 		previousFeatureId = currentFeatureId;
@@ -342,6 +346,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 		avgTemp = 0;
 		histogramData = [];
 		waterOff = false;
+		pixelSizeDeg = null;
 
 		if (!featureId || !date) return;
 
@@ -357,12 +362,18 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 				avg?: number;
 				wtoff?: boolean;
 				source?: string;
+				pixel_size?: number | null;
 			};
 			if (data.error || !data.geojson) return;
 
 			// Server returns ready-to-use GeoJSON and pre-computed stats
 			heatmapGeojson = data.geojson;
-			squareGeojson = data.geojson.features.length > 0 ? pointsToSquares(data.geojson) : null;
+			pixelSizeDeg =
+				data.pixel_size != null && Number.isFinite(data.pixel_size) && data.pixel_size > 0
+					? data.pixel_size
+					: null;
+			squareGeojson =
+				data.geojson.features.length > 0 ? pointsToSquares(data.geojson, pixelSizeDeg) : null;
 			relativeMin = data.min_max?.[0] || 0;
 			relativeMax = data.min_max?.[1] || 0;
 			avgTemp = data.avg || 0;
@@ -465,41 +476,97 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 	});
 	
 	/**
-	 * Detect the grid cell spacing from a set of points by finding the median gap
-	 * in sorted unique x and y coordinates.
+	 * Detect the grid cell spacing from a set of points (fallback when
+	 * `pixel_size` is not stored in D1 — e.g. legacy rows).
+	 *
+	 * For axis-aligned grids (ECOSTRESS in native WGS84), the median gap in
+	 * sorted unique coordinates gives an exact answer. For rotated grids
+	 * (Landsat UTM reprojected to WGS84), nearly every point has a unique
+	 * coordinate, so median-gap returns near-zero jitter. We detect this case
+	 * and fall back to bounding-box estimation.
 	 */
 	function detectGridSpacing(features: any[]): { dx: number; dy: number } {
+		if (features.length < 2) return { dx: 0.0007, dy: 0.0007 };
+
 		const lngs = new Set<number>();
 		const lats = new Set<number>();
+		let minLng = Infinity, maxLng = -Infinity;
+		let minLat = Infinity, maxLat = -Infinity;
 		for (const f of features) {
 			const [lng, lat] = f.geometry.coordinates;
 			lngs.add(lng);
 			lats.add(lat);
+			if (lng < minLng) minLng = lng;
+			if (lng > maxLng) maxLng = lng;
+			if (lat < minLat) minLat = lat;
+			if (lat > maxLat) maxLat = lat;
 		}
 
-		function medianGap(values: Set<number>): number {
-			const sorted = [...values].sort((a, b) => a - b);
-			if (sorted.length < 2) return 0.0007; // fallback ~70m
-			const gaps: number[] = [];
-			for (let i = 1; i < sorted.length; i++) {
-				const g = sorted[i] - sorted[i - 1];
-				if (g > 1e-8) gaps.push(g);
+		const n = features.length;
+		const sqrtN = Math.sqrt(n);
+		const isRegularGrid = lngs.size < sqrtN * 10 && lats.size < sqrtN * 10;
+
+		if (isRegularGrid) {
+			function medianGap(values: Set<number>): number {
+				const sorted = [...values].sort((a, b) => a - b);
+				if (sorted.length < 2) return 0.0007;
+				const gaps: number[] = [];
+				for (let i = 1; i < sorted.length; i++) {
+					const g = sorted[i] - sorted[i - 1];
+					if (g > 1e-8) gaps.push(g);
+				}
+				if (gaps.length === 0) return 0.0007;
+				gaps.sort((a, b) => a - b);
+				return gaps[Math.floor(gaps.length / 2)];
 			}
-			if (gaps.length === 0) return 0.0007;
-			gaps.sort((a, b) => a - b);
-			return gaps[Math.floor(gaps.length / 2)];
+			return { dx: medianGap(lngs), dy: medianGap(lats) };
 		}
 
-		return { dx: medianGap(lngs), dy: medianGap(lats) };
+		// Reprojected grid: estimate from bounding box + point count.
+		const bboxW = maxLng - minLng;
+		const bboxH = maxLat - minLat;
+		if (bboxW < 1e-10 || bboxH < 1e-10) return { dx: 0.0007, dy: 0.0007 };
+
+		const aspect = bboxW / bboxH;
+		const ny = Math.sqrt(n / aspect);
+		const nx = n / ny;
+
+		return { dx: bboxW / (nx - 1), dy: bboxH / (ny - 1) };
 	}
 
 	/**
 	 * Convert a Point FeatureCollection to a Polygon FeatureCollection
 	 * where each point becomes a square cell for contiguous rendering.
+	 * @param pixelSizeDeg — from processor/D1 when set; otherwise heuristic spacing
 	 */
 	function pointsToSquares(
-		geojson: { type: 'FeatureCollection'; features: any[] }
+		geojson: { type: 'FeatureCollection'; features: any[] },
+		pixelSizeDeg: number | null
 	): { type: 'FeatureCollection'; features: any[] } {
+		if (pixelSizeDeg != null && pixelSizeDeg > 0 && Number.isFinite(pixelSizeDeg)) {
+			const half = pixelSizeDeg / 2;
+			return {
+				type: 'FeatureCollection',
+				features: geojson.features.map((f) => {
+					const [lng, lat] = f.geometry.coordinates;
+					return {
+						type: 'Feature',
+						geometry: {
+							type: 'Polygon',
+							coordinates: [[
+								[lng - half, lat - half],
+								[lng + half, lat - half],
+								[lng + half, lat + half],
+								[lng - half, lat + half],
+								[lng - half, lat - half]
+							]]
+						},
+						properties: f.properties
+					};
+				})
+			};
+		}
+
 		const { dx, dy } = detectGridSpacing(geojson.features);
 		const halfDx = dx / 2;
 		const halfDy = dy / 2;

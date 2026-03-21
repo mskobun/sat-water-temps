@@ -112,8 +112,8 @@ def insert_metadata_to_d1(
     INSERT OR REPLACE INTO temperature_metadata
     (feature_id, date, min_temp, max_temp, mean_temp, median_temp, std_dev,
      data_points, water_pixel_count, land_pixel_count, wtoff,
-     csv_path, tif_path, png_path, filter_stats, source)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     csv_path, tif_path, png_path, filter_stats, source, pixel_size)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
 
     # Serialize filter_stats to JSON
@@ -136,6 +136,7 @@ def insert_metadata_to_d1(
         png_path,
         filter_stats_json,
         source,
+        metadata.get("pixel_size"),
     ]
     with xray_recorder.capture("d1_insert_temperature_metadata") as subsegment:
         subsegment.put_metadata("feature_id", feature_id)
@@ -473,6 +474,10 @@ def process_rasters(
         sum(hist.get(str(i), 0) for i in range(16) if i & 4) if water_mask_flag else 0
     )
 
+    # WGS84 pixel size in degrees (ECOSTRESS rasters are geographic)
+    tf = LST.transform
+    pixel_size_deg = (abs(tf.a) + abs(tf.e)) / 2.0
+
     metadata = {
         "date": date,
         "min_temp": float(df["LST_filter"].min())
@@ -486,6 +491,7 @@ def process_rasters(
         "land_pixel_count": land_pixels,
         "wtoff": bool(suffix),
         "filter_stats": filter_stats,
+        "pixel_size": float(pixel_size_deg),
     }
     metadata_path = os.path.join(work_dir, f"{base_name}_metadata.json")
     with open(metadata_path, "w") as f:
