@@ -240,22 +240,18 @@ def process_one_record(body):
         total_pixels = int(np.sum(st_clipped[0] != 0))  # Non-fill pixels within clip
         filter_stats = compute_filter_stats(flat_flags, len(flat_flags))
 
-        # Build 5-band TIF for tif_to_png() compatibility
-        # Band 1 = filtered LST, bands 2-5 = NaN placeholders
+        # Single-band TIF with DEFLATE compression
         rows, cols = filtered_lst.shape
-        bands = np.full((5, rows, cols), np.nan, dtype=np.float32)
-        bands[0] = filtered_lst
 
         suffix = "" if has_water else "_wtoff"
         base_name = f"{name}_{location}_{date}_filter{suffix}"
         filter_tif_path = os.path.join(work_dir, f"{base_name}.tif")
 
         tif_meta = st_meta.copy()
-        tif_meta.update(dtype=rasterio.float32, count=5, nodata=np.nan)
+        tif_meta.update(dtype=rasterio.float32, count=1, nodata=np.nan, compress='deflate')
 
         with rasterio.open(filter_tif_path, "w", **tif_meta) as dst:
-            for i in range(5):
-                dst.write(bands[i], i + 1)
+            dst.write(filtered_lst, 1)
 
         # Generate CSV — coordinates must be WGS84 (lon/lat) for the frontend.
         # Landsat rasters are in a projected CRS (e.g. UTM), so we must reproject.

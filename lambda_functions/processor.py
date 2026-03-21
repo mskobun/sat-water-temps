@@ -164,12 +164,6 @@ def normalize(data):
 def tif_to_png(tif_path, color_scale="relative"):
     with rasterio.open(tif_path) as dataset:
         num_bands = dataset.count
-        if num_bands < 5:
-            img = Image.new("RGBA", (256, 256), (255, 0, 0, 0))
-            img_bytes = io.BytesIO()
-            img.save(img_bytes, format="PNG")
-            img_bytes.seek(0)
-            return img_bytes
 
         if color_scale == "fixed":
             band = dataset.read(1).astype(np.float32)
@@ -433,7 +427,7 @@ def process_rasters(
     filter_csv_path = os.path.join(work_dir, f"{base_name}.csv")
 
     meta = LST.meta.copy()
-    meta.update(dtype=rasterio.float32, count=len(filtered_rasters))
+    meta.update(dtype=rasterio.float32, count=len(filtered_rasters), compress='deflate')
 
     with rasterio.open(filter_tif_path, "w", **meta) as dst:
         for idx, (key, data) in enumerate(filtered_rasters.items(), start=1):
