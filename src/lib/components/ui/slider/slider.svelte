@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Slider as SliderPrimitive } from "bits-ui";
-	import { cn } from "$lib/utils.js";
+	import type { SliderMultipleRootProps } from "bits-ui";
+	import { cn, type WithElementRef, type WithoutChildrenOrChild } from "$lib/utils.js";
 
 	let {
 		ref = $bindable(null),
@@ -9,7 +10,10 @@
 		trackClass,
 		showRange = true,
 		...restProps
-	}: SliderPrimitive.RootProps & { trackClass?: string; showRange?: boolean } = $props();
+	}: WithElementRef<WithoutChildrenOrChild<SliderMultipleRootProps>> & {
+		trackClass?: string;
+		showRange?: boolean;
+	} = $props();
 </script>
 
 <SliderPrimitive.Root
@@ -25,7 +29,7 @@
 			<SliderPrimitive.Range class="bg-primary/30 absolute h-full" />
 		{/if}
 	</span>
-	{#each value as _, i}
+	{#each value as _, i (i)}
 		<SliderPrimitive.Thumb
 			index={i}
 			class="border-primary bg-background ring-ring/50 block size-4 shrink-0 rounded-full border shadow-sm transition-[color,box-shadow] hover:ring-4 focus-visible:ring-4 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50"

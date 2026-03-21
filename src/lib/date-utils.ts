@@ -30,6 +30,19 @@ export function parseDate(date: string): Date {
 }
 
 /**
+ * Normalized calendar day key (YYYY-MM-DD) for any supported date string.
+ * This lets the UI group ECOSTRESS timestamps and Landsat day-only entries
+ * onto the same calendar cell.
+ */
+export function dateStringToCalendarKey(date: string): string {
+	const d = parseDate(date);
+	const y = d.getFullYear();
+	const m = String(d.getMonth() + 1).padStart(2, '0');
+	const day = String(d.getDate()).padStart(2, '0');
+	return `${y}-${m}-${day}`;
+}
+
+/**
  * Convert any date to a sortable ISO string (YYYY-MM-DD or YYYY-MM-DDThh:mm:ss).
  * Used for chronological comparison across ECOSTRESS and Landsat dates.
  */

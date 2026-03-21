@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
 	import * as Select from '$lib/components/ui/select';
+	import FeatureObservationCalendar from '$lib/components/FeatureObservationCalendar.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Spinner } from '$lib/components/ui/spinner';
@@ -9,7 +10,7 @@
 	import { Slider } from '$lib/components/ui/slider';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { cn } from '$lib/utils.js';
-	import { formatDateTime, formatShortDate, sourceLabel } from '$lib/date-utils';
+	import { formatShortDate, sourceLabel } from '$lib/date-utils';
 	import ThermometerIcon from '@lucide/svelte/icons/thermometer';
 	import PaletteIcon from '@lucide/svelte/icons/palette';
 	import BarChart3Icon from '@lucide/svelte/icons/bar-chart-3';
@@ -279,19 +280,14 @@
 					</h3>
 					<div class="grid gap-3">
 						<div>
-							<label for="date-select" class="text-xs text-muted-foreground mb-1.5 block">Date</label>
-							<Select.Root type="single" value={selectedDate} onValueChange={(v) => v != null && handleDateChange(v)}>
-								<Select.Trigger id="date-select" class="w-full h-9">
-									<span class="truncate">{selectedDate ? formatDateTime(selectedDate) : 'Pick date'}</span>
-								</Select.Trigger>
-								<Select.Content>
-									{#each dates as date}
-										<Select.Item value={date} label={formatDateTime(date)}>
-											{formatDateTime(date)}
-										</Select.Item>
-									{/each}
-								</Select.Content>
-							</Select.Root>
+							<p id="observation-calendar-label" class="text-xs text-muted-foreground mb-1.5">Date</p>
+							<div aria-labelledby="observation-calendar-label">
+								<FeatureObservationCalendar
+									selectedDate={selectedDate}
+									dateEntries={dateEntries}
+									onSelect={handleDateChange}
+								/>
+							</div>
 						</div>
 						<div>
 							<label for="scale-select" class="text-xs text-muted-foreground mb-1.5 block">Color scale</label>
@@ -322,6 +318,7 @@
 								{/if}
 							</label>
 							<Slider
+								type="multiple"
 								value={filterRange}
 								onValueChange={handleFilterRangeChange}
 								min={0}
