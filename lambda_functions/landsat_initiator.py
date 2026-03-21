@@ -84,17 +84,29 @@ def _get_s3_hrefs(item) -> dict:
 
 
 def _log_landsat_run(trigger_type, triggered_by, description, sd, ed,
-                     scenes_submitted=None, error_message=None):
-    """Log a run to the landsat_runs table."""
-    now = int(time.time() * 1000)
-    sql = """
-    INSERT INTO landsat_runs
-    (trigger_type, triggered_by, description, start_date, end_date,
-     scenes_submitted, created_at, error_message)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     scenes_submitted=None, error_message=None, run_id=None):
+    """Log a run to the landsat_runs table.
+
+    If run_id is provided (manual trigger from admin UI), updates the existing
+    row. Otherwise inserts a new row (timer-triggered runs).
     """
-    params = [trigger_type, triggered_by, description, sd, ed,
-              scenes_submitted, now, error_message]
+    now = int(time.time() * 1000)
+    if run_id:
+        sql = """
+        UPDATE landsat_runs
+        SET scenes_submitted = ?, error_message = ?, updated_at = ?
+        WHERE id = ?
+        """
+        params = [scenes_submitted, error_message, now, run_id]
+    else:
+        sql = """
+        INSERT INTO landsat_runs
+        (trigger_type, triggered_by, description, start_date, end_date,
+         scenes_submitted, created_at, error_message)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        params = [trigger_type, triggered_by, description, sd, ed,
+                  scenes_submitted, now, error_message]
     query_d1(sql, params, fatal=False)
 
 
@@ -113,6 +125,7 @@ def handler(event, context):
     trigger_type = event.get("trigger_type", "timer")
     triggered_by = event.get("triggered_by", "cloudwatch")
     description = event.get("description")
+    run_id = event.get("run_id")  # set by admin trigger API
 
     # Date range — default: look back 2 days for Landsat latency
     delay_days = int(get_setting("data_delay_days", default=2))
@@ -204,7 +217,7 @@ def handler(event, context):
             duration_ms=duration_ms,
         )
         _log_landsat_run(trigger_type, triggered_by, description, sd, ed,
-                         scenes_submitted=total_messages)
+                         scenes_submitted=total_messages, run_id=run_id)
 
         print(f"✓ Landsat initiator complete: {total_messages} messages sent in {duration_ms}ms")
 
@@ -225,6 +238,6 @@ def handler(event, context):
             error_message=str(e),
         )
         _log_landsat_run(trigger_type, triggered_by, description, sd, ed,
-                         error_message=str(e))
+                         error_message=str(e), run_id=run_id)
         print(f"✗ Landsat initiator error: {e}")
         return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
