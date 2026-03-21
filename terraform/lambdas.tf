@@ -155,6 +155,39 @@ resource "aws_iam_access_key" "cloudflare_invoker_key" {
 }
 
 # SQS Trigger for Processor Lambda
+# Landsat initiator Lambda
+resource "aws_cloudwatch_log_group" "landsat_initiator_logs" {
+  name              = "/aws/lambda/${var.project_name}-landsat-initiator"
+  retention_in_days = 30
+}
+
+resource "aws_lambda_function" "landsat_initiator_lambda" {
+  function_name = "${var.project_name}-landsat-initiator"
+  role          = aws_iam_role.lambda_role.arn
+  package_type  = "Image"
+  image_uri     = "${aws_ecr_repository.lambda_repo.repository_url}@${data.aws_ecr_image.lambda_image.image_digest}"
+
+  image_config {
+    command = ["landsat_initiator.handler"]
+  }
+
+  tracing_config {
+    mode = "Active"
+  }
+
+  environment {
+    variables = {
+      SQS_QUEUE_URL         = aws_sqs_queue.eco_processing_queue.url
+      D1_DATABASE_ID        = cloudflare_d1_database.main.id
+      CLOUDFLARE_ACCOUNT_ID = var.cloudflare_account_id
+      CLOUDFLARE_API_TOKEN  = var.cloudflare_api_token
+    }
+  }
+
+  timeout     = 300
+  memory_size = 512
+}
+
 resource "aws_lambda_event_source_mapping" "sqs_trigger" {
   event_source_arn                   = aws_sqs_queue.eco_processing_queue.arn
   function_name                      = aws_lambda_function.processor_lambda.arn

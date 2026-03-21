@@ -64,6 +64,17 @@ resource "aws_iam_role_policy" "lambda_policy" {
           "xray:PutTelemetryRecords"
         ]
         Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:ListBucket"
+        ]
+        Resource = [
+          "arn:aws:s3:::usgs-landsat",
+          "arn:aws:s3:::usgs-landsat/*"
+        ]
       }
     ]
   })

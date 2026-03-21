@@ -37,12 +37,15 @@
 
 	$: session = $page.data.session;
 
+	export let dataSource: string = '';
+
 	const dispatch = createEventDispatcher<{
 		close: void;
 		dateChange: string;
 		colorScaleChange: 'relative' | 'fixed' | 'gray';
 		tempFilterChange: { min: number | null; max: number | null };
 	}>();
+	let dateEntries: Array<{ date: string; source: string }> = [];
 	let dates: string[] = [];
 	let loading = false;
 	let filterRange: number[] = [0, 100]; // Percentage values (0-100)
@@ -53,7 +56,9 @@
 
 	function resetState() {
 		dates = [];
+		dateEntries = [];
 		selectedDate = '';
+		dataSource = '';
 		filterRange = [0, 100];
 		dispatch('tempFilterChange', { min: null, max: null });
 	}
@@ -73,7 +78,17 @@
 		avg: convertTemp(avgTemp, currentUnit)
 	} : null;
 
+	function isIsoDate(date: string): boolean {
+		return date.length === 10 && date[4] === '-';
+	}
+
 	function formatDateTime(date: string): string {
+		if (isIsoDate(date)) {
+			// Landsat: YYYY-MM-DD
+			const [year, month, day] = date.split('-');
+			return `${day}/${month}/${year}`;
+		}
+		// ECOSTRESS: 13-digit DOY format
 		const year = date.substring(0, 4);
 		const doy = parseInt(date.substring(4, 7), 10);
 		const hours = date.substring(7, 9);
@@ -87,6 +102,10 @@
 	}
 
 	function formatShortDate(date: string): string {
+		if (isIsoDate(date)) {
+			const dateObj = new Date(date + 'T00:00:00');
+			return dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+		}
 		const year = date.substring(0, 4);
 		const doy = parseInt(date.substring(4, 7), 10);
 		const dateObj = new Date(parseInt(year), 0);
@@ -94,21 +113,34 @@
 		return dateObj.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 	}
 
+	function getSourceForDate(date: string): string {
+		const entry = dateEntries.find(e => e.date === date);
+		return entry?.source || 'ecostress';
+	}
+
 	async function loadDates() {
 		if (!featureId) return;
 		loading = true;
 		try {
 			const response = await fetch(`/api/feature/${featureId}/get_dates`);
-			const fetchedDates = await response.json();
-			dates = Array.isArray(fetchedDates) ? fetchedDates : [];
+			const fetched = await response.json();
+			// Handle both old format (string[]) and new format ({date, source}[])
+			if (Array.isArray(fetched) && fetched.length > 0 && typeof fetched[0] === 'object') {
+				dateEntries = fetched;
+				dates = fetched.map((e: any) => e.date);
+			} else {
+				dateEntries = (Array.isArray(fetched) ? fetched : []).map((d: string) => ({ date: d, source: 'ecostress' }));
+				dates = Array.isArray(fetched) ? fetched : [];
+			}
 			if (dates.length > 0) {
 				selectedDate = (initialDate && dates.includes(initialDate)) ? initialDate : dates[0];
+				dataSource = getSourceForDate(selectedDate);
 				dispatch('dateChange', selectedDate);
-				// Temperature data is loaded by parent via handleDateChange
 			}
 		} catch (err) {
 			console.error('Error loading dates:', err);
 			dates = [];
+			dateEntries = [];
 		} finally {
 			loading = false;
 		}
@@ -122,6 +154,7 @@
 
 	function handleDateChange(value: string) {
 		selectedDate = value;
+		dataSource = getSourceForDate(value);
 		dispatch('dateChange', selectedDate);
 		// Temperature data (including waterOff) is loaded by parent via handleDateChange
 	}
@@ -229,10 +262,15 @@
 			<div class="p-4 space-y-6">
 				<!-- Summary & actions -->
 				<div class="flex items-center justify-between gap-2">
-					<p class="text-sm text-muted-foreground">
-						{dates.length} observation{dates.length === 1 ? '' : 's'}
+					<p class="text-sm text-muted-foreground flex items-center gap-1.5 flex-wrap">
+						<span>{dates.length} observation{dates.length === 1 ? '' : 's'}</span>
 						{#if selectedDate}
-							· {formatShortDate(selectedDate)}
+							<span>· {formatShortDate(selectedDate)}</span>
+						{/if}
+						{#if dataSource}
+							<span class="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium {dataSource === 'landsat' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300' : 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300'}">
+								{dataSource === 'landsat' ? 'Landsat' : 'ECOSTRESS'}
+							</span>
 						{/if}
 					</p>
 					<Tooltip.Provider>

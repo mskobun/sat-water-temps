@@ -37,3 +37,24 @@ resource "aws_lambda_permission" "allow_cloudwatch_poller" {
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.task_poller_schedule.arn
 }
+
+# Landsat daily trigger (offset from ECOSTRESS at 06:00 UTC)
+resource "aws_cloudwatch_event_rule" "landsat_daily_trigger" {
+  name                = "${var.project_name}-landsat-daily-trigger"
+  description         = "Triggers the Landsat initiator Lambda daily at 06:00 UTC"
+  schedule_expression = "cron(0 6 * * ? *)"
+}
+
+resource "aws_cloudwatch_event_target" "landsat_trigger_target" {
+  rule      = aws_cloudwatch_event_rule.landsat_daily_trigger.name
+  target_id = "TriggerLandsatInitiatorLambda"
+  arn       = aws_lambda_function.landsat_initiator_lambda.arn
+}
+
+resource "aws_lambda_permission" "allow_cloudwatch_landsat" {
+  statement_id  = "AllowExecutionFromCloudWatchLandsat"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.landsat_initiator_lambda.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.landsat_daily_trigger.arn
+}

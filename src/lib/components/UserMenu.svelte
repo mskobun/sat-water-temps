@@ -75,9 +75,10 @@
 		<Dialog.Header>
 			<Dialog.Title>Satellite Water Temperature Monitoring</Dialog.Title>
 			<Dialog.Description>
-				This map shows water bodies monitored with ECOSTRESS satellite data. Click a polygon to
-				view temperature time series and thermal imagery. Data is updated periodically from NASA
-				AppEEARS.
+				This map shows water bodies monitored with ECOSTRESS and Landsat satellite data. Click a
+				polygon to view temperature time series and thermal imagery. ECOSTRESS data is sourced
+				from NASA AppEEARS; Landsat Collection 2 Level-2 Surface Temperature is sourced directly
+				from USGS.
 			</Dialog.Description>
 		</Dialog.Header>
 	</Dialog.Content>

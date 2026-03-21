@@ -65,6 +65,7 @@ def insert_metadata_to_d1(
     csv_r2_key: str,
     tif_r2_key: str,
     png_r2_keys: Dict[str, str],
+    source: str = "ecostress",
 ):
     """Insert only metadata into D1 (temperature data stays in R2).
 
@@ -104,8 +105,8 @@ def insert_metadata_to_d1(
     INSERT OR REPLACE INTO temperature_metadata
     (feature_id, date, min_temp, max_temp, mean_temp, median_temp, std_dev,
      data_points, water_pixel_count, land_pixel_count, wtoff,
-     csv_path, tif_path, png_path, filter_stats)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     csv_path, tif_path, png_path, filter_stats, source)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
 
     # Serialize filter_stats to JSON
@@ -127,6 +128,7 @@ def insert_metadata_to_d1(
         tif_path,
         png_path,
         filter_stats_json,
+        source,
     ]
     with xray_recorder.capture("d1_insert_temperature_metadata") as subsegment:
         subsegment.put_metadata("feature_id", feature_id)
@@ -653,19 +655,41 @@ def handler(event, context):
     print(f"Received {len(records)} SQS message(s)")
 
     # Shared resources across all records in this batch
-    user = os.environ.get("APPEEARS_USER")
-    password = os.environ.get("APPEEARS_PASS")
     bucket_name = os.environ.get("R2_BUCKET_NAME", "multitifs")
-
-    token = get_token(user, password)
-    session = create_http_session()
     aid_folder_mapping = _get_aid_folder_mapping()
     s3_client = _get_s3_client()
+
+    # Lazily initialize ECOSTRESS credentials (not needed for Landsat)
+    token = None
+    session = None
 
     # Process each record, tracking failures for partial batch reporting
     failed_message_ids = []
 
     for record in records:
+        message_id = record["messageId"]
+        body = json.loads(record["body"])
+
+        # Route Landsat messages to the Landsat processor
+        if body.get("source") == "landsat":
+            try:
+                from landsat_processor import process_one_record as process_landsat
+                process_landsat(body)
+                continue
+            except Exception as e:
+                import traceback
+                print(f"[Landsat] ✗ Record-level failure: {e}")
+                print(f"[Landsat] Traceback: {traceback.format_exc()}")
+                failed_message_ids.append(message_id)
+                continue
+
+        # ECOSTRESS path — initialize credentials on first use
+        if token is None:
+            user = os.environ.get("APPEEARS_USER")
+            password = os.environ.get("APPEEARS_PASS")
+            token = get_token(user, password)
+            session = create_http_session()
+
         message_id, success = _process_record(
             record, token, session, aid_folder_mapping, s3_client, bucket_name,
         )

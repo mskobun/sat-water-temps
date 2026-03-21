@@ -7,13 +7,15 @@ requires-python = ">=3.12"
 dependencies = [
     "aws-xray-sdk>=2.14.0",
     "boto3>=1.35.0",
-"cmap>=0.4.0",
+    "cmap>=0.4.0",
     "numpy>=2.0.2",
     "pillow>=11.0.0",
     "pandas>=2.3.3",
+    "pystac-client>=0.8.3",
     "python-dotenv>=1.1.1",
     "rasterio>=1.4.3",
     "requests>=2.32.5",
+    "shapely>=2.0.0",
 ]
 
 [dependency-groups]

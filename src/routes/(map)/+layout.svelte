@@ -47,6 +47,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 	let avgTemp = $state(0);
 	let histogramData: Array<{ range: string; count: number }> = $state([]);
 	let waterOff = $state(false);
+	let dataSource = $state('');
 	const globalMin = 273.15;
 	const globalMax = 308.15;
 
@@ -168,6 +169,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 			histogramData = [];
 			tempFilterMin = null;
 			tempFilterMax = null;
+			dataSource = '';
 		} else if (currentFeatureId && previousFeatureId && currentFeatureId !== previousFeatureId) {
 			// Switching features: just zoom to new feature
 			if (bounds) {
@@ -184,6 +186,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 			histogramData = [];
 			tempFilterMin = null;
 			tempFilterMax = null;
+			dataSource = '';
 		}
 
 		previousFeatureId = currentFeatureId;
@@ -353,6 +356,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 				histogram?: Array<{ range: string; count: number }>;
 				avg?: number;
 				wtoff?: boolean;
+				source?: string;
 			};
 			if (data.error || !data.geojson) return;
 
@@ -364,6 +368,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 			avgTemp = data.avg || 0;
 			histogramData = data.histogram || [];
 			waterOff = data.wtoff || false;
+			dataSource = data.source || 'ecostress';
 		} catch (err) {
 			console.error('Error loading temperature data:', err);
 		}
@@ -534,8 +539,9 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 		return '°F';
 	});
 	
+	let sourceLabel = $derived(dataSource === 'landsat' ? ' · Landsat' : dataSource === 'ecostress' ? ' · ECO' : '');
 	let tooltipTempDisplay = $derived(
-		hoveredTemp != null ? convertTemp(hoveredTemp).toFixed(1) + unitSymbol : ''
+		hoveredTemp != null ? convertTemp(hoveredTemp).toFixed(1) + unitSymbol + sourceLabel : ''
 	);
 </script>
 
@@ -566,6 +572,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 						bind:selectedDate
 						bind:selectedColorScale
 						bind:currentUnit
+						bind:dataSource
 						{relativeMin}
 						{relativeMax}
 						{avgTemp}
@@ -723,6 +730,7 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 						bind:selectedDate
 						bind:selectedColorScale
 						bind:currentUnit
+						bind:dataSource
 						{relativeMin}
 						{relativeMax}
 						{avgTemp}

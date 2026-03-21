@@ -14,7 +14,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 		// Query all dates with metadata for this feature
 		const result = await db
 			.prepare(
-				`SELECT date, min_temp, max_temp, data_points, wtoff
+				`SELECT date, min_temp, max_temp, data_points, wtoff, source
          FROM temperature_metadata
          WHERE feature_id = ?
          ORDER BY date DESC`
@@ -22,12 +22,21 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 			.bind(featureId)
 			.all();
 
-		const dates = result.results?.map((r: any) => r.date) || [];
+		const entries = result.results?.map((r: any) => ({
+			date: r.date,
+			source: String(r.source || 'ecostress'),
+			min_temp: r.min_temp,
+			max_temp: r.max_temp,
+			data_points: r.data_points,
+			wtoff: r.wtoff,
+		})) || [];
+		const dates = entries.map((e: any) => e.date);
 		const latestDate = dates.length > 0 ? dates[0] : null;
 
 		return json(
 			{
 				dates,
+				entries,
 				latest_date: latestDate,
 				last_updated: new Date().toISOString()
 			},

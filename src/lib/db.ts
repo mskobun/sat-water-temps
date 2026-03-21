@@ -82,7 +82,7 @@ export async function queryTemperatureData(
     // Get metadata from D1
     const metaResult = await db
       .prepare(
-        "SELECT min_temp, max_temp, wtoff, csv_path FROM temperature_metadata WHERE feature_id = ? AND date = ?"
+        "SELECT min_temp, max_temp, wtoff, csv_path, source FROM temperature_metadata WHERE feature_id = ? AND date = ?"
       )
       .bind(featureId, date)
       .first();
@@ -121,6 +121,7 @@ export async function queryTemperatureData(
       avg: temps.length ? temps.reduce((a, b) => a + b, 0) / temps.length : 0,
       date: date,
       wtoff: Boolean(metaResult.wtoff),
+      source: String(metaResult.source || 'ecostress'),
     };
   } catch (err) {
     console.error("Error fetching temperature data:", err);
@@ -132,12 +133,12 @@ export async function getFeatureDates(db: D1Database, featureId: string) {
   try {
     const result = await db
       .prepare(
-        "SELECT date FROM temperature_metadata WHERE feature_id = ? ORDER BY date DESC"
+        "SELECT date, source FROM temperature_metadata WHERE feature_id = ? ORDER BY date DESC"
       )
       .bind(featureId)
       .all();
 
-    return result.results?.map((r: any) => r.date) || [];
+    return result.results?.map((r: any) => ({ date: r.date, source: String(r.source || 'ecostress') })) || [];
   } catch (err) {
     console.error("D1 query error:", err);
     return [];
