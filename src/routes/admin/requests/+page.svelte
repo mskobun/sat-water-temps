@@ -72,9 +72,15 @@
 	let updatedAt = $state('');
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
-	// Trigger dialog state
+	// Trigger dialog state — triggerSource syncs with active tab when dialog opens
 	let dialogOpen = $state(false);
 	let triggerSource = $state<Source>('ecostress');
+
+	$effect(() => {
+		if (dialogOpen) {
+			triggerSource = source;
+		}
+	});
 	let triggerDateRange = $state<DateRange>({ start: undefined, end: undefined });
 	let triggerDescription = $state('');
 	let triggerLoading = $state(false);
@@ -479,6 +485,7 @@
 								<Table.Head>Description</Table.Head>
 								<Table.Head>Scenes</Table.Head>
 								<Table.Head>Created</Table.Head>
+								<Table.Head>Error</Table.Head>
 							</Table.Row>
 						</Table.Header>
 						<Table.Body>
@@ -506,6 +513,13 @@
 									</Table.Cell>
 									<Table.Cell class="text-sm text-muted-foreground">
 										{formatDate(r.created_at)}
+									</Table.Cell>
+									<Table.Cell class="text-sm max-w-xs">
+										{#if r.error_message}
+											<span class="text-destructive truncate block" title={r.error_message}>{r.error_message}</span>
+										{:else}
+											<span class="text-muted-foreground">-</span>
+										{/if}
 									</Table.Cell>
 								</Table.Row>
 							{/each}

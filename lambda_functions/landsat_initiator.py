@@ -55,7 +55,7 @@ def _load_polygons():
 
 def _search_stac(start_date: str, end_date: str, bbox: list) -> list:
     """Search USGS STAC for Landsat C2 L2 ST scenes intersecting bbox."""
-    catalog = STACClient.from_url(STAC_URL)
+    catalog = STACClient.open(STAC_URL)
     search = catalog.search(
         collections=[COLLECTION],
         bbox=bbox,
