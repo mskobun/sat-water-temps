@@ -2,8 +2,15 @@
 	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-import { MapLibre, GeoJSONSource, FillLayer, LineLayer } from 'svelte-maplibre-gl';
-import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, FilterSpecification } from 'maplibre-gl';
+	import { MapLibre, GeoJSONSource, FillLayer, LineLayer, CircleLayer } from 'svelte-maplibre-gl';
+	import type {
+		Map,
+		MapMouseEvent,
+		LngLatBoundsLike,
+		FillLayerSpecification,
+		CircleLayerSpecification,
+		FilterSpecification
+	} from 'maplibre-gl';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import * as Drawer from '$lib/components/ui/drawer';
 	import { Button } from '$lib/components/ui/button';
@@ -197,8 +204,8 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 	});
 
 
-	// Fill paint properties based on color scale - colors each square by its temperature
-	let fillPaint = $derived.by(() => {
+	// Shared color expression for both zoomed-out circles and zoomed-in cells.
+	let temperatureColorExpr = $derived.by(() => {
 		let minTemp = selectedColorScale === 'relative' ? relativeMin : globalMin;
 		let maxTemp = selectedColorScale === 'relative' ? relativeMax : globalMax;
 
@@ -228,10 +235,58 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 				maxTemp, 'rgb(255,0,0)'
 			];
 
+		return colorExpr;
+	});
+
+	// Crossfade from circles at overview zooms to true cell footprints when zoomed in.
+	let fillPaint = $derived.by(() => {
 		return {
-			'fill-color': colorExpr,
-			'fill-opacity': 0.8
+			'fill-color': temperatureColorExpr,
+			'fill-opacity': [
+				'interpolate',
+				['linear'],
+				['zoom'],
+				8,
+				0,
+				10,
+				0.4,
+				11,
+				0.8
+			]
 		} as unknown as FillLayerSpecification['paint'];
+	});
+
+	let circlePaint = $derived.by(() => {
+		return {
+			'circle-color': temperatureColorExpr,
+			'circle-radius': [
+				'interpolate',
+				['linear'],
+				['zoom'],
+				4,
+				1.5,
+				7,
+				2.5,
+				9,
+				4,
+				11,
+				6
+			],
+			'circle-opacity': [
+				'interpolate',
+				['linear'],
+				['zoom'],
+				4,
+				0.85,
+				8,
+				0.7,
+				10,
+				0.25,
+				11,
+				0
+			],
+			'circle-stroke-width': 0
+		} as unknown as CircleLayerSpecification['paint'];
 	});
 
 	// MapLibre style with Esri World Imagery tiles
@@ -259,12 +314,20 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 	};
 
 	// All user interactions just change the URL
+	function getTemperatureLayerIds(): string[] {
+		if (!map) return [];
+		return ['temperature-circles-layer', 'temperature-squares-layer'].filter((layerId) =>
+			Boolean(map.getLayer(layerId))
+		);
+	}
+
 	function handleMapClick(e: MapMouseEvent) {
 		if (!map) return;
 
 		// On mobile, tapping the heatmap shows a temperature tooltip
-		if (isMobile.current && map.getLayer('temperature-layer')) {
-			const tempFeatures = map.queryRenderedFeatures(e.point, { layers: ['temperature-layer'] });
+		const temperatureLayerIds = getTemperatureLayerIds();
+		if (isMobile.current && temperatureLayerIds.length > 0) {
+			const tempFeatures = map.queryRenderedFeatures(e.point, { layers: temperatureLayerIds });
 			if (tempFeatures && tempFeatures.length > 0) {
 				const temp = tempFeatures[0].properties?.temperature;
 				if (temp != null) {
@@ -304,8 +367,9 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 		if (!map) return;
 		
 		// Check temperature layer first
-		if (map.getLayer('temperature-layer')) {
-			const tempFeatures = map.queryRenderedFeatures(e.point, { layers: ['temperature-layer'] });
+		const temperatureLayerIds = getTemperatureLayerIds();
+		if (temperatureLayerIds.length > 0) {
+			const tempFeatures = map.queryRenderedFeatures(e.point, { layers: temperatureLayerIds });
 			if (tempFeatures && tempFeatures.length > 0) {
 				const temp = tempFeatures[0].properties?.temperature;
 				if (temp != null) {
@@ -718,16 +782,29 @@ import type { Map, MapMouseEvent, LngLatBoundsLike, FillLayerSpecification, Filt
 						</GeoJSONSource>
 					{/if}
 
-					{#if squareGeojson}
-						<!-- Temperature squares - each colored by its temperature value -->
+					{#if heatmapGeojson || squareGeojson}
+						<!-- Temperature overlay crossfades from circles when zoomed out to cells when zoomed in. -->
 						{#key selectedDate}
-							<GeoJSONSource id="temperature-points" data={squareGeojson}>
-								<FillLayer
-									id="temperature-layer"
-									paint={fillPaint}
-									filter={tempLayerFilter}
-								/>
-							</GeoJSONSource>
+							{#if heatmapGeojson}
+								<GeoJSONSource id="temperature-points-source" data={heatmapGeojson}>
+									<CircleLayer
+										id="temperature-circles-layer"
+										paint={circlePaint}
+										filter={tempLayerFilter}
+										maxzoom={11}
+									/>
+								</GeoJSONSource>
+							{/if}
+							{#if squareGeojson}
+								<GeoJSONSource id="temperature-squares-source" data={squareGeojson}>
+									<FillLayer
+										id="temperature-squares-layer"
+										paint={fillPaint}
+										filter={tempLayerFilter}
+										minzoom={8}
+									/>
+								</GeoJSONSource>
+							{/if}
 						{/key}
 					{/if}
 				</MapLibre>
