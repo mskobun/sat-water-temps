@@ -285,6 +285,8 @@
 								<FeatureObservationCalendar
 									selectedDate={selectedDate}
 									dateEntries={dateEntries}
+									{featureId}
+									colorScale={selectedColorScale}
 									onSelect={handleDateChange}
 								/>
 							</div>

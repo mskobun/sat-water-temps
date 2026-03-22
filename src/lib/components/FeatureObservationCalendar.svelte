@@ -2,6 +2,7 @@
 	import { Calendar } from '$lib/components/ui/calendar';
 	import { Button } from '$lib/components/ui/button';
 	import * as Popover from '$lib/components/ui/popover';
+	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Calendar as CalendarPrimitive } from 'bits-ui';
 	import { buttonVariants } from '$lib/components/ui/button/index.js';
 	import { cn } from '$lib/utils.js';
@@ -16,10 +17,14 @@
 	let {
 		selectedDate = '',
 		dateEntries = [] as Array<{ date: string; source: string }>,
+		featureId = '',
+		colorScale = 'relative' as 'relative' | 'fixed' | 'gray',
 		onSelect
 	}: {
 		selectedDate?: string;
 		dateEntries?: Array<{ date: string; source: string }>;
+		featureId?: string;
+		colorScale?: 'relative' | 'fixed' | 'gray';
 		onSelect: (date: string) => void;
 	} = $props();
 
@@ -144,7 +149,31 @@
 </Popover.Root>
 
 {#snippet day({ day: date, outsideMonth: _outsideMonth }: { day: DateValue; outsideMonth: boolean })}
-	{@const flags = sourcesByDay[dateValueToKey(date)] ?? { ecostress: false, landsat: false }}
+	{@const key = dateValueToKey(date)}
+	{@const flags = sourcesByDay[key] ?? { ecostress: false, landsat: false }}
+	{@const hasObs = flags.ecostress || flags.landsat}
+	{@const serverDate = hasObs && featureId ? serverDateForCalendarKey(key) : null}
+	{@const pngUrl = serverDate ? `/api/feature/${featureId}/tif/${serverDate}/${colorScale}` : null}
+	{#if pngUrl}
+		<Tooltip.Root delayDuration={200}>
+			<Tooltip.Trigger>
+				{@render dayCell(flags, hasObs)}
+			</Tooltip.Trigger>
+			<Tooltip.Content side="right" class="p-1 bg-card border shadow-lg" arrowClasses="hidden">
+				<img
+					src={pngUrl}
+					alt="Preview for {key}"
+					loading="lazy"
+					class="w-48 h-48 rounded object-cover bg-muted"
+				/>
+			</Tooltip.Content>
+		</Tooltip.Root>
+	{:else}
+		{@render dayCell(flags, hasObs)}
+	{/if}
+{/snippet}
+
+{#snippet dayCell(flags: SourceFlags, hasObs: boolean)}
 	<CalendarPrimitive.Day
 		class={cn(
 			buttonVariants({ variant: 'ghost' }),
@@ -162,7 +191,7 @@
 		{#snippet children({ day: dayNum }: { day: string })}
 			<span class="flex flex-col items-center justify-center gap-0.5">
 				<span>{dayNum}</span>
-				{#if flags.ecostress || flags.landsat}
+				{#if hasObs}
 					<span class="flex min-h-[6px] flex-row justify-center gap-0.5" aria-hidden="true">
 						{#if flags.ecostress}
 							<span class="size-1.5 rounded-full bg-orange-500" title="ECOSTRESS"></span>
