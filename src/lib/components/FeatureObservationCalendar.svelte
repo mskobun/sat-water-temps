@@ -214,11 +214,11 @@
 	{@const serverDate = hasObs && featureId ? serverDateForCalendarKey(key) : null}
 	{@const pngUrl = serverDate ? `/api/feature/${featureId}/tif/${serverDate}/${colorScale}` : null}
 	{#if pngUrl}
-		<Tooltip.Root delayDuration={200}>
+		<Tooltip.Root delayDuration={200} disableHoverableContent>
 			<Tooltip.Trigger>
 				{@render dayCell(flags, hasObs)}
 			</Tooltip.Trigger>
-			<Tooltip.Content side="right" class="p-1 bg-card border shadow-lg" arrowClasses="hidden">
+			<Tooltip.Content side="bottom" class="p-1 bg-card border shadow-lg" arrowClasses="hidden">
 				<img
 					src={pngUrl}
 					alt="Preview for {key}"
