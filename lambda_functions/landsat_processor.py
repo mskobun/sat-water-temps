@@ -310,7 +310,6 @@ def process_one_record(body):
         pixel_m = abs(st_transform.a)
         pixel_deg_x = pixel_m / (111320 * math.cos(math.radians(mid_lat)))
         pixel_deg_y = pixel_m / 110540
-        pixel_size_deg = (pixel_deg_x + pixel_deg_y) / 2.0
 
         metadata = {
             "date": date,
@@ -321,7 +320,8 @@ def process_one_record(body):
             "land_pixel_count": land_pixels,
             "wtoff": not has_water,
             "filter_stats": filter_stats,
-            "pixel_size": float(pixel_size_deg),
+            "pixel_size": float(pixel_deg_y),
+            "pixel_size_x": float(pixel_deg_x),
         }
 
         # Upload metadata JSON

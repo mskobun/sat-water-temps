@@ -56,6 +56,7 @@
 	let waterOff = $state(false);
 	let dataSource = $state('');
 	let pixelSizeDeg = $state<number | null>(null);
+	let pixelSizeXDeg = $state<number | null>(null);
 	const globalMin = 273.15;
 	const globalMax = 308.15;
 
@@ -179,6 +180,7 @@
 			tempFilterMax = null;
 			dataSource = '';
 			pixelSizeDeg = null;
+			pixelSizeXDeg = null;
 		} else if (currentFeatureId && previousFeatureId && currentFeatureId !== previousFeatureId) {
 			// Switching features: just zoom to new feature
 			if (bounds) {
@@ -197,6 +199,7 @@
 			tempFilterMax = null;
 			dataSource = '';
 			pixelSizeDeg = null;
+			pixelSizeXDeg = null;
 		}
 
 		previousFeatureId = currentFeatureId;
@@ -410,6 +413,7 @@
 		histogramData = [];
 		waterOff = false;
 		pixelSizeDeg = null;
+		pixelSizeXDeg = null;
 
 		if (!featureId || !date) return;
 
@@ -426,15 +430,17 @@
 				wtoff?: boolean;
 				source?: string;
 				pixel_size?: number | null;
+				pixel_size_x?: number | null;
 			};
 			if (data.error || !data.geojson) return;
 
 			// Server returns ready-to-use GeoJSON and pre-computed stats
 			heatmapGeojson = data.geojson;
 			pixelSizeDeg = data.pixel_size ?? null;
+			pixelSizeXDeg = data.pixel_size_x ?? pixelSizeDeg;
 			squareGeojson =
 				data.geojson.features.length > 0 && pixelSizeDeg != null
-					? pointsToSquares(data.geojson, pixelSizeDeg)
+					? pointsToSquares(data.geojson, pixelSizeXDeg!, pixelSizeDeg)
 					: null;
 			relativeMin = data.min_max?.[0] || 0;
 			relativeMax = data.min_max?.[1] || 0;
@@ -539,14 +545,16 @@
 	
 	/**
 	 * Convert a Point FeatureCollection to a Polygon FeatureCollection
-	 * where each point becomes a square cell for contiguous rendering.
-	 * pixel_size is always set in D1 by the processor at ingest time.
+	 * where each point becomes a rectangular cell for contiguous rendering.
+	 * pixelSizeX (longitude) and pixelSizeY (latitude) are set in D1 at ingest.
 	 */
 	function pointsToSquares(
 		geojson: { type: 'FeatureCollection'; features: any[] },
-		pixelSizeDeg: number
+		pixelSizeX: number,
+		pixelSizeY: number
 	): { type: 'FeatureCollection'; features: any[] } {
-		const half = pixelSizeDeg / 2;
+		const halfX = pixelSizeX / 2;
+		const halfY = pixelSizeY / 2;
 		return {
 			type: 'FeatureCollection',
 			features: geojson.features.map((f) => {
@@ -556,11 +564,11 @@
 					geometry: {
 						type: 'Polygon',
 						coordinates: [[
-							[lng - half, lat - half],
-							[lng + half, lat - half],
-							[lng + half, lat + half],
-							[lng - half, lat + half],
-							[lng - half, lat - half]
+							[lng - halfX, lat - halfY],
+							[lng + halfX, lat - halfY],
+							[lng + halfX, lat + halfY],
+							[lng - halfX, lat + halfY],
+							[lng - halfX, lat - halfY]
 						]]
 					},
 					properties: f.properties

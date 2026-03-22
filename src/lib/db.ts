@@ -82,7 +82,7 @@ export async function queryTemperatureData(
     // Get metadata from D1
     const metaResult = await db
       .prepare(
-        "SELECT min_temp, max_temp, wtoff, csv_path, source, pixel_size FROM temperature_metadata WHERE feature_id = ? AND date = ?"
+        "SELECT min_temp, max_temp, wtoff, csv_path, source, pixel_size, pixel_size_x FROM temperature_metadata WHERE feature_id = ? AND date = ?"
       )
       .bind(featureId, date)
       .first();
@@ -116,6 +116,8 @@ export async function queryTemperatureData(
     
     const ps = metaResult.pixel_size;
     const pixel_size = ps != null && ps !== '' ? Number(ps) : null;
+    const psx = metaResult.pixel_size_x;
+    const pixel_size_x = psx != null && psx !== '' ? Number(psx) : null;
 
     return {
       geojson: buildGeoJSON(geoPoints),
@@ -126,6 +128,7 @@ export async function queryTemperatureData(
       wtoff: Boolean(metaResult.wtoff),
       source: String(metaResult.source || 'ecostress'),
       pixel_size,
+      pixel_size_x,
     };
   } catch (err) {
     console.error("Error fetching temperature data:", err);

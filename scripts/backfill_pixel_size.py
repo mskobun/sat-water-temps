@@ -63,7 +63,10 @@ def query_d1(sql, params=None):
 
 
 def compute_pixel_size(tif_path, source):
-    """Compute WGS84 pixel size in degrees from a TIF file."""
+    """Compute WGS84 pixel size in degrees from a TIF file.
+
+    Returns (pixel_size_x, pixel_size_y) — longitude and latitude sizes.
+    """
     with rasterio.open(tif_path) as src:
         tf = src.transform
         crs = src.crs
@@ -75,10 +78,10 @@ def compute_pixel_size(tif_path, source):
             pixel_m = abs(tf.a)
             pixel_deg_x = pixel_m / (111320 * math.cos(math.radians(mid_lat)))
             pixel_deg_y = pixel_m / 110540
-            return (pixel_deg_x + pixel_deg_y) / 2.0
+            return pixel_deg_x, pixel_deg_y
         else:
             # ECOSTRESS (WGS84) — direct from transform
-            return (abs(tf.a) + abs(tf.e)) / 2.0
+            return abs(tf.a), abs(tf.e)
 
 
 def main():
@@ -94,14 +97,14 @@ def main():
 
     s3 = get_s3_client()
 
-    # Find records missing pixel_size that have a tif_path
+    # Find records missing pixel_size_x that have a tif_path
     result = query_d1(
         "SELECT feature_id, date, tif_path, source FROM temperature_metadata "
-        "WHERE pixel_size IS NULL AND tif_path IS NOT NULL"
+        "WHERE pixel_size_x IS NULL AND tif_path IS NOT NULL"
     )
 
     rows = result.get("result", [{}])[0].get("results", [])
-    print(f"Found {len(rows)} record(s) missing pixel_size\n")
+    print(f"Found {len(rows)} record(s) missing pixel_size_x\n")
 
     updated = 0
     failed = 0
@@ -117,16 +120,16 @@ def main():
 
         try:
             s3.download_file(R2_BUCKET_NAME, tif_key, tmp_path)
-            pixel_size = compute_pixel_size(tmp_path, source)
+            pixel_size_x, pixel_size_y = compute_pixel_size(tmp_path, source)
 
             if dry_run:
-                print(f"  [DRY RUN] {feature_id} {date} ({source}): pixel_size={pixel_size:.8f}")
+                print(f"  [DRY RUN] {feature_id} {date} ({source}): pixel_size_x={pixel_size_x:.8f} pixel_size_y={pixel_size_y:.8f}")
             else:
                 query_d1(
-                    "UPDATE temperature_metadata SET pixel_size = ? WHERE feature_id = ? AND date = ?",
-                    [pixel_size, feature_id, date],
+                    "UPDATE temperature_metadata SET pixel_size = ?, pixel_size_x = ? WHERE feature_id = ? AND date = ?",
+                    [pixel_size_y, pixel_size_x, feature_id, date],
                 )
-                print(f"  {feature_id} {date} ({source}): pixel_size={pixel_size:.8f}")
+                print(f"  {feature_id} {date} ({source}): pixel_size_x={pixel_size_x:.8f} pixel_size_y={pixel_size_y:.8f}")
             updated += 1
 
         except Exception as e:
