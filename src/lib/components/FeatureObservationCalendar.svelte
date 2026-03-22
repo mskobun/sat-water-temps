@@ -7,12 +7,13 @@
 	import { buttonVariants } from '$lib/components/ui/button/index.js';
 	import { cn } from '$lib/utils.js';
 	import { CalendarDate, type DateValue } from '@internationalized/date';
-	import { compareDates, dateStringToCalendarKey, formatDateTime, parseDate } from '$lib/date-utils';
+	import { compareDates, dateStringToCalendarKey, formatDateTime, parseDate, sourceLabel } from '$lib/date-utils';
 	import CalendarIcon from '@lucide/svelte/icons/calendar';
 
 	type SourceFlags = { ecostress: boolean; landsat: boolean };
 
 	let open = $state(false);
+	let pendingDayKey = $state<string | null>(null);
 
 	let {
 		selectedDate = '',
@@ -48,6 +49,12 @@
 		}
 		return o;
 	});
+
+	function entriesForDay(key: string): Array<{ date: string; source: string }> {
+		return dateEntries.filter((e) => dateStringToCalendarKey(e.date) === key);
+	}
+
+	const pendingEntries = $derived(pendingDayKey ? entriesForDay(pendingDayKey) : []);
 
 	const bounds = $derived.by(() => {
 		if (dateEntries.length === 0) {
@@ -86,11 +93,29 @@
 
 	function handleValueChange(v: DateValue | undefined) {
 		if (!v) return;
-		const server = serverDateForCalendarKey(dateValueToKey(v));
+		const key = dateValueToKey(v);
+		const flags = sourcesByDay[key];
+		if (!flags) return;
+
+		// If both sources exist on this day, show the picker
+		if (flags.ecostress && flags.landsat) {
+			pendingDayKey = key;
+			return;
+		}
+
+		// Single source — select immediately
+		const server = serverDateForCalendarKey(key);
 		if (server) {
+			pendingDayKey = null;
 			onSelect(server);
 			open = false;
 		}
+	}
+
+	function selectEntry(entry: { date: string; source: string }) {
+		pendingDayKey = null;
+		onSelect(entry.date);
+		open = false;
 	}
 
 	function isDateDisabled(d: DateValue): boolean {
@@ -98,7 +123,7 @@
 	}
 </script>
 
-<Popover.Root bind:open>
+<Popover.Root bind:open onOpenChange={(o) => { if (!o) pendingDayKey = null; }}>
 	<Popover.Trigger>
 		<Button
 			variant="outline"
@@ -128,6 +153,40 @@
 					day={day}
 				/>
 			{/key}
+			{#if pendingDayKey && pendingEntries.length > 1}
+				<div class="border-t px-3 py-2 space-y-1.5">
+					<p class="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+						Select observation
+					</p>
+					{#each pendingEntries as entry}
+						{@const isLandsat = entry.source === 'landsat'}
+						<button
+							type="button"
+							class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent transition-colors"
+							onclick={() => selectEntry(entry)}
+						>
+							<span
+								class={cn(
+									'w-0.5 self-stretch rounded-full shrink-0',
+									isLandsat ? 'bg-blue-500' : 'bg-orange-500'
+								)}
+							></span>
+							<div class="flex flex-col min-w-0">
+								<span class="font-medium">{sourceLabel(entry.source)}</span>
+								<span class="text-[10px] text-muted-foreground">{formatDateTime(entry.date)}</span>
+							</div>
+							{#if featureId}
+								<img
+									src={`/api/feature/${featureId}/tif/${entry.date}/${colorScale}`}
+									alt=""
+									loading="lazy"
+									class="size-8 rounded object-cover bg-muted ml-auto shrink-0"
+								/>
+							{/if}
+						</button>
+					{/each}
+				</div>
+			{/if}
 			<div
 				class="border-t px-3 py-2"
 				role="group"
