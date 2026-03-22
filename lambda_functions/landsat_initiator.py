@@ -162,14 +162,17 @@ def handler(event, context):
                     "scene_id": item.id,
                     "hrefs": hrefs,
                     "cloud_cover": item.properties.get("eo:cloud_cover"),
+                    "datetime": item.datetime.strftime("%Y-%m-%dT%H:%M:%S"),
                 })
 
             # Send one SQS message per (AID, date)
             for scene_date, scenes in scenes_by_date.items():
+                # Use earliest scene datetime for the record timestamp
+                scene_datetime = min(s["datetime"] for s in scenes)
                 message_body = {
                     "source": "landsat",
                     "aid": poly["aid"],
-                    "date": scene_date,
+                    "date": scene_datetime,
                     "name": poly["name"],
                     "location": poly["location"],
                     "scenes": scenes,

@@ -60,7 +60,8 @@ def to_iso_datetime(date_str):
     """Convert any date string to ISO datetime YYYY-MM-DDTHH:MM:SS.
 
     ECOSTRESS DOY "2024362041923" -> "2024-12-27T04:19:23"
-    Landsat ISO   "2024-12-27"    -> "2024-12-27T00:00:00"
+    Landsat ISO   "2024-12-27T10:23:45" -> pass through
+    Legacy date   "2024-12-27"    -> "2024-12-27T00:00:00"
     Already normalized            -> pass through
     """
     if len(date_str) == 19 and date_str[4] == "-" and "T" in date_str:

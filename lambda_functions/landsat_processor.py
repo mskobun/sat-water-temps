@@ -123,25 +123,26 @@ def process_one_record(body):
     }
     """
     aid = body["aid"]
-    date = body["date"]
+    date_str = body["date"]  # ISO datetime e.g. "2024-12-27T10:23:45" or legacy "2024-12-27"
+    date_day = date_str[:10]  # YYYY-MM-DD for filenames/paths
     name = body["name"]
     location = body.get("location", "lake")
     scenes = body["scenes"]
     feature_id = f"{name}/{location}" if location != "lake" else name
 
-    print(f"[Landsat][{feature_id}] Processing {len(scenes)} scene(s) for date={date}")
+    print(f"[Landsat][{feature_id}] Processing {len(scenes)} scene(s) for date={date_str}")
 
     start_time = time.time()
 
     log_job_to_d1(
         job_type="landsat_process",
         feature_id=feature_id,
-        date=date,
+        date=date_str,
         status="started",
         fatal=False,
     )
 
-    work_dir = f"/tmp/landsat_{aid}_{date}"
+    work_dir = f"/tmp/landsat_{aid}_{date_day}"
     os.makedirs(work_dir, exist_ok=True)
 
     try:
@@ -244,7 +245,7 @@ def process_one_record(body):
         rows, cols = filtered_lst.shape
 
         suffix = "" if has_water else "_wtoff"
-        base_name = f"{name}_{location}_{date}_filter{suffix}"
+        base_name = f"{name}_{location}_{date_day}_filter{suffix}"
         filter_tif_path = os.path.join(work_dir, f"{base_name}.tif")
 
         tif_meta = st_meta.copy()
@@ -312,7 +313,7 @@ def process_one_record(body):
         pixel_deg_y = pixel_m / 110540
 
         metadata = {
-            "date": date,
+            "date": date_str,
             "min_temp": float(np.nanmin(filtered_lst)) if not np.all(np.isnan(filtered_lst)) else None,
             "max_temp": float(np.nanmax(filtered_lst)) if not np.all(np.isnan(filtered_lst)) else None,
             "data_points": int(len(df_valid)),
@@ -332,14 +333,14 @@ def process_one_record(body):
         upload_to_r2(s3_client, bucket_name, meta_key, metadata_path, "application/json")
 
         # Insert into D1 with source='landsat'
-        insert_metadata_to_d1(feature_id, date, metadata, csv_key, tif_key, png_r2_keys,
+        insert_metadata_to_d1(feature_id, date_str, metadata, csv_key, tif_key, png_r2_keys,
                               source="landsat")
 
         duration_ms = int((time.time() - start_time) * 1000)
         log_job_to_d1(
             job_type="landsat_process",
             feature_id=feature_id,
-            date=date,
+            date=date_str,
             status="success",
             duration_ms=duration_ms,
         )
@@ -351,7 +352,7 @@ def process_one_record(body):
         log_job_to_d1(
             job_type="landsat_process",
             feature_id=feature_id,
-            date=date,
+            date=date_str,
             status="failed",
             duration_ms=duration_ms,
             error_message=str(e),
