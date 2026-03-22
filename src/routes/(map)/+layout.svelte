@@ -55,7 +55,6 @@
 	let histogramData: Array<{ range: string; count: number }> = $state([]);
 	let waterOff = $state(false);
 	let dataSource = $state('');
-	/** Degrees (WGS84) from D1 when ingested; null uses client-side heuristic */
 	let pixelSizeDeg = $state<number | null>(null);
 	const globalMin = 273.15;
 	const globalMax = 308.15;
@@ -432,12 +431,11 @@
 
 			// Server returns ready-to-use GeoJSON and pre-computed stats
 			heatmapGeojson = data.geojson;
-			pixelSizeDeg =
-				data.pixel_size != null && Number.isFinite(data.pixel_size) && data.pixel_size > 0
-					? data.pixel_size
-					: null;
+			pixelSizeDeg = data.pixel_size ?? null;
 			squareGeojson =
-				data.geojson.features.length > 0 ? pointsToSquares(data.geojson, pixelSizeDeg) : null;
+				data.geojson.features.length > 0 && pixelSizeDeg != null
+					? pointsToSquares(data.geojson, pixelSizeDeg)
+					: null;
 			relativeMin = data.min_max?.[0] || 0;
 			relativeMax = data.min_max?.[1] || 0;
 			avgTemp = data.avg || 0;
@@ -540,101 +538,15 @@
 	});
 	
 	/**
-	 * Detect the grid cell spacing from a set of points (fallback when
-	 * `pixel_size` is not stored in D1 — e.g. legacy rows).
-	 *
-	 * For axis-aligned grids (ECOSTRESS in native WGS84), the median gap in
-	 * sorted unique coordinates gives an exact answer. For rotated grids
-	 * (Landsat UTM reprojected to WGS84), nearly every point has a unique
-	 * coordinate, so median-gap returns near-zero jitter. We detect this case
-	 * and fall back to bounding-box estimation.
-	 */
-	function detectGridSpacing(features: any[]): { dx: number; dy: number } {
-		if (features.length < 2) return { dx: 0.0007, dy: 0.0007 };
-
-		const lngs = new Set<number>();
-		const lats = new Set<number>();
-		let minLng = Infinity, maxLng = -Infinity;
-		let minLat = Infinity, maxLat = -Infinity;
-		for (const f of features) {
-			const [lng, lat] = f.geometry.coordinates;
-			lngs.add(lng);
-			lats.add(lat);
-			if (lng < minLng) minLng = lng;
-			if (lng > maxLng) maxLng = lng;
-			if (lat < minLat) minLat = lat;
-			if (lat > maxLat) maxLat = lat;
-		}
-
-		const n = features.length;
-		const sqrtN = Math.sqrt(n);
-		const isRegularGrid = lngs.size < sqrtN * 10 && lats.size < sqrtN * 10;
-
-		if (isRegularGrid) {
-			function medianGap(values: Set<number>): number {
-				const sorted = [...values].sort((a, b) => a - b);
-				if (sorted.length < 2) return 0.0007;
-				const gaps: number[] = [];
-				for (let i = 1; i < sorted.length; i++) {
-					const g = sorted[i] - sorted[i - 1];
-					if (g > 1e-8) gaps.push(g);
-				}
-				if (gaps.length === 0) return 0.0007;
-				gaps.sort((a, b) => a - b);
-				return gaps[Math.floor(gaps.length / 2)];
-			}
-			return { dx: medianGap(lngs), dy: medianGap(lats) };
-		}
-
-		// Reprojected grid: estimate from bounding box + point count.
-		const bboxW = maxLng - minLng;
-		const bboxH = maxLat - minLat;
-		if (bboxW < 1e-10 || bboxH < 1e-10) return { dx: 0.0007, dy: 0.0007 };
-
-		const aspect = bboxW / bboxH;
-		const ny = Math.sqrt(n / aspect);
-		const nx = n / ny;
-
-		return { dx: bboxW / (nx - 1), dy: bboxH / (ny - 1) };
-	}
-
-	/**
 	 * Convert a Point FeatureCollection to a Polygon FeatureCollection
 	 * where each point becomes a square cell for contiguous rendering.
-	 * @param pixelSizeDeg — from processor/D1 when set; otherwise heuristic spacing
+	 * pixel_size is always set in D1 by the processor at ingest time.
 	 */
 	function pointsToSquares(
 		geojson: { type: 'FeatureCollection'; features: any[] },
-		pixelSizeDeg: number | null
+		pixelSizeDeg: number
 	): { type: 'FeatureCollection'; features: any[] } {
-		if (pixelSizeDeg != null && pixelSizeDeg > 0 && Number.isFinite(pixelSizeDeg)) {
-			const half = pixelSizeDeg / 2;
-			return {
-				type: 'FeatureCollection',
-				features: geojson.features.map((f) => {
-					const [lng, lat] = f.geometry.coordinates;
-					return {
-						type: 'Feature',
-						geometry: {
-							type: 'Polygon',
-							coordinates: [[
-								[lng - half, lat - half],
-								[lng + half, lat - half],
-								[lng + half, lat + half],
-								[lng - half, lat + half],
-								[lng - half, lat - half]
-							]]
-						},
-						properties: f.properties
-					};
-				})
-			};
-		}
-
-		const { dx, dy } = detectGridSpacing(geojson.features);
-		const halfDx = dx / 2;
-		const halfDy = dy / 2;
-
+		const half = pixelSizeDeg / 2;
 		return {
 			type: 'FeatureCollection',
 			features: geojson.features.map((f) => {
@@ -644,11 +556,11 @@
 					geometry: {
 						type: 'Polygon',
 						coordinates: [[
-							[lng - halfDx, lat - halfDy],
-							[lng + halfDx, lat - halfDy],
-							[lng + halfDx, lat + halfDy],
-							[lng - halfDx, lat + halfDy],
-							[lng - halfDx, lat - halfDy]
+							[lng - half, lat - half],
+							[lng + half, lat - half],
+							[lng + half, lat + half],
+							[lng - half, lat + half],
+							[lng - half, lat - half]
 						]]
 					},
 					properties: f.properties

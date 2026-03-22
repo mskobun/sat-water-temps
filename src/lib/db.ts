@@ -116,8 +116,7 @@ export async function queryTemperatureData(
     const temps = geoPoints.map(p => p.temperature);
     
     const ps = metaResult.pixel_size;
-    const pixel_size =
-      ps != null && ps !== '' ? Number(ps) : null;
+    const pixel_size = ps != null && ps !== '' ? Number(ps) : null;
 
     return {
       geojson: buildGeoJSON(geoPoints),
@@ -127,10 +126,7 @@ export async function queryTemperatureData(
       date: date,
       wtoff: Boolean(metaResult.wtoff),
       source: String(metaResult.source || 'ecostress'),
-      pixel_size:
-        pixel_size != null && Number.isFinite(pixel_size) && pixel_size > 0
-          ? pixel_size
-          : null,
+      pixel_size,
     };
   } catch (err) {
     console.error("Error fetching temperature data:", err);
