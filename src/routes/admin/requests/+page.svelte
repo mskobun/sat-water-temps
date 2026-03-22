@@ -21,8 +21,9 @@
 
 	type Source = 'ecostress' | 'landsat';
 
-	interface EcostressRequest {
+	interface DataRequest {
 		id: number;
+		source: string;
 		task_id: string | null;
 		trigger_type: string;
 		triggered_by: string | null;
@@ -40,19 +41,6 @@
 		running_jobs: number;
 	}
 
-	interface LandsatRun {
-		id: number;
-		trigger_type: string;
-		triggered_by: string | null;
-		description: string | null;
-		start_date: string;
-		end_date: string;
-		scenes_submitted: number | null;
-		created_at: number;
-		updated_at: number | null;
-		error_message: string | null;
-	}
-
 	const filterOptions = [
 		{ value: 'all', label: 'All Requests' },
 		{ value: 'pending', label: 'Pending' },
@@ -64,7 +52,7 @@
 	];
 
 	let source = $state<Source>('ecostress');
-	let requests = $state<(EcostressRequest | LandsatRun)[]>([]);
+	let requests = $state<DataRequest[]>([]);
 	let loading = $state(true);
 	let error = $state('');
 	let filter = $state('all');
@@ -102,7 +90,7 @@
 			params.set('source', source);
 			const qs = params.toString();
 			const response = await fetch(`/api/admin/requests?${qs}`);
-			const data = (await response.json()) as { requests?: (EcostressRequest | LandsatRun)[] };
+			const data = (await response.json()) as { requests?: DataRequest[] };
 			requests = data.requests || [];
 			error = '';
 			updatedAt = new Date().toLocaleTimeString();
@@ -147,12 +135,6 @@
 			case 'reprocess': return 'outline';
 			default: return 'default';
 		}
-	}
-
-	function getLandsatStatus(run: LandsatRun): string {
-		if (run.error_message) return 'failed';
-		if (run.scenes_submitted != null && run.scenes_submitted > 0) return 'completed';
-		return 'pending';
 	}
 
 	async function handleTrigger() {
@@ -375,24 +357,15 @@
 			</div>
 		</div>
 
-		{#if source === 'ecostress'}
-			<div class="mb-6">
-				<StatBar stats={[
-					{ label: 'Total', count: requests.length },
-					{ label: 'Pending/Submitted', count: requests.filter((r) => 'status' in r && (r.status === 'pending' || r.status === 'submitted')).length },
-					{ label: 'Processing', count: requests.filter((r) => 'status' in r && r.status === 'processing').length },
-					{ label: 'Failed', count: requests.filter((r) => 'status' in r && r.status === 'failed').length }
-				]} />
-			</div>
-		{:else}
-			<div class="mb-6">
-				<StatBar stats={[
-					{ label: 'Total', count: requests.length },
-					{ label: 'With Scenes', count: requests.filter((r) => 'scenes_submitted' in r && r.scenes_submitted != null && r.scenes_submitted > 0).length },
-					{ label: 'Failed', count: requests.filter((r) => 'error_message' in r && r.error_message != null).length }
-				]} />
-			</div>
-		{/if}
+		<div class="mb-6">
+			<StatBar stats={[
+				{ label: 'Total', count: requests.length },
+				{ label: 'Pending', count: requests.filter((r) => r.status === 'pending').length },
+				{ label: 'Processing', count: requests.filter((r) => r.status === 'processing').length },
+				{ label: 'Completed', count: requests.filter((r) => r.status === 'completed').length },
+				{ label: 'Failed', count: requests.filter((r) => r.status === 'failed' || r.status === 'completed_with_errors').length }
+			]} />
+		</div>
 
 		{#if loading && requests.length === 0}
 			<Card.Card>
@@ -411,7 +384,7 @@
 					No requests found. Requests will appear here once the pipeline runs or you trigger one manually.
 				</Card.Content>
 			</Card.Card>
-		{:else if source === 'ecostress'}
+		{:else}
 			<div class="overflow-x-auto rounded-md border">
 				<Table.Root>
 						<Table.Header>
@@ -426,11 +399,10 @@
 							</Table.Row>
 						</Table.Header>
 						<Table.Body>
-							{#each requests as req}
-								{@const r = req as EcostressRequest}
+							{#each requests as r}
 								<Table.Row
 									class="cursor-pointer hover:bg-muted/50"
-									onclick={() => goto(`/admin/requests/${r.id}`)}
+									onclick={() => goto(`/admin/requests/${r.id}?source=${source}`)}
 								>
 									<Table.Cell>
 										<Badge variant={getTriggerVariant(r.trigger_type)}>{r.trigger_type}</Badge>
@@ -468,61 +440,6 @@
 									</Table.Cell>
 									<Table.Cell class="text-sm text-muted-foreground">
 										{formatDate(r.created_at)}
-									</Table.Cell>
-								</Table.Row>
-							{/each}
-						</Table.Body>
-					</Table.Root>
-				</div>
-		{:else}
-			<div class="overflow-x-auto rounded-md border">
-				<Table.Root>
-						<Table.Header>
-							<Table.Row>
-								<Table.Head>Trigger</Table.Head>
-								<Table.Head>Status</Table.Head>
-								<Table.Head>Date Range</Table.Head>
-								<Table.Head>Description</Table.Head>
-								<Table.Head>Scenes</Table.Head>
-								<Table.Head>Created</Table.Head>
-								<Table.Head>Error</Table.Head>
-							</Table.Row>
-						</Table.Header>
-						<Table.Body>
-							{#each requests as req}
-								{@const r = req as LandsatRun}
-								<Table.Row
-									class="cursor-pointer hover:bg-muted/50"
-									onclick={() => goto(`/admin/requests/${r.id}?source=landsat`)}
-								>
-									<Table.Cell>
-										<Badge variant={getTriggerVariant(r.trigger_type)}>{r.trigger_type}</Badge>
-									</Table.Cell>
-									<Table.Cell>
-										{@const status = getLandsatStatus(r)}
-										<Badge variant={getStatusVariant(status)}>{formatStatus(status)}</Badge>
-									</Table.Cell>
-									<Table.Cell class="text-sm">
-										<div>{r.start_date}</div>
-										{#if r.start_date !== r.end_date}
-											<div class="text-xs text-muted-foreground">to {r.end_date}</div>
-										{/if}
-									</Table.Cell>
-									<Table.Cell class="text-sm max-w-xs truncate">
-										{r.description || '-'}
-									</Table.Cell>
-									<Table.Cell class="text-sm">
-										{r.scenes_submitted ?? '-'}
-									</Table.Cell>
-									<Table.Cell class="text-sm text-muted-foreground">
-										{formatDate(r.created_at)}
-									</Table.Cell>
-									<Table.Cell class="text-sm max-w-xs">
-										{#if r.error_message}
-											<span class="text-destructive truncate block" title={r.error_message}>{r.error_message}</span>
-										{:else}
-											<span class="text-muted-foreground">-</span>
-										{/if}
 									</Table.Cell>
 								</Table.Row>
 							{/each}

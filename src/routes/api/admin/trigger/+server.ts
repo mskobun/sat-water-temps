@@ -24,10 +24,11 @@ function enumerateDays(start: string, end: string): string[] {
 	return days;
 }
 
-async function triggerEcostress(
+async function triggerProcessing(
 	db: D1Database,
 	aws: AwsClient | undefined,
 	lambdaUrl: string | undefined,
+	source: 'ecostress' | 'landsat',
 	startDate: string,
 	endDate: string,
 	description: string | undefined,
@@ -38,134 +39,119 @@ async function triggerEcostress(
 		return json({ error: `Date range too large. Maximum ${MAX_RANGE_DAYS} days.` }, { status: 400 });
 	}
 
-	const ids: number[] = [];
-	const errors: string[] = [];
-	let successful = 0;
+	if (source === 'ecostress') {
+		// One request per day (ECOSTRESS behavior)
+		const ids: number[] = [];
+		const errors: string[] = [];
+		let successful = 0;
 
-	for (const day of days) {
-		const dayMatch = parseDate(day)!;
-		const appearsDate = toAppearsDate(dayMatch);
-		const dayDesc = description ? `${description} (${appearsDate})` : `Manual trigger for ${appearsDate}`;
+		for (const day of days) {
+			const dayMatch = parseDate(day)!;
+			const appearsDate = toAppearsDate(dayMatch);
+			const dayDesc = description ? `${description} (${appearsDate})` : `Manual trigger for ${appearsDate}`;
+
+			const result = await db
+				.prepare(`
+					INSERT INTO data_requests
+					(source, trigger_type, triggered_by, description, start_date, end_date, created_at)
+					VALUES (?, ?, ?, ?, ?, ?, ?)
+				`)
+				.bind('ecostress', 'manual', userEmail, dayDesc, appearsDate, appearsDate, Date.now())
+				.run();
+
+			const requestId = result.meta.last_row_id;
+			ids.push(requestId);
+
+			if (!aws || !lambdaUrl) continue;
+
+			try {
+				const response = await aws.fetch(lambdaUrl, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						start_date: appearsDate,
+						end_date: appearsDate,
+						trigger_type: 'manual',
+						triggered_by: userEmail,
+						description: dayDesc,
+						request_id: requestId
+					})
+				});
+
+				if (!response.ok) {
+					const errorText = await response.text();
+					const msg = `Lambda failed for ${day}: ${response.status} ${errorText}`;
+					errors.push(msg);
+					await db
+						.prepare(`UPDATE data_requests SET error_message = ?, updated_at = ? WHERE id = ?`)
+						.bind(msg, Date.now(), requestId)
+						.run();
+				} else {
+					successful++;
+				}
+			} catch (err) {
+				const msg = `Lambda error for ${day}: ${err instanceof Error ? err.message : String(err)}`;
+				errors.push(msg);
+				await db
+					.prepare(`UPDATE data_requests SET error_message = ?, updated_at = ? WHERE id = ?`)
+					.bind(msg, Date.now(), requestId)
+					.run();
+			}
+		}
+
+		return { ids, errors, successful, count: days.length };
+	} else {
+		// One request for entire range (Landsat behavior)
+		const desc = description || `Manual Landsat trigger for ${startDate} to ${endDate}`;
 
 		const result = await db
 			.prepare(`
-				INSERT INTO ecostress_requests
-				(trigger_type, triggered_by, description, start_date, end_date, created_at)
-				VALUES (?, ?, ?, ?, ?, ?)
+				INSERT INTO data_requests
+				(source, trigger_type, triggered_by, description, start_date, end_date, created_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?)
 			`)
-			.bind('manual', userEmail, dayDesc, appearsDate, appearsDate, Date.now())
+			.bind('landsat', 'manual', userEmail, desc, startDate, endDate, Date.now())
 			.run();
 
-		const requestId = result.meta.last_row_id;
-		ids.push(requestId);
+		const runId = result.meta.last_row_id;
 
-		if (!aws || !lambdaUrl) continue;
+		if (!aws || !lambdaUrl) {
+			return { ids: [runId], errors: [], successful: 0, count: 1, noLambda: true };
+		}
 
 		try {
-			const lambdaPayload = {
-				start_date: appearsDate,
-				end_date: appearsDate,
-				trigger_type: 'manual',
-				triggered_by: userEmail,
-				description: dayDesc,
-				request_id: requestId
-			};
-
 			const response = await aws.fetch(lambdaUrl, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(lambdaPayload)
+				body: JSON.stringify({
+					start_date: startDate,
+					end_date: endDate,
+					trigger_type: 'manual',
+					triggered_by: userEmail,
+					description: desc,
+					run_id: runId
+				})
 			});
 
 			if (!response.ok) {
 				const errorText = await response.text();
-				const msg = `Lambda failed for ${day}: ${response.status} ${errorText}`;
-				errors.push(msg);
+				const msg = `Lambda failed: ${response.status} ${errorText}`;
 				await db
-					.prepare(`UPDATE ecostress_requests SET error_message = ?, updated_at = ? WHERE id = ?`)
-					.bind(msg, Date.now(), requestId)
+					.prepare(`UPDATE data_requests SET error_message = ?, updated_at = ? WHERE id = ?`)
+					.bind(msg, Date.now(), runId)
 					.run();
-			} else {
-				successful++;
+				return { ids: [runId], errors: [msg], successful: 0, count: 1 };
 			}
+
+			return { ids: [runId], errors: [], successful: 1, count: 1 };
 		} catch (err) {
-			const msg = `Lambda error for ${day}: ${err instanceof Error ? err.message : String(err)}`;
-			errors.push(msg);
+			const msg = `Lambda error: ${err instanceof Error ? err.message : String(err)}`;
 			await db
-				.prepare(`UPDATE ecostress_requests SET error_message = ?, updated_at = ? WHERE id = ?`)
-				.bind(msg, Date.now(), requestId)
-				.run();
-		}
-	}
-
-	return { ids, errors, successful, count: days.length };
-}
-
-async function triggerLandsat(
-	db: D1Database,
-	aws: AwsClient | undefined,
-	lambdaUrl: string | undefined,
-	startDate: string,
-	endDate: string,
-	description: string | undefined,
-	userEmail: string
-) {
-	const days = enumerateDays(startDate, endDate);
-	if (days.length > MAX_RANGE_DAYS) {
-		return json({ error: `Date range too large. Maximum ${MAX_RANGE_DAYS} days.` }, { status: 400 });
-	}
-
-	const desc = description || `Manual Landsat trigger for ${startDate} to ${endDate}`;
-
-	const result = await db
-		.prepare(`
-			INSERT INTO landsat_runs
-			(trigger_type, triggered_by, description, start_date, end_date, created_at)
-			VALUES (?, ?, ?, ?, ?, ?)
-		`)
-		.bind('manual', userEmail, desc, startDate, endDate, Date.now())
-		.run();
-
-	const runId = result.meta.last_row_id;
-
-	if (!aws || !lambdaUrl) {
-		return { ids: [runId], errors: [], successful: 0, count: 1, noLambda: true };
-	}
-
-	try {
-		const lambdaPayload = {
-			start_date: startDate,
-			end_date: endDate,
-			trigger_type: 'manual',
-			triggered_by: userEmail,
-			description: desc,
-			run_id: runId
-		};
-
-		const response = await aws.fetch(lambdaUrl, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(lambdaPayload)
-		});
-
-		if (!response.ok) {
-			const errorText = await response.text();
-			const msg = `Lambda failed: ${response.status} ${errorText}`;
-			await db
-				.prepare(`UPDATE landsat_runs SET error_message = ?, updated_at = ? WHERE id = ?`)
+				.prepare(`UPDATE data_requests SET error_message = ?, updated_at = ? WHERE id = ?`)
 				.bind(msg, Date.now(), runId)
 				.run();
 			return { ids: [runId], errors: [msg], successful: 0, count: 1 };
 		}
-
-		return { ids: [runId], errors: [], successful: 1, count: 1 };
-	} catch (err) {
-		const msg = `Lambda error: ${err instanceof Error ? err.message : String(err)}`;
-		await db
-			.prepare(`UPDATE landsat_runs SET error_message = ?, updated_at = ? WHERE id = ?`)
-			.bind(msg, Date.now(), runId)
-			.run();
-		return { ids: [runId], errors: [msg], successful: 0, count: 1 };
 	}
 }
 
@@ -223,11 +209,9 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		});
 	}
 
-	const result = isLandsat
-		? await triggerLandsat(db, aws, lambdaUrl, startDate, endDate, description, userEmail)
-		: await triggerEcostress(db, aws, lambdaUrl, startDate, endDate, description, userEmail);
+	const result = await triggerProcessing(db, aws, lambdaUrl, source || 'ecostress', startDate, endDate, description, userEmail);
 
-	// If triggerEcostress/triggerLandsat returned a Response (validation error), pass through
+	// If triggerProcessing returned a Response (validation error), pass through
 	if (result instanceof Response) return result;
 
 	const { ids, errors, successful, count } = result;

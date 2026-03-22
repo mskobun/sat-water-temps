@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { getEcostressRequestDetail, getLandsatRunDetail } from '$lib/db';
+import { getDataRequestDetail } from '$lib/db';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params, url, platform }) => {
@@ -15,9 +15,7 @@ export const GET: RequestHandler = async ({ params, url, platform }) => {
 
 	const source = url.searchParams.get('source') || 'ecostress';
 
-	const detail = source === 'landsat'
-		? await getLandsatRunDetail(db, id)
-		: await getEcostressRequestDetail(db, id);
+	const detail = await getDataRequestDetail(db, id, source);
 
 	if (!detail) {
 		return json({ error: 'Request not found' }, { status: 404 });

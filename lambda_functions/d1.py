@@ -3,6 +3,8 @@ import time
 import requests
 from typing import Dict, List
 
+from shared import to_iso_datetime
+
 
 class D1Error(Exception):
     """Raised when a D1 query fails and fatal=True."""
@@ -90,6 +92,8 @@ def log_job_to_d1(
     INSERT when status="started", UPDATE otherwise.
     Returns last_row_id on INSERT success.
     """
+    if date is not None:
+        date = to_iso_datetime(date)
     try:
         if status == "started":
             sql = """
@@ -159,60 +163,73 @@ def log_job_to_d1(
 
 
 # ---------------------------------------------------------------------------
-# ECOSTRESS request helpers
+# Data request helpers (unified ecostress + landsat)
 # ---------------------------------------------------------------------------
 
-def log_ecostress_request(
-    task_id, trigger_type, triggered_by, description, sd, ed,
-    request_id=None, fatal=True,
+def log_data_request(
+    source, task_id, trigger_type, triggered_by, description, sd, ed,
+    request_id=None, scenes_count=None, error_message=None, fatal=True,
 ):
-    """Log an ECOSTRESS request.
+    """Log a data request (ECOSTRESS or Landsat).
 
     If request_id is provided (manual triggers), UPDATE the existing pending row.
     Otherwise (timer triggers), INSERT a new row.
     """
+    now = int(time.time() * 1000)
     if request_id:
         sql = """
-        UPDATE ecostress_requests
-        SET task_id = ?, updated_at = ?
+        UPDATE data_requests
+        SET task_id = COALESCE(?, task_id),
+            scenes_count = COALESCE(?, scenes_count),
+            error_message = COALESCE(?, error_message),
+            updated_at = ?
         WHERE id = ?
         """
-        params = [task_id, int(time.time() * 1000), request_id]
+        params = [task_id, scenes_count, error_message, now, request_id]
     else:
         sql = """
-        INSERT INTO ecostress_requests
-        (task_id, trigger_type, triggered_by, description, start_date, end_date, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO data_requests
+        (source, task_id, trigger_type, triggered_by, description,
+         start_date, end_date, scenes_count, error_message, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
-        params = [task_id, trigger_type, triggered_by, description, sd, ed, int(time.time() * 1000)]
+        params = [source, task_id, trigger_type, triggered_by, description,
+                  sd, ed, scenes_count, error_message, now]
     query_d1(sql, params, fatal=fatal)
 
 
-def update_ecostress_request_error(task_id, error_message=None, fatal=True):
-    """Update an ECOSTRESS request error by task_id."""
-    query_d1(
-        "UPDATE ecostress_requests SET updated_at = ?, error_message = ? WHERE task_id = ?",
-        [int(time.time() * 1000), error_message, task_id],
-        fatal=fatal,
-    )
+def update_data_request_error(task_id=None, request_id=None, error_message=None, fatal=True):
+    """Update error on a data request, by task_id or row id."""
+    now = int(time.time() * 1000)
+    if task_id:
+        query_d1(
+            "UPDATE data_requests SET updated_at = ?, error_message = ? WHERE task_id = ?",
+            [now, error_message, task_id],
+            fatal=fatal,
+        )
+    elif request_id:
+        query_d1(
+            "UPDATE data_requests SET updated_at = ?, error_message = ? WHERE id = ?",
+            [now, error_message, request_id],
+            fatal=fatal,
+        )
 
 
-def update_ecostress_request_by_id_error(request_id, error_message=None, fatal=True):
-    """Update an ECOSTRESS request error by row id."""
-    query_d1(
-        "UPDATE ecostress_requests SET updated_at = ?, error_message = ? WHERE id = ?",
-        [int(time.time() * 1000), error_message, request_id],
-        fatal=fatal,
-    )
-
-
-def update_ecostress_request_scenes(task_id, scenes_count, fatal=True):
-    """Update ecostress_requests with scene count."""
-    query_d1(
-        "UPDATE ecostress_requests SET scenes_count = ?, updated_at = ? WHERE task_id = ?",
-        [scenes_count, int(time.time() * 1000), task_id],
-        fatal=fatal,
-    )
+def update_data_request_scenes(task_id=None, request_id=None, scenes_count=None, fatal=True):
+    """Update scenes count on a data request."""
+    now = int(time.time() * 1000)
+    if task_id:
+        query_d1(
+            "UPDATE data_requests SET scenes_count = ?, updated_at = ? WHERE task_id = ?",
+            [scenes_count, now, task_id],
+            fatal=fatal,
+        )
+    elif request_id:
+        query_d1(
+            "UPDATE data_requests SET scenes_count = ?, updated_at = ? WHERE id = ?",
+            [scenes_count, now, request_id],
+            fatal=fatal,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -223,8 +240,9 @@ def get_pending_task_ids(fatal=True):
     """Return list of task_ids that need polling."""
     result = query_d1(
         """
-        SELECT task_id FROM ecostress_requests
-        WHERE task_id IS NOT NULL
+        SELECT task_id FROM data_requests
+        WHERE source = 'ecostress'
+          AND task_id IS NOT NULL
           AND scenes_count IS NULL
           AND dispatched_at IS NULL
           AND error_message IS NULL
@@ -243,7 +261,7 @@ def get_pending_task_ids(fatal=True):
 
 def mark_dispatched(task_id, fatal=True):
     query_d1(
-        "UPDATE ecostress_requests SET dispatched_at = ? WHERE task_id = ?",
+        "UPDATE data_requests SET dispatched_at = ? WHERE task_id = ?",
         [int(time.time() * 1000), task_id],
         fatal=fatal,
     )
@@ -251,7 +269,7 @@ def mark_dispatched(task_id, fatal=True):
 
 def mark_error(task_id, error_message, fatal=True):
     query_d1(
-        "UPDATE ecostress_requests SET error_message = ?, updated_at = ? WHERE task_id = ?",
+        "UPDATE data_requests SET error_message = ?, updated_at = ? WHERE task_id = ?",
         [error_message, int(time.time() * 1000), task_id],
         fatal=fatal,
     )

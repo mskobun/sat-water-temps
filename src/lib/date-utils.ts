@@ -1,23 +1,25 @@
 /**
- * Centralized date utilities for handling both ECOSTRESS (DOY) and Landsat (ISO) date formats.
+ * Date utilities for ISO datetime format (YYYY-MM-DDTHH:MM:SS).
  *
- * ECOSTRESS dates: 13-digit DOY — "YYYYDDDhhmmss" e.g. "2024362041923"
- * Landsat dates:   ISO 8601     — "YYYY-MM-DD"    e.g. "2024-12-27"
+ * All dates in the database are normalized to this format:
+ *   ECOSTRESS: "2024-12-27T04:19:23"
+ *   Landsat:   "2024-12-27T00:00:00"
  */
-
-export function isIsoDate(date: string): boolean {
-	return date.length === 10 && date[4] === '-';
-}
 
 /**
- * Convert any date string to a JS Date object.
- * For DOY dates, parses year + day-of-year + optional time.
- * For ISO dates, parses YYYY-MM-DD.
+ * Convert a date string to a JS Date object.
+ * Primary format: "YYYY-MM-DDTHH:MM:SS"
+ * Legacy fallbacks kept for transition period.
  */
 export function parseDate(date: string): Date {
-	if (isIsoDate(date)) {
+	if (date.length === 19 && date[10] === 'T') {
+		return new Date(date);
+	}
+	// Legacy: bare ISO date
+	if (date.length === 10 && date[4] === '-') {
 		return new Date(date + 'T00:00:00');
 	}
+	// Legacy: ECOSTRESS DOY format
 	const year = parseInt(date.substring(0, 4), 10);
 	const doy = parseInt(date.substring(4, 7), 10);
 	const hours = date.length >= 9 ? parseInt(date.substring(7, 9), 10) : 0;
@@ -30,52 +32,23 @@ export function parseDate(date: string): Date {
 }
 
 /**
- * Normalized calendar day key (YYYY-MM-DD) for any supported date string.
- * This lets the UI group ECOSTRESS timestamps and Landsat day-only entries
- * onto the same calendar cell.
+ * Calendar day key (YYYY-MM-DD) — just the date portion.
  */
 export function dateStringToCalendarKey(date: string): string {
-	const d = parseDate(date);
-	const y = d.getFullYear();
-	const m = String(d.getMonth() + 1).padStart(2, '0');
-	const day = String(d.getDate()).padStart(2, '0');
-	return `${y}-${m}-${day}`;
+	return date.substring(0, 10);
 }
 
 /**
- * Convert any date to a sortable ISO string (YYYY-MM-DD or YYYY-MM-DDThh:mm:ss).
- * Used for chronological comparison across ECOSTRESS and Landsat dates.
- */
-export function toSortableDate(date: string): string {
-	if (isIsoDate(date)) return date;
-	const d = parseDate(date);
-	const y = d.getFullYear();
-	const m = String(d.getMonth() + 1).padStart(2, '0');
-	const day = String(d.getDate()).padStart(2, '0');
-	const hh = String(d.getHours()).padStart(2, '0');
-	const mm = String(d.getMinutes()).padStart(2, '0');
-	const ss = String(d.getSeconds()).padStart(2, '0');
-	return `${y}-${m}-${day}T${hh}:${mm}:${ss}`;
-}
-
-/**
- * Full date/time display: "dd/mm/yyyy hh:mm:ss" for DOY, "dd/mm/yyyy" for ISO.
+ * Full date/time display: "dd/mm/yyyy hh:mm:ss" or "dd/mm/yyyy" if midnight.
  */
 export function formatDateTime(date: string): string {
-	if (isIsoDate(date)) {
-		const [year, month, day] = date.split('-');
-		return `${day}/${month}/${year}`;
-	}
-	const year = date.substring(0, 4);
-	const doy = parseInt(date.substring(4, 7), 10);
-	const hours = date.substring(7, 9);
-	const minutes = date.substring(9, 11);
-	const seconds = date.substring(11, 13);
-	const dateObj = new Date(parseInt(year), 0);
-	dateObj.setDate(doy);
-	const day = String(dateObj.getDate()).padStart(2, '0');
-	const month = String(dateObj.getMonth() + 1).padStart(2, '0');
-	return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+	const d = parseDate(date);
+	const day = String(d.getDate()).padStart(2, '0');
+	const month = String(d.getMonth() + 1).padStart(2, '0');
+	const year = d.getFullYear();
+	const time = date.length >= 19 ? date.substring(11) : null;
+	if (!time || time === '00:00:00') return `${day}/${month}/${year}`;
+	return `${day}/${month}/${year} ${time}`;
 }
 
 /**
@@ -87,15 +60,15 @@ export function formatShortDate(date: string): string {
 }
 
 /**
- * Compare two date strings chronologically (works across DOY and ISO formats).
- * Returns negative if a < b, positive if a > b, 0 if equal.
+ * Compare two date strings chronologically.
+ * With normalized ISO datetime format, string comparison works directly.
  */
 export function compareDates(a: string, b: string): number {
-	return toSortableDate(a).localeCompare(toSortableDate(b));
+	return a.localeCompare(b);
 }
 
 /**
- * Source label for display — always full names for consistency.
+ * Source label for display.
  */
 export function sourceLabel(source: string): string {
 	if (source === 'landsat') return 'Landsat';

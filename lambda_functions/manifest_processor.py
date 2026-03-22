@@ -2,7 +2,7 @@ import json
 import os
 import time
 import boto3
-from d1 import log_job_to_d1, update_ecostress_request_scenes
+from d1 import log_job_to_d1, update_data_request_scenes
 from shared import get_token, create_http_session, extract_metadata
 
 
@@ -55,7 +55,7 @@ def handler(event, context):
         print(f"Grouped into {len(scenes)} scenes")
 
         # Update ecostress_request with scene count
-        update_ecostress_request_scenes(task_id, len(scenes))
+        update_data_request_scenes(task_id=task_id, scenes_count=len(scenes))
 
         # Send to SQS
         for key, file_list in scenes.items():

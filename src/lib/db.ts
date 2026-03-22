@@ -2,7 +2,6 @@
 
 import type { D1Database, R2Bucket } from '@cloudflare/workers-types';
 import Papa from 'papaparse';
-import { compareDates } from '$lib/date-utils';
 
 type GeoPoint = { lng: number; lat: number; temperature: number };
 
@@ -138,16 +137,12 @@ export async function getFeatureDates(db: D1Database, featureId: string) {
   try {
     const result = await db
       .prepare(
-        "SELECT date, source FROM temperature_metadata WHERE feature_id = ?"
+        "SELECT date, source FROM temperature_metadata WHERE feature_id = ? ORDER BY date DESC"
       )
       .bind(featureId)
       .all();
 
-    const entries = result.results?.map((r: any) => ({ date: r.date, source: String(r.source || 'ecostress') })) || [];
-    // Sort chronologically (descending) — can't rely on SQL ORDER BY since
-    // ECOSTRESS DOY and Landsat ISO strings don't sort correctly together.
-    entries.sort((a, b) => compareDates(b.date, a.date));
-    return entries;
+    return result.results?.map((r: any) => ({ date: r.date, source: String(r.source || 'ecostress') })) || [];
   } catch (err) {
     console.error("D1 query error:", err);
     return [];
@@ -156,18 +151,12 @@ export async function getFeatureDates(db: D1Database, featureId: string) {
 
 export async function getLatestDate(db: D1Database, featureId: string): Promise<string | null> {
   try {
-    // Query temperature_metadata directly and sort in application code.
-    // features.latest_date uses SQL string comparison which breaks across
-    // ECOSTRESS DOY ("2024362041923") and Landsat ISO ("2024-12-27") formats.
     const result = await db
-      .prepare("SELECT date FROM temperature_metadata WHERE feature_id = ?")
+      .prepare("SELECT date FROM temperature_metadata WHERE feature_id = ? ORDER BY date DESC LIMIT 1")
       .bind(featureId)
-      .all();
+      .first();
 
-    const dates = (result.results || []).map((r: any) => String(r.date));
-    if (dates.length === 0) return null;
-    dates.sort((a, b) => compareDates(b, a));
-    return dates[0];
+    return result ? String(result.date) : null;
   } catch (err) {
     console.error("D1 query error:", err);
     return null;
@@ -401,32 +390,45 @@ export async function countJobsByFeature(db: D1Database, featureId: string, stat
   }
 }
 
-export async function getEcostressRequests(
+export async function getDataRequests(
   db: D1Database,
+  source: 'ecostress' | 'landsat',
   limit: number = 50,
   status?: string
 ) {
   try {
+    const jobType = source === 'ecostress' ? 'process' : 'landsat_process';
     let query = `
       SELECT
-        er.*,
-        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'process' AND pj.started_at >= er.created_at) as total_jobs,
-        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'process' AND pj.status = 'success' AND pj.started_at >= er.created_at) as success_jobs,
-        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'process' AND pj.status = 'failed' AND pj.started_at >= er.created_at) as failed_jobs,
-        (SELECT COUNT(*) FROM processing_jobs pj WHERE pj.task_id = er.task_id AND pj.job_type = 'process' AND pj.status = 'started' AND pj.started_at >= er.created_at) as running_jobs
-      FROM ecostress_requests_with_status er
+        dr.*,
+        (SELECT COUNT(*) FROM processing_jobs pj
+         WHERE pj.task_id = dr.task_id AND pj.job_type = '${jobType}'
+         AND pj.started_at >= dr.created_at) as total_jobs,
+        (SELECT COUNT(*) FROM processing_jobs pj
+         WHERE pj.task_id = dr.task_id AND pj.job_type = '${jobType}'
+         AND pj.status = 'success' AND pj.started_at >= dr.created_at) as success_jobs,
+        (SELECT COUNT(*) FROM processing_jobs pj
+         WHERE pj.task_id = dr.task_id AND pj.job_type = '${jobType}'
+         AND pj.status = 'failed' AND pj.started_at >= dr.created_at) as failed_jobs,
+        (SELECT COUNT(*) FROM processing_jobs pj
+         WHERE pj.task_id = dr.task_id AND pj.job_type = '${jobType}'
+         AND pj.status = 'started' AND pj.started_at >= dr.created_at) as running_jobs
+      FROM data_requests_with_status dr
+      WHERE dr.source = ?
     `;
 
+    const params: any[] = [source];
+
     if (status) {
-      query += ` WHERE er.status = ?`;
+      query += ` AND dr.status = ?`;
+      params.push(status);
     }
 
-    query += ` ORDER BY er.created_at DESC LIMIT ?`;
+    query += ` ORDER BY dr.created_at DESC LIMIT ?`;
+    params.push(limit);
 
     const stmt = db.prepare(query);
-    const result = status
-      ? await stmt.bind(status, limit).all()
-      : await stmt.bind(limit).all();
+    const result = await stmt.bind(...params).all();
 
     return result.results || [];
   } catch (err) {
@@ -435,113 +437,60 @@ export async function getEcostressRequests(
   }
 }
 
-export async function getLandsatRuns(
+export async function getDataRequestDetail(
   db: D1Database,
-  limit: number = 50,
-  status?: string
-) {
-  try {
-    let query = `SELECT * FROM landsat_runs`;
-
-    if (status) {
-      query += ` WHERE error_message IS ${status === 'failed' ? 'NOT NULL' : 'NULL'}`;
-    }
-
-    query += ` ORDER BY created_at DESC LIMIT ?`;
-
-    const stmt = db.prepare(query);
-    const result = await stmt.bind(limit).all();
-
-    return result.results || [];
-  } catch (err) {
-    console.error("D1 query error:", err);
-    return [];
-  }
-}
-
-export async function getLandsatRunDetail(
-  db: D1Database,
-  id: number
-) {
-  try {
-    const run = await db
-      .prepare(`SELECT * FROM landsat_runs WHERE id = ?`)
-      .bind(id)
-      .first();
-
-    if (!run) return null;
-
-    // Find processing jobs for this Landsat run by matching date range and source
-    const jobs = await db
-      .prepare(`
-        SELECT j.id, j.job_type, j.task_id, j.feature_id, j.date, j.status,
-               j.started_at, j.completed_at, j.duration_ms, j.error_message, j.metadata,
-               tm.filter_stats
-        FROM processing_jobs j
-        LEFT JOIN temperature_metadata tm
-          ON j.feature_id = tm.feature_id AND j.date = tm.date
-        WHERE j.job_type = 'landsat_process'
-          AND j.date >= ?
-          AND j.date <= ?
-          AND j.started_at >= ?
-        ORDER BY j.started_at DESC
-      `)
-      .bind(run.start_date, run.end_date, run.created_at)
-      .all();
-
-    return {
-      request: {
-        ...run,
-        status: run.error_message ? 'failed' : (run.scenes_submitted != null && (run.scenes_submitted as number) > 0 ? 'completed' : 'pending'),
-      },
-      jobs: (jobs.results || []).map((job: any) => ({
-        ...job,
-        metadata: job.metadata ? JSON.parse(job.metadata as string) : null,
-        filter_stats: parseFilterStats(job.filter_stats)
-      }))
-    };
-  } catch (err) {
-    console.error("D1 query error:", err);
-    return null;
-  }
-}
-
-export async function getEcostressRequestDetail(
-  db: D1Database,
-  id: number
+  id: number,
+  source: string
 ) {
   try {
     const request = await db
-      .prepare(`
-        SELECT *
-        FROM ecostress_requests_with_status
-        WHERE id = ?
-      `)
-      .bind(id)
+      .prepare(`SELECT * FROM data_requests_with_status WHERE id = ? AND source = ?`)
+      .bind(id, source)
       .first();
 
     if (!request) return null;
 
-    const jobs = request.task_id
-      ? await db
-          .prepare(`
-            SELECT j.id, j.job_type, j.task_id, j.feature_id, j.date, j.status,
-                   j.started_at, j.completed_at, j.duration_ms, j.error_message, j.metadata,
-                   tm.filter_stats
-            FROM processing_jobs j
-            LEFT JOIN temperature_metadata tm
-              ON j.feature_id = tm.feature_id AND j.date = tm.date
-            WHERE j.task_id = ?
-              AND j.started_at >= ?
-            ORDER BY j.started_at DESC
-          `)
-          .bind(request.task_id, request.created_at)
-          .all()
-      : { results: [] };
+    let jobsResult: { results: any[] };
+
+    if (source === 'ecostress' && request.task_id) {
+      jobsResult = await db
+        .prepare(`
+          SELECT j.id, j.job_type, j.task_id, j.feature_id, j.date, j.status,
+                 j.started_at, j.completed_at, j.duration_ms, j.error_message, j.metadata,
+                 tm.filter_stats
+          FROM processing_jobs j
+          LEFT JOIN temperature_metadata tm
+            ON j.feature_id = tm.feature_id AND j.date = tm.date
+          WHERE j.task_id = ?
+            AND j.started_at >= ?
+          ORDER BY j.started_at DESC
+        `)
+        .bind(request.task_id, request.created_at)
+        .all();
+    } else if (source === 'landsat') {
+      jobsResult = await db
+        .prepare(`
+          SELECT j.id, j.job_type, j.task_id, j.feature_id, j.date, j.status,
+                 j.started_at, j.completed_at, j.duration_ms, j.error_message, j.metadata,
+                 tm.filter_stats
+          FROM processing_jobs j
+          LEFT JOIN temperature_metadata tm
+            ON j.feature_id = tm.feature_id AND j.date = tm.date
+          WHERE j.job_type = 'landsat_process'
+            AND j.date >= ? || 'T00:00:00'
+            AND j.date <= ? || 'T23:59:59'
+            AND j.started_at >= ?
+          ORDER BY j.started_at DESC
+        `)
+        .bind(request.start_date, request.end_date, request.created_at)
+        .all();
+    } else {
+      jobsResult = { results: [] };
+    }
 
     return {
       request,
-      jobs: (jobs.results || []).map((job: any) => ({
+      jobs: (jobsResult.results || []).map((job: any) => ({
         ...job,
         metadata: job.metadata ? JSON.parse(job.metadata as string) : null,
         filter_stats: parseFilterStats(job.filter_stats)

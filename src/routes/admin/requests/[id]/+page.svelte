@@ -13,6 +13,7 @@
 
 	interface RequestDetail {
 		id: number;
+		source: string;
 		task_id?: string | null;
 		trigger_type: string;
 		triggered_by: string | null;
@@ -20,8 +21,7 @@
 		start_date: string;
 		end_date: string;
 		status: string;
-		scenes_count?: number | null;
-		scenes_submitted?: number | null;
+		scenes_count: number | null;
 		created_at: number;
 		updated_at: number | null;
 		error_message: string | null;
@@ -129,7 +129,7 @@
 		request ? Date.now() - request.created_at > THIRTY_DAYS_MS : false
 	);
 
-	let scenesLabel = $derived(isLandsat ? (request?.scenes_submitted ?? '-') : (request?.scenes_count ?? '-'));
+	let scenesLabel = $derived(request?.scenes_count ?? '-');
 	let successCount = $derived(jobs.filter((j) => j.status === 'success').length);
 	let failedCount = $derived(jobs.filter((j) => j.status === 'failed').length);
 	let runningCount = $derived(jobs.filter((j) => j.status === 'started').length);

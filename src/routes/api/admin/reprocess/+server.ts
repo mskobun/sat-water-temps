@@ -21,7 +21,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 	// Fetch the original request
 	const originalRequest = await db
-		.prepare(`SELECT * FROM ecostress_requests WHERE id = ?`)
+		.prepare(`SELECT * FROM data_requests WHERE id = ?`)
 		.bind(request_id)
 		.first();
 
@@ -48,11 +48,11 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	}
 
 	// Check if there's already an active reprocessing job for this task_id
-	// Status is computed via the ecostress_requests_with_status view
+	// Status is computed via the data_requests_with_status view
 	const activeReprocess = await db
 		.prepare(`
 			SELECT id, status
-			FROM ecostress_requests_with_status
+			FROM data_requests_with_status
 			WHERE task_id = ?
 			AND trigger_type = 'reprocess'
 			AND status IN ('submitted', 'processing', 'pending')
@@ -75,9 +75,9 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 	await db
 		.prepare(`
-			INSERT INTO ecostress_requests
-			(task_id, trigger_type, triggered_by, description, start_date, end_date, created_at)
-			VALUES (?, 'reprocess', ?, ?, ?, ?, ?)
+			INSERT INTO data_requests
+			(source, task_id, trigger_type, triggered_by, description, start_date, end_date, created_at)
+			VALUES ('ecostress', ?, 'reprocess', ?, ?, ?, ?, ?)
 		`)
 		.bind(
 			taskId,
@@ -91,7 +91,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 	// Get the inserted row ID
 	const inserted = await db
-		.prepare(`SELECT id FROM ecostress_requests WHERE created_at = ? AND triggered_by = ? ORDER BY id DESC LIMIT 1`)
+		.prepare(`SELECT id FROM data_requests WHERE created_at = ? AND triggered_by = ? ORDER BY id DESC LIMIT 1`)
 		.bind(now, userEmail)
 		.first();
 

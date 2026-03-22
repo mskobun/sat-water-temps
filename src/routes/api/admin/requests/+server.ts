@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { getEcostressRequests, getLandsatRuns } from '$lib/db';
+import { getDataRequests } from '$lib/db';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ url, platform }) => {
@@ -10,11 +10,9 @@ export const GET: RequestHandler = async ({ url, platform }) => {
 
 	const limit = parseInt(url.searchParams.get('limit') || '50');
 	const status = url.searchParams.get('status') || undefined;
-	const source = url.searchParams.get('source') || 'ecostress';
+	const source = (url.searchParams.get('source') || 'ecostress') as 'ecostress' | 'landsat';
 
-	const requests = source === 'landsat'
-		? await getLandsatRuns(db, limit, status)
-		: await getEcostressRequests(db, limit, status);
+	const requests = await getDataRequests(db, source, limit, status);
 
 	return json({ requests }, {
 		headers: {

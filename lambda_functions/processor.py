@@ -9,7 +9,7 @@ from typing import Dict
 from aws_xray_sdk.core import xray_recorder
 from aws_xray_sdk.core import patch_all
 from d1 import query_d1, log_job_to_d1
-from shared import get_token, create_http_session, extract_metadata, to_sort_date
+from shared import get_token, create_http_session, extract_metadata, to_iso_datetime
 
 import boto3
 import rasterio
@@ -78,30 +78,26 @@ def insert_metadata_to_d1(
     full_png_path = png_r2_keys.get("relative", png_r2_keys.get("fixed", ""))
     png_path = full_png_path.replace("_relative.png", "").replace("_fixed.png", "")
 
+    # Normalize date to ISO datetime at write boundary
+    date = to_iso_datetime(date)
+
     # Insert/update feature record FIRST (to satisfy foreign key constraint)
     name, location = (
         feature_id.split("/") if "/" in feature_id else (feature_id, "lake")
     )
-    # Store ISO sort_date alongside the raw date for correct chronological
-    # comparison across ECOSTRESS DOY and Landsat ISO formats.
-    sort_date = to_sort_date(date)
     feature_sql = """
-    INSERT INTO features (id, name, location, latest_date, latest_sort_date, last_updated)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO features (id, name, location, latest_date, last_updated)
+    VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
         latest_date = CASE
-            WHEN excluded.latest_sort_date > COALESCE(latest_sort_date, '') THEN excluded.latest_date
+            WHEN excluded.latest_date > COALESCE(latest_date, '') THEN excluded.latest_date
             ELSE latest_date
-        END,
-        latest_sort_date = CASE
-            WHEN excluded.latest_sort_date > COALESCE(latest_sort_date, '') THEN excluded.latest_sort_date
-            ELSE latest_sort_date
         END,
         last_updated = excluded.last_updated
     """
     import time
 
-    feature_params = [feature_id, name, location, date, sort_date, int(time.time())]
+    feature_params = [feature_id, name, location, date, int(time.time())]
 
     with xray_recorder.capture("d1_insert_feature") as subsegment:
         subsegment.put_metadata("feature_id", feature_id)

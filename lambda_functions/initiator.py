@@ -6,9 +6,8 @@ import time
 from d1 import (
     get_setting,
     log_job_to_d1,
-    log_ecostress_request,
-    update_ecostress_request_error,
-    update_ecostress_request_by_id_error,
+    log_data_request,
+    update_data_request_error,
 )
 from shared import get_token
 
@@ -99,7 +98,7 @@ def handler(event, context):
         print(f"Submitted task: {task_id}")
 
         # Log ECOSTRESS request
-        log_ecostress_request(task_id, trigger_type, triggered_by, description, sd, ed, request_id=request_id)
+        log_data_request('ecostress', task_id, trigger_type, triggered_by, description, sd, ed, request_id=request_id)
 
         # Log job start — fatal=False so we still attempt the actual work
         metadata = json.dumps({"start_date": sd, "end_date": ed})
@@ -125,12 +124,12 @@ def handler(event, context):
                 duration_ms=duration_ms,
                 error_message=str(e),
             )
-            update_ecostress_request_error(task_id, str(e))
+            update_data_request_error(task_id=task_id, error_message=str(e))
         elif request_id:
             # Manual trigger failed before getting task_id - update existing row
-            update_ecostress_request_by_id_error(request_id, str(e))
+            update_data_request_error(request_id=request_id, error_message=str(e))
         else:
             # Timer trigger failed before getting task_id - create failed row
-            log_ecostress_request(None, trigger_type, triggered_by, description, sd, ed)
+            log_data_request('ecostress', None, trigger_type, triggered_by, description, sd, ed)
         print(f"✗ Error: {e}")
         return {"statusCode": 500, "body": json.dumps({"error": str(e)})}

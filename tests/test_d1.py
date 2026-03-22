@@ -99,7 +99,7 @@ class TestLogJobInsert:
         sql = _get_sql(mock_post)
         assert "INSERT INTO processing_jobs" in sql
         params = _get_params(mock_post)
-        assert params[:5] == ["process", "t1", "Songkhla", "2024001", "started"]
+        assert params[:5] == ["process", "t1", "Songkhla", "2024-01-01T00:00:00", "started"]
 
     def test_insert_returns_last_row_id(self, mock_post):
         mock_post.return_value = _ok_response(meta={"last_row_id": 99})

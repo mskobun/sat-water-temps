@@ -13,7 +13,7 @@ import boto3
 from pystac_client import Client as STACClient
 from shapely.geometry import shape, mapping
 
-from d1 import query_d1, log_job_to_d1, get_setting
+from d1 import log_job_to_d1, get_setting, log_data_request
 
 
 STAC_URL = "https://landsatlook.usgs.gov/stac-server"
@@ -81,33 +81,6 @@ def _get_s3_hrefs(item) -> dict:
             s3_href = asset.href
         hrefs[key] = s3_href
     return hrefs
-
-
-def _log_landsat_run(trigger_type, triggered_by, description, sd, ed,
-                     scenes_submitted=None, error_message=None, run_id=None):
-    """Log a run to the landsat_runs table.
-
-    If run_id is provided (manual trigger from admin UI), updates the existing
-    row. Otherwise inserts a new row (timer-triggered runs).
-    """
-    now = int(time.time() * 1000)
-    if run_id:
-        sql = """
-        UPDATE landsat_runs
-        SET scenes_submitted = ?, error_message = ?, updated_at = ?
-        WHERE id = ?
-        """
-        params = [scenes_submitted, error_message, now, run_id]
-    else:
-        sql = """
-        INSERT INTO landsat_runs
-        (trigger_type, triggered_by, description, start_date, end_date,
-         scenes_submitted, created_at, error_message)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """
-        params = [trigger_type, triggered_by, description, sd, ed,
-                  scenes_submitted, now, error_message]
-    query_d1(sql, params, fatal=False)
 
 
 def handler(event, context):
@@ -216,8 +189,8 @@ def handler(event, context):
             status="success",
             duration_ms=duration_ms,
         )
-        _log_landsat_run(trigger_type, triggered_by, description, sd, ed,
-                         scenes_submitted=total_messages, run_id=run_id)
+        log_data_request('landsat', None, trigger_type, triggered_by, description, sd, ed,
+                         request_id=run_id, scenes_count=total_messages)
 
         print(f"✓ Landsat initiator complete: {total_messages} messages sent in {duration_ms}ms")
 
@@ -237,7 +210,7 @@ def handler(event, context):
             duration_ms=duration_ms,
             error_message=str(e),
         )
-        _log_landsat_run(trigger_type, triggered_by, description, sd, ed,
-                         error_message=str(e), run_id=run_id)
+        log_data_request('landsat', None, trigger_type, triggered_by, description, sd, ed,
+                         request_id=run_id, error_message=str(e))
         print(f"✗ Landsat initiator error: {e}")
         return {"statusCode": 500, "body": json.dumps({"error": str(e)})}

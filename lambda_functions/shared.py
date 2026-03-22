@@ -54,3 +54,24 @@ def to_sort_date(date_str):
     doy = int(date_str[4:7])
     d = datetime(year, 1, 1) + timedelta(days=doy - 1)
     return d.strftime("%Y-%m-%d")
+
+
+def to_iso_datetime(date_str):
+    """Convert any date string to ISO datetime YYYY-MM-DDTHH:MM:SS.
+
+    ECOSTRESS DOY "2024362041923" -> "2024-12-27T04:19:23"
+    Landsat ISO   "2024-12-27"    -> "2024-12-27T00:00:00"
+    Already normalized            -> pass through
+    """
+    if len(date_str) == 19 and date_str[4] == "-" and "T" in date_str:
+        return date_str
+    if len(date_str) == 10 and date_str[4] == "-":
+        return date_str + "T00:00:00"
+    # DOY format: YYYYDDDhhmmss
+    year = int(date_str[:4])
+    doy = int(date_str[4:7])
+    hh = date_str[7:9] if len(date_str) >= 9 else "00"
+    mm = date_str[9:11] if len(date_str) >= 11 else "00"
+    ss = date_str[11:13] if len(date_str) >= 13 else "00"
+    d = datetime(year, 1, 1) + timedelta(days=doy - 1)
+    return f"{d.strftime('%Y-%m-%d')}T{hh}:{mm}:{ss}"
