@@ -202,7 +202,9 @@
 		handleFilterRangeChange(filterRange);
 	}
 
-	$: if (featureId && isOpen) {
+	let prevFeatureId: string | undefined;
+	$: if (featureId && featureId !== prevFeatureId) {
+		prevFeatureId = featureId;
 		resetState();
 		loadDates();
 	}
