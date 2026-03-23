@@ -53,7 +53,11 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 	}
 
 	const filename = key.split('/').pop() ?? `${date}_filter_relative.csv`;
-	return new Response(obj.body as BodyInit, {
+	let body: BodyInit = obj.body as unknown as ReadableStream;
+	if (obj.httpMetadata?.contentEncoding === 'gzip') {
+		body = (obj.body as unknown as ReadableStream).pipeThrough(new DecompressionStream('gzip'));
+	}
+	return new Response(body as BodyInit, {
 		headers: {
 			'content-type': 'text/csv',
 			'content-disposition': `attachment; filename="${filename}"`,

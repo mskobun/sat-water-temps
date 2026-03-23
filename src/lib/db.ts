@@ -1,9 +1,18 @@
 // Hybrid architecture: D1 for metadata, R2 for temperature data
 
-import type { D1Database, R2Bucket } from '@cloudflare/workers-types';
+import type { D1Database, R2Bucket, R2ObjectBody } from '@cloudflare/workers-types';
 import Papa from 'papaparse';
 
 type GeoPoint = { lng: number; lat: number; temperature: number };
+
+/** Read R2 object text, transparently decompressing gzip if needed. */
+async function r2Text(obj: R2ObjectBody): Promise<string> {
+  if (obj.httpMetadata?.contentEncoding === 'gzip') {
+    const decompressed = (obj.body as unknown as ReadableStream).pipeThrough(new DecompressionStream('gzip'));
+    return new Response(decompressed).text();
+  }
+  return obj.text();
+}
 
 /**
  * Parse CSV text into geographic coordinate array
@@ -110,7 +119,7 @@ export async function queryTemperatureData(
       return null;
     }
 
-    const csvText = await csvObject.text();
+    const csvText = await r2Text(csvObject);
     const geoPoints = parseCSV(csvText);
     const temps = geoPoints.map(p => p.temperature);
     

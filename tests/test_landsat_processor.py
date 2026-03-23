@@ -324,13 +324,18 @@ class TestLandsatProcessOneRecordFixture:
                 }
             )
 
-        def capture_upload(s3_client, bucket, key, local_path, content_type):
+        def capture_upload(s3_client, bucket, key, local_path, content_type=None):
             if key.endswith(".csv"):
                 uploaded_csvs[key] = local_path
+
+        def capture_csv_upload(s3_client, bucket, key, csv_file_path):
+            capture_upload(s3_client, bucket, key, csv_file_path)
 
         mock_s3 = MagicMock()
 
         with patch("landsat_processor.upload_to_r2", side_effect=capture_upload) as _upload, patch(
+            "landsat_processor.upload_csv_to_r2", side_effect=capture_csv_upload
+        ), patch(
             "landsat_processor.insert_metadata_to_d1", side_effect=capture_insert
         ), patch("landsat_processor.log_job_to_d1"), patch(
             "landsat_processor._get_s3_client", return_value=mock_s3
@@ -359,14 +364,19 @@ class TestLandsatProcessOneRecordFixture:
 
         saved_csv = [None]
 
-        def capture_upload(s3_client, bucket, key, local_path, content_type):
+        def capture_upload(s3_client, bucket, key, local_path, content_type=None):
             if key.endswith(".csv"):
                 import shutil
                 dest = tmp_path / "output.csv"
                 shutil.copy2(local_path, dest)
                 saved_csv[0] = dest
 
+        def capture_csv_upload(s3_client, bucket, key, csv_file_path):
+            capture_upload(s3_client, bucket, key, csv_file_path)
+
         with patch("landsat_processor.upload_to_r2", side_effect=capture_upload), patch(
+            "landsat_processor.upload_csv_to_r2", side_effect=capture_csv_upload
+        ), patch(
             "landsat_processor.insert_metadata_to_d1"
         ), patch("landsat_processor.log_job_to_d1"), patch(
             "landsat_processor._get_s3_client", return_value=MagicMock()

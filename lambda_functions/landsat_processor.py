@@ -28,6 +28,7 @@ from processor import (
     _get_s3_client,
     tif_to_png,
     upload_to_r2,
+    upload_csv_to_r2,
     compute_filter_stats,
     insert_metadata_to_d1,
     GLOBAL_MIN,
@@ -282,7 +283,7 @@ def process_one_record(body):
         upload_to_r2(s3_client, bucket_name, tif_key, filter_tif_path, "image/tiff")
 
         csv_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.csv"
-        upload_to_r2(s3_client, bucket_name, csv_key, filter_csv_path, "text/csv")
+        upload_csv_to_r2(s3_client, bucket_name, csv_key, filter_csv_path)
 
         # PNGs
         png_r2_keys = {}

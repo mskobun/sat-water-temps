@@ -216,6 +216,18 @@ def upload_to_r2(s3_client, bucket_name, key, file_path, content_type=None):
     print(f"Uploaded {file_path} to {key}")
 
 
+def upload_csv_to_r2(s3_client, bucket_name, key, csv_file_path):
+    """Upload CSV to R2 with gzip compression."""
+    import gzip
+    with open(csv_file_path, "rb") as f:
+        compressed = gzip.compress(f.read())
+    s3_client.put_object(
+        Bucket=bucket_name, Key=key, Body=compressed,
+        ContentType="text/csv", ContentEncoding="gzip",
+    )
+    print(f"Uploaded {csv_file_path} to {key} (gzip, {len(compressed):,} bytes)")
+
+
 def compute_filter_stats(filter_flags, total_pixels, padding_count=0):
     """Compute filter statistics as bit flag histogram.
 
@@ -438,7 +450,7 @@ def process_rasters(
     df.dropna(subset=["LST_filter"], inplace=True)
     df.to_csv(filter_csv_path, index=False)
     csv_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.csv"
-    upload_to_r2(s3_client, bucket_name, csv_key, filter_csv_path, "text/csv")
+    upload_csv_to_r2(s3_client, bucket_name, csv_key, filter_csv_path)
 
     # PNGs for all scales
     png_r2_keys = {}
