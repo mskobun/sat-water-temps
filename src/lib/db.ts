@@ -38,20 +38,6 @@ function parseCSV(csvText: string): GeoPoint[] {
 }
 
 /**
- * Build GeoJSON FeatureCollection from geo points
- */
-function buildGeoJSON(points: GeoPoint[]) {
-  return {
-    type: 'FeatureCollection' as const,
-    features: points.map(p => ({
-      type: 'Feature' as const,
-      geometry: { type: 'Point' as const, coordinates: [p.lng, p.lat] },
-      properties: { temperature: p.temperature }
-    }))
-  };
-}
-
-/**
  * Compute histogram bins from temperature data
  */
 function computeHistogram(temps: number[], numBins = 6): Array<{ range: string; count: number }> {
@@ -129,7 +115,7 @@ export async function queryTemperatureData(
     const pixel_size_x = psx != null && psx !== '' ? Number(psx) : null;
 
     return {
-      geojson: buildGeoJSON(geoPoints),
+      points: geoPoints.map(p => [p.lng, p.lat, p.temperature]),
       min_max: [metaResult.min_temp, metaResult.max_temp],
       histogram: computeHistogram(temps),
       avg: temps.length ? temps.reduce((a, b) => a + b, 0) / temps.length : 0,

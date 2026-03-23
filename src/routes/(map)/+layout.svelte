@@ -2,7 +2,7 @@
 	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { MapLibre, GeoJSONSource, FillLayer, LineLayer, CircleLayer } from 'svelte-maplibre-gl';
+	import { MapLibre, GeoJSONSource, VectorTileSource, Protocol, FillLayer, LineLayer, CircleLayer } from 'svelte-maplibre-gl';
 	import type {
 		Map,
 		MapMouseEvent,
@@ -18,7 +18,9 @@
 	import FeatureSearch from '$lib/components/FeatureSearch.svelte';
 	import UserMenu from '$lib/components/UserMenu.svelte';
 	import { IsMobile } from '$lib/hooks/is-mobile.svelte';
+	import { createTileIndex } from '$lib/tile-protocol';
 	import type { Snippet } from 'svelte';
+	import type { AddProtocolAction } from 'maplibre-gl';
 	import XIcon from '@lucide/svelte/icons/x';
 	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
 
@@ -46,9 +48,8 @@
 	let tooltipY = $state(0);
 
 	// Temperature data (fetched here so map can use it for heatmap)
-	// Use $state.raw to avoid deep reactive proxies over thousands of GeoJSON coordinates
-	let heatmapGeojson: { type: 'FeatureCollection'; features: any[] } | null = $state.raw(null);
-	let squareGeojson: { type: 'FeatureCollection'; features: any[] } | null = $state.raw(null);
+	let tileLoadFn: AddProtocolAction | null = $state.raw(null);
+	let destroyTileIndex: (() => void) | null = null;
 	let relativeMin = $state(0);
 	let relativeMax = $state(0);
 	let avgTemp = $state(0);
@@ -170,8 +171,9 @@
 			// Reset local UI state
 			selectedDate = '';
 			selectedColorScale = 'relative';
-			heatmapGeojson = null;
-			squareGeojson = null;
+			destroyTileIndex?.();
+			destroyTileIndex = null;
+			tileLoadFn = null;
 			relativeMin = 0;
 			relativeMax = 0;
 			avgTemp = 0;
@@ -189,8 +191,9 @@
 			// Reset local UI state
 			selectedDate = '';
 			selectedColorScale = 'relative';
-			heatmapGeojson = null;
-			squareGeojson = null;
+			destroyTileIndex?.();
+			destroyTileIndex = null;
+			tileLoadFn = null;
 			relativeMin = 0;
 			relativeMax = 0;
 			avgTemp = 0;
@@ -405,8 +408,9 @@
 
 	async function loadTemperatureData(featureId: string, date: string) {
 		// Clear previous data first
-		heatmapGeojson = null;
-		squareGeojson = null;
+		destroyTileIndex?.();
+		destroyTileIndex = null;
+		tileLoadFn = null;
 		relativeMin = 0;
 		relativeMax = 0;
 		avgTemp = 0;
@@ -423,7 +427,7 @@
 
 			const data = (await response.json()) as {
 				error?: string;
-				geojson?: { type: 'FeatureCollection'; features: any[] };
+				points?: number[][];
 				min_max?: [number, number];
 				histogram?: Array<{ range: string; count: number }>;
 				avg?: number;
@@ -432,16 +436,20 @@
 				pixel_size?: number | null;
 				pixel_size_x?: number | null;
 			};
-			if (data.error || !data.geojson) return;
+			if (data.error || !data.points || data.points.length === 0) return;
 
-			// Server returns ready-to-use GeoJSON and pre-computed stats
-			heatmapGeojson = data.geojson;
 			pixelSizeDeg = data.pixel_size ?? null;
 			pixelSizeXDeg = data.pixel_size_x ?? pixelSizeDeg;
-			squareGeojson =
-				data.geojson.features.length > 0 && pixelSizeDeg != null
-					? pointsToSquares(data.geojson, pixelSizeXDeg!, pixelSizeDeg)
-					: null;
+
+			// Build tile index client-side from flat triplets
+			const idx = createTileIndex(
+				data.points as [number, number, number][],
+				pixelSizeXDeg,
+				pixelSizeDeg
+			);
+			destroyTileIndex = idx.destroy;
+			tileLoadFn = idx.loadFn;
+
 			relativeMin = data.min_max?.[0] || 0;
 			relativeMax = data.min_max?.[1] || 0;
 			avgTemp = data.avg || 0;
@@ -542,40 +550,7 @@
 			1
 		]);
 	});
-	
-	/**
-	 * Convert a Point FeatureCollection to a Polygon FeatureCollection
-	 * where each point becomes a rectangular cell for contiguous rendering.
-	 * pixelSizeX (longitude) and pixelSizeY (latitude) are set in D1 at ingest.
-	 */
-	function pointsToSquares(
-		geojson: { type: 'FeatureCollection'; features: any[] },
-		pixelSizeX: number,
-		pixelSizeY: number
-	): { type: 'FeatureCollection'; features: any[] } {
-		const halfX = pixelSizeX / 2;
-		const halfY = pixelSizeY / 2;
-		return {
-			type: 'FeatureCollection',
-			features: geojson.features.map((f) => {
-				const [lng, lat] = f.geometry.coordinates;
-				return {
-					type: 'Feature',
-					geometry: {
-						type: 'Polygon',
-						coordinates: [[
-							[lng - halfX, lat - halfY],
-							[lng + halfX, lat - halfY],
-							[lng + halfX, lat + halfY],
-							[lng - halfX, lat + halfY],
-							[lng - halfX, lat - halfY]
-						]]
-					},
-					properties: f.properties
-				};
-			})
-		};
-	}
+
 
 	// Format temperature for tooltip based on selected unit
 	function convertTemp(kelvin: number): number {
@@ -702,29 +677,30 @@
 						</GeoJSONSource>
 					{/if}
 
-					{#if heatmapGeojson || squareGeojson}
-						<!-- Temperature overlay crossfades from circles when zoomed out to cells when zoomed in. -->
+					{#if tileLoadFn}
+						<!-- Temperature overlay: vector tiles via custom protocol -->
 						{#key selectedDate}
-							{#if heatmapGeojson}
-								<GeoJSONSource id="temperature-points-source" data={heatmapGeojson}>
-									<CircleLayer
-										id="temperature-circles-layer"
-										paint={circlePaint}
-										filter={tempLayerFilter}
-										maxzoom={11}
-									/>
-								</GeoJSONSource>
-							{/if}
-							{#if squareGeojson}
-								<GeoJSONSource id="temperature-squares-source" data={squareGeojson}>
-									<FillLayer
-										id="temperature-squares-layer"
-										paint={fillPaint}
-										filter={tempLayerFilter}
-										minzoom={8}
-									/>
-								</GeoJSONSource>
-							{/if}
+							<Protocol scheme="temp" loadFn={tileLoadFn} />
+							<VectorTileSource
+								id="temperature-tiles"
+								tiles={["temp://tiles/{z}/{x}/{y}"]}
+								maxzoom={14}
+							>
+								<CircleLayer
+									id="temperature-circles-layer"
+									sourceLayer="points"
+									paint={circlePaint}
+									filter={tempLayerFilter}
+									maxzoom={11}
+								/>
+								<FillLayer
+									id="temperature-squares-layer"
+									sourceLayer="squares"
+									paint={fillPaint}
+									filter={tempLayerFilter}
+									minzoom={8}
+								/>
+							</VectorTileSource>
 						{/key}
 					{/if}
 				</MapLibre>

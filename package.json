@@ -24,7 +24,9 @@
     "@sveltejs/adapter-cloudflare": "^7.2.4",
     "@sveltejs/kit": "^2.49.2",
     "@tailwindcss/postcss": "^4.1.18",
+    "@types/geojson-vt": "^3.2.5",
     "@types/node": "^22.10.0",
+    "@types/vt-pbf": "^3.1.1",
     "autoprefixer": "^10.4.23",
     "bits-ui": "^2.15.5",
     "clsx": "^2.1.1",
@@ -47,9 +49,12 @@
     "@auth/sveltekit": "^1.11.1",
     "aws4fetch": "^1.0.20",
     "date-fns": "^4.1.0",
+    "geojson-vt": "^4.0.2",
     "maplibre-gl": "^5.0.1",
     "mode-watcher": "^1.1.0",
     "papaparse": "^5.5.3",
-    "svelte-maplibre-gl": "^1.0.2"
+    "pmtiles": "^4.4.0",
+    "svelte-maplibre-gl": "^1.0.2",
+    "vt-pbf": "^3.1.3"
   }
 }
