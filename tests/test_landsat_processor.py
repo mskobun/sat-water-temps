@@ -325,7 +325,7 @@ class TestLandsatProcessOneRecordFixture:
             )
 
         def capture_upload(s3_client, bucket, key, local_path, content_type=None):
-            if key.endswith(".csv"):
+            if ".csv" in key:
                 uploaded_csvs[key] = local_path
 
         def capture_csv_upload(s3_client, bucket, key, csv_file_path):
@@ -365,7 +365,7 @@ class TestLandsatProcessOneRecordFixture:
         saved_csv = [None]
 
         def capture_upload(s3_client, bucket, key, local_path, content_type=None):
-            if key.endswith(".csv"):
+            if ".csv" in key:
                 import shutil
                 dest = tmp_path / "output.csv"
                 shutil.copy2(local_path, dest)

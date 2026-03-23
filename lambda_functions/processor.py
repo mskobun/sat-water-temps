@@ -449,7 +449,7 @@ def process_rasters(
     # CSV (keep for archive downloads)
     df.dropna(subset=["LST_filter"], inplace=True)
     df.to_csv(filter_csv_path, index=False)
-    csv_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.csv"
+    csv_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.csv.gz"
     upload_csv_to_r2(s3_client, bucket_name, csv_key, filter_csv_path)
 
     # PNGs for all scales

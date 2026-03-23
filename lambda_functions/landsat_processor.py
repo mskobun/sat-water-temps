@@ -282,7 +282,7 @@ def process_one_record(body):
         tif_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.tif"
         upload_to_r2(s3_client, bucket_name, tif_key, filter_tif_path, "image/tiff")
 
-        csv_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.csv"
+        csv_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.csv.gz"
         upload_csv_to_r2(s3_client, bucket_name, csv_key, filter_csv_path)
 
         # PNGs

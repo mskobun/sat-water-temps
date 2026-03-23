@@ -52,9 +52,10 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 		});
 	}
 
-	const filename = key.split('/').pop() ?? `${date}_filter_relative.csv`;
+	const rawFilename = key.split('/').pop() ?? `${date}_filter_relative.csv`;
+	const filename = rawFilename.replace(/\.gz$/, '');
 	let body: BodyInit = obj.body as unknown as ReadableStream;
-	if (obj.httpMetadata?.contentEncoding === 'gzip') {
+	if (key.endsWith('.gz') || obj.httpMetadata?.contentEncoding === 'gzip') {
 		body = (obj.body as unknown as ReadableStream).pipeThrough(new DecompressionStream('gzip'));
 	}
 	return new Response(body as BodyInit, {

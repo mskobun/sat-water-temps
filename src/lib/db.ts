@@ -5,9 +5,9 @@ import Papa from 'papaparse';
 
 type GeoPoint = { lng: number; lat: number; temperature: number };
 
-/** Read R2 object text, transparently decompressing gzip if needed. */
+/** Read R2 object text, decompressing gzip if the key ends in .gz or contentEncoding says so. */
 async function r2Text(obj: R2ObjectBody): Promise<string> {
-  if (obj.httpMetadata?.contentEncoding === 'gzip') {
+  if (obj.key?.endsWith('.gz') || obj.httpMetadata?.contentEncoding === 'gzip') {
     const decompressed = (obj.body as unknown as ReadableStream).pipeThrough(new DecompressionStream('gzip'));
     return new Response(decompressed).text();
   }
