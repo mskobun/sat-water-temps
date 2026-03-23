@@ -441,8 +441,8 @@
 			pixelSizeDeg = data.pixel_size ?? null;
 			pixelSizeXDeg = data.pixel_size_x ?? pixelSizeDeg;
 
-			// Build tile index client-side from flat triplets
-			const idx = createTileIndex(
+			// Build tile index in Web Worker from flat triplets
+			const idx = await createTileIndex(
 				data.points as [number, number, number][],
 				pixelSizeXDeg,
 				pixelSizeDeg
