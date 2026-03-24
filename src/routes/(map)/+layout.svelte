@@ -121,16 +121,6 @@
 	// Sidebar is open when there's a selected feature
 	let sidebarOpen = $derived(!!selectedFeature);
 
-	// Keep URL ?date= param in sync with selected date
-	$effect(() => {
-		const currentDate = selectedDate;
-		const currentUrlDate = $page.url.searchParams.get('date') ?? '';
-		if (!selectedFeature || !currentDate || currentDate === currentUrlDate) return;
-		const url = new URL($page.url);
-		url.searchParams.set('date', currentDate);
-		replaceState(url, {});
-	});
-
 	// Drawer open state for mobile — opens when a feature is selected, but can be
 	// dismissed independently (user can still view the heatmap on the map).
 	let drawerOpen = $state(false);
@@ -463,11 +453,23 @@
 		}
 	}
 
+	function syncDateInUrl(date: string) {
+		if (!selectedFeature || !date) return;
+
+		const currentUrlDate = $page.url.searchParams.get('date') ?? '';
+		if (date === currentUrlDate) return;
+
+		const url = new URL($page.url);
+		url.searchParams.set('date', date);
+		replaceState(url, $page.state);
+	}
+
 	function handleDateChange(event: CustomEvent<string>) {
 		selectedDate = event.detail;
 		if (selectedFeature) {
 			loadTemperatureData(selectedFeature.id, event.detail);
 		}
+		syncDateInUrl(event.detail);
 	}
 
 	function handleColorScaleChange(event: CustomEvent<'relative' | 'fixed' | 'gray'>) {
