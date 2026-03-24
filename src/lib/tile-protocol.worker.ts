@@ -1,19 +1,22 @@
 import geojsonvt from 'geojson-vt';
 import { fromGeojsonVt } from 'vt-pbf';
 
-type PointTriplet = [lng: number, lat: number, temperature: number];
-
 let pointsIndex: ReturnType<typeof geojsonvt> | null = null;
 let squaresIndex: ReturnType<typeof geojsonvt> | null = null;
 
-function tripletsToPoints(points: PointTriplet[]): GeoJSON.FeatureCollection {
+function tripletsToPointsPacked(f32: Float32Array): GeoJSON.FeatureCollection {
+	const n = (f32.length / 3) | 0;
+	const features = new Array<GeoJSON.Feature>(n);
+	for (let i = 0, j = 0; i < n; i++, j += 3) {
+		features[i] = {
+			type: 'Feature' as const,
+			geometry: { type: 'Point' as const, coordinates: [f32[j], f32[j + 1]] },
+			properties: { temperature: f32[j + 2] }
+		};
+	}
 	return {
 		type: 'FeatureCollection',
-		features: points.map((p) => ({
-			type: 'Feature' as const,
-			geometry: { type: 'Point' as const, coordinates: [p[0], p[1]] },
-			properties: { temperature: p[2] }
-		}))
+		features
 	};
 }
 
@@ -59,17 +62,25 @@ self.onmessage = (e: MessageEvent) => {
 	const msg = e.data;
 
 	if (msg.type === 'init') {
-		const points: PointTriplet[] = msg.points;
+		const pointsBuffer: ArrayBuffer = msg.pointsBuffer;
 		const pixelSizeX: number | null = msg.pixelSizeX;
 		const pixelSizeY: number | null = msg.pixelSizeY;
 
-		const pointsGeoJSON = tripletsToPoints(points);
-		pointsIndex = geojsonvt(pointsGeoJSON, vtOpts);
+		const f32 = new Float32Array(pointsBuffer);
+		pointsIndex = null;
+		squaresIndex = null;
+		if (f32.length === 0 || f32.length % 3 !== 0) {
+			const empty: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+			pointsIndex = geojsonvt(empty, vtOpts);
+		} else {
+			const pointsGeoJSON = tripletsToPointsPacked(f32);
+			pointsIndex = geojsonvt(pointsGeoJSON, vtOpts);
 
-		if (pixelSizeY != null) {
-			const psx = pixelSizeX ?? pixelSizeY;
-			const squaresGeoJSON = pointsToSquares(pointsGeoJSON, psx, pixelSizeY);
-			squaresIndex = geojsonvt(squaresGeoJSON, vtOpts);
+			if (pixelSizeY != null) {
+				const psx = pixelSizeX ?? pixelSizeY;
+				const squaresGeoJSON = pointsToSquares(pointsGeoJSON, psx, pixelSizeY);
+				squaresIndex = geojsonvt(squaresGeoJSON, vtOpts);
+			}
 		}
 
 		self.postMessage({ type: 'ready' });

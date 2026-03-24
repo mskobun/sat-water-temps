@@ -1,5 +1,5 @@
 import { json } from '@sveltejs/kit';
-import { getLatestDate, queryTemperatureData } from '$lib/db';
+import { getLatestDate, queryTemperatureMetadata } from '$lib/db';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params, platform }) => {
@@ -20,7 +20,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 	}
 
 	// Query temperature data (metadata from D1, CSV from R2)
-	const result = await queryTemperatureData(db, r2, featureId, latestDate);
+	const result = await queryTemperatureMetadata(db, r2, featureId, latestDate);
 	if (!result) {
 		return json({ error: 'Temperature data not found' }, { status: 404 });
 	}

@@ -1,7 +1,5 @@
 import type { AddProtocolAction } from 'maplibre-gl';
 
-type PointTriplet = [lng: number, lat: number, temperature: number];
-
 interface TileIndex {
 	loadFn: AddProtocolAction;
 	destroy: () => void;
@@ -14,9 +12,12 @@ const tileUrlRe = /(\d+)\/(\d+)\/(\d+)/;
  * to MapLibre via a custom protocol handler. All heavy work (GeoJSON
  * construction, geojson-vt indexing, per-tile PBF encoding) runs off the
  * main thread.
+ *
+ * `pointsBuffer` must be packed Float32 triplets (lng, lat, temperature).
+ * It is transferred to the worker (detached); do not use it afterward.
  */
 export async function createTileIndex(
-	points: PointTriplet[],
+	pointsBuffer: ArrayBuffer,
 	pixelSizeX: number | null,
 	pixelSizeY: number | null
 ): Promise<TileIndex> {
@@ -30,7 +31,7 @@ export async function createTileIndex(
 			if (e.data.type === 'ready') resolve();
 		};
 		worker.onerror = (e) => reject(e);
-		worker.postMessage({ type: 'init', points, pixelSizeX, pixelSizeY });
+		worker.postMessage({ type: 'init', pointsBuffer, pixelSizeX, pixelSizeY }, [pointsBuffer]);
 	});
 
 	let nextId = 0;

@@ -412,12 +412,16 @@
 
 		temperatureLoading = true;
 		try {
-			const response = await fetch(`/api/feature/${featureId}/temperature/${date}`);
-			if (!response.ok) return;
+			const enc = encodeURIComponent(featureId);
+			const metaUrl = `/api/feature/${enc}/temperature/${encodeURIComponent(date)}`;
+			const pointsUrl = `/api/feature/${enc}/temperature/${encodeURIComponent(date)}/points`;
 
-			const data = (await response.json()) as {
+			const [metaRes, pointsRes] = await Promise.all([fetch(metaUrl), fetch(pointsUrl)]);
+
+			if (!metaRes.ok || !pointsRes.ok) return;
+
+			const data = (await metaRes.json()) as {
 				error?: string;
-				points?: number[][];
 				min_max?: [number, number];
 				histogram?: Array<{ range: string; count: number }>;
 				avg?: number;
@@ -426,17 +430,16 @@
 				pixel_size?: number | null;
 				pixel_size_x?: number | null;
 			};
-			if (data.error || !data.points || data.points.length === 0) return;
+			if (data.error) return;
+
+			const pointsBuffer = await pointsRes.arrayBuffer();
+			if (pointsBuffer.byteLength < 12 || pointsBuffer.byteLength % 12 !== 0) return;
 
 			pixelSizeDeg = data.pixel_size ?? null;
 			pixelSizeXDeg = data.pixel_size_x ?? pixelSizeDeg;
 
-			// Build tile index in Web Worker from flat triplets
-			const idx = await createTileIndex(
-				data.points as [number, number, number][],
-				pixelSizeXDeg,
-				pixelSizeDeg
-			);
+			// Build tile index in Web Worker; buffer is transferred (detached) inside createTileIndex
+			const idx = await createTileIndex(pointsBuffer, pixelSizeXDeg, pixelSizeDeg);
 			destroyTileIndex = idx.destroy;
 			tileLoadFn = idx.loadFn;
 

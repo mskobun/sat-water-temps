@@ -70,10 +70,12 @@ multitifs/
 6. **Logs job status to D1**
 
 ### API Request (SvelteKit)
-1. Frontend requests temperature data for feature + date
+1. Frontend requests temperature **metadata** (JSON) and **points** (binary) for feature + date in parallel
 2. **SvelteKit queries D1** for metadata and CSV path
-3. **SvelteKit fetches CSV from R2** using path
-4. Parses CSV and returns to frontend
+3. **SvelteKit fetches CSV from R2** using path (once per endpoint; each request may parse CSV separately)
+4. Metadata route returns sidebar/chart fields only; `/points` returns packed `Float32` triplets (`lng`, `lat`, `temperature`) with no JSON parse on the client for the large array
+
+**Payload comparison:** binary points are **12 bytes per observation** (3× float32) vs. JSON triplets which are much larger on the wire and require `JSON.parse` plus nested array allocation. Use browser DevTools **Network** (transfer size and time) to compare before/after when tuning.
 
 ## File Reference
 
@@ -90,9 +92,12 @@ multitifs/
 
 ### SvelteKit
 - `src/lib/db.ts`
-  - `queryTemperatureData()` - Fetches metadata from D1, CSV from R2
+  - `queryTemperatureMetadata()` - Fetches metadata from D1, CSV from R2 (histogram/avg; no points in JSON)
+  - `queryTemperaturePointsBuffer()` - Same CSV path; returns packed float32 triplets for map tiling
   - `parseCSV()` - Parses R2 CSV data
-- `src/routes/api/feature/[id]/temperature/+server.ts` - Temperature API endpoint
+- `src/routes/api/feature/[...id]/temperature/[date]/+server.ts` - Temperature metadata JSON
+- `src/routes/api/feature/[...id]/temperature/[date]/points/+server.ts` - Binary temperature points (`application/octet-stream`)
+- `src/routes/api/feature/[...id]/temperature/+server.ts` - Latest date metadata JSON (no points)
 
 ## Benefits
 

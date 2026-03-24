@@ -94,7 +94,9 @@ Once running:
 - API endpoints are available at `/api/*`:
   - `http://localhost:8788/api/polygons` - Get GeoJSON polygons
   - `http://localhost:8788/api/feature/{id}/get_dates` - Get available dates from D1
-  - `http://localhost:8788/api/feature/{id}/temperature` - Get temperature data (D1 metadata + R2 CSV)
+  - `http://localhost:8788/api/feature/{id}/temperature/{date}` - Temperature metadata JSON (sidebar/stats; R2 CSV parsed on server)
+  - `http://localhost:8788/api/feature/{id}/temperature/{date}/points` - Packed float32 points (`application/octet-stream`, 12 bytes per point)
+  - `http://localhost:8788/api/feature/{id}/temperature` - Latest observation metadata JSON (same shape as dated route, no points)
   - `http://localhost:8788/api/latest_lst_tif/{id}` - Get latest temperature image from R2
   - `http://localhost:8788/admin/jobs` - Admin dashboard for job tracking
 
