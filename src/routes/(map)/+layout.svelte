@@ -19,12 +19,15 @@
 	import UserMenu from '$lib/components/UserMenu.svelte';
 	import { IsMobile } from '$lib/hooks/is-mobile.svelte';
 	import { createTileIndex } from '$lib/tile-protocol';
+	import { Kbd } from '$lib/components/ui/kbd';
 	import type { Snippet } from 'svelte';
 	import type { AddProtocolAction } from 'maplibre-gl';
 	import XIcon from '@lucide/svelte/icons/x';
 	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
 
 	const isMobile = new IsMobile();
+	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+	const modKeyLabel = isMac ? '⌥' : 'Alt';
 
 	let { children }: { children: Snippet } = $props();
 
@@ -49,7 +52,6 @@
 
 	// Temperature data (fetched here so map can use it for heatmap)
 	let tileLoadFn: AddProtocolAction | null = $state.raw(null);
-	let destroyTileIndex: (() => void) | null = null;
 	let relativeMin = $state(0);
 	let relativeMax = $state(0);
 	let avgTemp = $state(0);
@@ -58,8 +60,25 @@
 	let dataSource = $state('');
 	let pixelSizeDeg = $state<number | null>(null);
 	let pixelSizeXDeg = $state<number | null>(null);
+	let temperatureLoading = $state(false);
+	let destroyTileIndex: (() => void) | null = null;
 	const globalMin = 273.15;
 	const globalMax = 308.15;
+
+	function resetTileState() {
+		destroyTileIndex?.();
+		destroyTileIndex = null;
+		tileLoadFn = null;
+		relativeMin = 0;
+		relativeMax = 0;
+		avgTemp = 0;
+		histogramData = [];
+		tempFilterMin = null;
+		tempFilterMax = null;
+		dataSource = '';
+		pixelSizeDeg = null;
+		pixelSizeXDeg = null;
+	}
 
 	// Default map view (MapLibre uses [lng, lat])
 	const defaultCenter: [number, number] = [112.5, 2.5];
@@ -171,18 +190,7 @@
 			// Reset local UI state
 			selectedDate = '';
 			selectedColorScale = 'relative';
-			destroyTileIndex?.();
-			destroyTileIndex = null;
-			tileLoadFn = null;
-			relativeMin = 0;
-			relativeMax = 0;
-			avgTemp = 0;
-			histogramData = [];
-			tempFilterMin = null;
-			tempFilterMax = null;
-			dataSource = '';
-			pixelSizeDeg = null;
-			pixelSizeXDeg = null;
+			resetTileState();
 		} else if (currentFeatureId && previousFeatureId && currentFeatureId !== previousFeatureId) {
 			// Switching features: just zoom to new feature
 			if (bounds) {
@@ -191,18 +199,7 @@
 			// Reset local UI state
 			selectedDate = '';
 			selectedColorScale = 'relative';
-			destroyTileIndex?.();
-			destroyTileIndex = null;
-			tileLoadFn = null;
-			relativeMin = 0;
-			relativeMax = 0;
-			avgTemp = 0;
-			histogramData = [];
-			tempFilterMin = null;
-			tempFilterMax = null;
-			dataSource = '';
-			pixelSizeDeg = null;
-			pixelSizeXDeg = null;
+			resetTileState();
 		}
 
 		previousFeatureId = currentFeatureId;
@@ -408,19 +405,12 @@
 
 	async function loadTemperatureData(featureId: string, date: string) {
 		// Clear previous data first
-		destroyTileIndex?.();
-		destroyTileIndex = null;
-		tileLoadFn = null;
-		relativeMin = 0;
-		relativeMax = 0;
-		avgTemp = 0;
-		histogramData = [];
+		resetTileState();
 		waterOff = false;
-		pixelSizeDeg = null;
-		pixelSizeXDeg = null;
 
 		if (!featureId || !date) return;
 
+		temperatureLoading = true;
 		try {
 			const response = await fetch(`/api/feature/${featureId}/temperature/${date}`);
 			if (!response.ok) return;
@@ -458,6 +448,8 @@
 			dataSource = data.source || 'ecostress';
 		} catch (err) {
 			console.error('Error loading temperature data:', err);
+		} finally {
+			temperatureLoading = false;
 		}
 	}
 
@@ -604,6 +596,7 @@
 						{avgTemp}
 						{histogramData}
 						{waterOff}
+						{temperatureLoading}
 						on:close={handleSidebarClose}
 						on:dateChange={handleDateChange}
 						on:colorScaleChange={handleColorScaleChange}
@@ -713,11 +706,22 @@
 
 				<!-- Temperature hover tooltip (styled like shadcn tooltip) -->
 				{#if hoveredTemp != null}
-					<div 
+					<div
 						class="absolute pointer-events-none z-50 px-3 py-1.5 text-xs font-medium bg-foreground text-background rounded-md shadow-md"
 						style="left: {tooltipX + 12}px; top: {tooltipY - 12}px;"
 					>
 						{tooltipTempDisplay}
+					</div>
+				{/if}
+
+				<!-- Keyboard navigation hint (desktop only, when feature has data loaded) -->
+				{#if !isMobile.current && selectedFeature && tileLoadFn}
+					<div class="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none flex items-center gap-2 rounded-md bg-background/80 backdrop-blur-sm px-3 py-1.5 shadow-sm border border-border/50">
+						<span class="inline-flex items-center gap-0.5"><Kbd>{modKeyLabel}</Kbd><Kbd>←</Kbd></span>
+						<span class="text-[11px] text-muted-foreground">Previous observation</span>
+						<span class="text-muted-foreground/40 mx-1">|</span>
+						<span class="text-[11px] text-muted-foreground">Next observation</span>
+						<span class="inline-flex items-center gap-0.5"><Kbd>{modKeyLabel}</Kbd><Kbd>→</Kbd></span>
 					</div>
 				{/if}
 			</div>
@@ -776,6 +780,7 @@
 						{avgTemp}
 						{histogramData}
 						{waterOff}
+						{temperatureLoading}
 						on:close={handleSidebarClose}
 						on:dateChange={handleDateChange}
 						on:colorScaleChange={handleColorScaleChange}

@@ -35,6 +35,7 @@
 	export let currentUnit: 'Kelvin' | 'Celsius' | 'Fahrenheit' = 'Celsius';
 	// Water off status (passed from parent, fetched with temperature data)
 	export let waterOff: boolean = false;
+	export let temperatureLoading: boolean = false;
 	export let initialDate: string = '';
 
 	$: session = $page.data.session;
@@ -208,7 +209,42 @@
 		resetState();
 		loadDates();
 	}
+
+	// Arrow key date navigation (same source only)
+	function isInputFocused(): boolean {
+		const el = document.activeElement;
+		return (
+			el instanceof HTMLInputElement ||
+			el instanceof HTMLTextAreaElement ||
+			(el instanceof HTMLElement && el.isContentEditable)
+		);
+	}
+
+	function navigateDate(direction: -1 | 1) {
+		if (!featureId || !selectedDate || dateEntries.length === 0) return;
+		// Filter to entries matching current data source
+		const sameSourceEntries = dateEntries.filter(e => e.source === dataSource);
+		const currentIndex = sameSourceEntries.findIndex(e => e.date === selectedDate);
+		if (currentIndex === -1) return;
+		// Dates are sorted DESC (newest first): ArrowRight = newer (index - 1), ArrowLeft = older (index + 1)
+		const nextIndex = currentIndex - direction;
+		if (nextIndex < 0 || nextIndex >= sameSourceEntries.length) return;
+		handleDateChange(sameSourceEntries[nextIndex].date);
+	}
+
+	function handleKeydown(e: KeyboardEvent) {
+		if (!featureId || !e.altKey || isInputFocused()) return;
+		if (e.key === 'ArrowLeft') {
+			e.preventDefault();
+			navigateDate(-1); // older
+		} else if (e.key === 'ArrowRight') {
+			e.preventDefault();
+			navigateDate(1); // newer
+		}
+	}
 </script>
+
+<svelte:window on:keydown={handleKeydown} />
 
 <div class="flex flex-col h-full">
 	{#if loading}
@@ -361,94 +397,101 @@
 
 				<Separator />
 
-				<!-- Temperature snapshot -->
-				<div class="space-y-3">
-					<h3 class="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-						<ThermometerIcon class="size-3.5" />
-						Temperature
-					</h3>
-					{#if stats}
-						<div class="grid grid-cols-3 gap-2">
-							<div class="rounded-lg border bg-muted/40 px-3 py-2 text-center">
-								<p class="text-[10px] text-muted-foreground uppercase tracking-wider">Min</p>
-								<p class="text-sm font-semibold tabular-nums">{stats.min.toFixed(1)}{unitSymbol}</p>
-							</div>
-							<div class="rounded-lg border bg-muted/40 px-3 py-2 text-center">
-								<p class="text-[10px] text-muted-foreground uppercase tracking-wider">Avg</p>
-								<p class="text-sm font-semibold tabular-nums">{stats.avg.toFixed(1)}{unitSymbol}</p>
-							</div>
-							<div class="rounded-lg border bg-muted/40 px-3 py-2 text-center">
-								<p class="text-[10px] text-muted-foreground uppercase tracking-wider">Max</p>
-								<p class="text-sm font-semibold tabular-nums">{stats.max.toFixed(1)}{unitSymbol}</p>
-							</div>
-						</div>
-					{/if}
-					<div class="flex items-center gap-1 p-1 rounded-md bg-muted/50 w-fit">
-						<button
-							type="button"
-							class={cn(
-								'px-2.5 py-1 text-xs font-medium rounded transition-colors',
-								currentUnit === 'Kelvin' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-							)}
-							onclick={() => (currentUnit = 'Kelvin')}
-						>
-							K
-						</button>
-						<button
-							type="button"
-							class={cn(
-								'px-2.5 py-1 text-xs font-medium rounded transition-colors',
-								currentUnit === 'Celsius' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-							)}
-							onclick={() => (currentUnit = 'Celsius')}
-						>
-							°C
-						</button>
-						<button
-							type="button"
-							class={cn(
-								'px-2.5 py-1 text-xs font-medium rounded transition-colors',
-								currentUnit === 'Fahrenheit' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-							)}
-							onclick={() => (currentUnit = 'Fahrenheit')}
-						>
-							°F
-						</button>
+				{#if temperatureLoading}
+					<div class="flex flex-col items-center justify-center py-12 gap-3">
+						<Spinner class="size-6 text-muted-foreground" />
+						<p class="text-sm text-muted-foreground">Loading temperature data...</p>
 					</div>
-				</div>
-
-				<!-- Distribution -->
-				<div class="space-y-3">
-					<h3 class="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-						<BarChart3Icon class="size-3.5" />
-						Distribution
-					</h3>
-					<div class="overflow-hidden">
-						<div class="h-[200px] p-2">
-							{#if convertedHistogram.length > 0}
-								<BarChart
-									data={convertedHistogram}
-									x="range"
-									xScale={scaleBand().padding(0.2)}
-									y="count"
-									yNice
-									series={[{ key: 'count', color: 'var(--chart-1)' }]}
-									props={{
-										xAxis: { format: (d) => d },
-										yAxis: { ticks: 4 },
-										bars: {
-											stroke: "none",
-										}
-									}}
-								/>
-							{:else}
-								<div class="h-full flex items-center justify-center text-muted-foreground text-sm">
-									No data available
+				{:else}
+					<!-- Temperature snapshot -->
+					<div class="space-y-3">
+						<h3 class="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+							<ThermometerIcon class="size-3.5" />
+							Temperature
+						</h3>
+						{#if stats}
+							<div class="grid grid-cols-3 gap-2">
+								<div class="rounded-lg border bg-muted/40 px-3 py-2 text-center">
+									<p class="text-[10px] text-muted-foreground uppercase tracking-wider">Min</p>
+									<p class="text-sm font-semibold tabular-nums">{stats.min.toFixed(1)}{unitSymbol}</p>
 								</div>
-							{/if}
+								<div class="rounded-lg border bg-muted/40 px-3 py-2 text-center">
+									<p class="text-[10px] text-muted-foreground uppercase tracking-wider">Avg</p>
+									<p class="text-sm font-semibold tabular-nums">{stats.avg.toFixed(1)}{unitSymbol}</p>
+								</div>
+								<div class="rounded-lg border bg-muted/40 px-3 py-2 text-center">
+									<p class="text-[10px] text-muted-foreground uppercase tracking-wider">Max</p>
+									<p class="text-sm font-semibold tabular-nums">{stats.max.toFixed(1)}{unitSymbol}</p>
+								</div>
+							</div>
+						{/if}
+						<div class="flex items-center gap-1 p-1 rounded-md bg-muted/50 w-fit">
+							<button
+								type="button"
+								class={cn(
+									'px-2.5 py-1 text-xs font-medium rounded transition-colors',
+									currentUnit === 'Kelvin' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+								)}
+								onclick={() => (currentUnit = 'Kelvin')}
+							>
+								K
+							</button>
+							<button
+								type="button"
+								class={cn(
+									'px-2.5 py-1 text-xs font-medium rounded transition-colors',
+									currentUnit === 'Celsius' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+								)}
+								onclick={() => (currentUnit = 'Celsius')}
+							>
+								°C
+							</button>
+							<button
+								type="button"
+								class={cn(
+									'px-2.5 py-1 text-xs font-medium rounded transition-colors',
+									currentUnit === 'Fahrenheit' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+								)}
+								onclick={() => (currentUnit = 'Fahrenheit')}
+							>
+								°F
+							</button>
 						</div>
 					</div>
-				</div>
+
+					<!-- Distribution -->
+					<div class="space-y-3">
+						<h3 class="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+							<BarChart3Icon class="size-3.5" />
+							Distribution
+						</h3>
+						<div class="overflow-hidden">
+							<div class="h-[200px] p-2">
+								{#if convertedHistogram.length > 0}
+									<BarChart
+										data={convertedHistogram}
+										x="range"
+										xScale={scaleBand().padding(0.2)}
+										y="count"
+										yNice
+										series={[{ key: 'count', color: 'var(--chart-1)' }]}
+										props={{
+											xAxis: { format: (d) => d },
+											yAxis: { ticks: 4 },
+											bars: {
+												stroke: "none",
+											}
+										}}
+									/>
+								{:else}
+									<div class="h-full flex items-center justify-center text-muted-foreground text-sm">
+										No data available
+									</div>
+								{/if}
+							</div>
+						</div>
+					</div>
+				{/if}
 
 				</div>
 		</ScrollArea>
