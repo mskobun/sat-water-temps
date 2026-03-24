@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { goto, replaceState } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { MapLibre, GeoJSONSource, VectorTileSource, Protocol, FillLayer, LineLayer, CircleLayer } from 'svelte-maplibre-gl';
 	import type {
@@ -120,6 +120,16 @@
 
 	// Sidebar is open when there's a selected feature
 	let sidebarOpen = $derived(!!selectedFeature);
+
+	// Keep URL ?date= param in sync with selected date
+	$effect(() => {
+		const currentDate = selectedDate;
+		const currentUrlDate = $page.url.searchParams.get('date') ?? '';
+		if (!selectedFeature || !currentDate || currentDate === currentUrlDate) return;
+		const url = new URL($page.url);
+		url.searchParams.set('date', currentDate);
+		replaceState(url, {});
+	});
 
 	// Drawer open state for mobile — opens when a feature is selected, but can be
 	// dismissed independently (user can still view the heatmap on the map).
@@ -564,7 +574,7 @@
 </script>
 
 <svelte:head>
-	<title>Satellite Water Temperature Monitoring</title>
+	<title>{selectedFeature ? `${selectedFeature.name} — Satellite Water Temps` : 'Satellite Water Temperature Monitoring'}</title>
 </svelte:head>
 
 <Sidebar.Provider open={sidebarOpen} onOpenChange={(open) => { if (!open) handleSidebarClose(); }}>
