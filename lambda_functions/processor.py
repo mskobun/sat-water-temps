@@ -217,13 +217,18 @@ def upload_to_r2(s3_client, bucket_name, key, file_path, content_type=None):
 
 
 def upload_csv_to_r2(s3_client, bucket_name, key, csv_file_path):
-    """Upload CSV to R2 with gzip compression."""
+    """Upload CSV to R2 with gzip compression.
+
+    Stored as application/gzip (not ContentEncoding: gzip) so R2 does NOT
+    transparently decompress on read. The frontend detects .gz extension
+    and decompresses client-side.
+    """
     import gzip
     with open(csv_file_path, "rb") as f:
         compressed = gzip.compress(f.read())
     s3_client.put_object(
         Bucket=bucket_name, Key=key, Body=compressed,
-        ContentType="text/csv", ContentEncoding="gzip",
+        ContentType="application/gzip",
     )
     print(f"Uploaded {csv_file_path} to {key} (gzip, {len(compressed):,} bytes)")
 
