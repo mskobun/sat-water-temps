@@ -20,6 +20,7 @@
 	import { IsMobile } from '$lib/hooks/is-mobile.svelte';
 	import { createTileIndex } from '$lib/tile-protocol';
 	import { Kbd } from '$lib/components/ui/kbd';
+	import * as Tooltip from '$lib/components/ui/tooltip';
 	import type { Snippet } from 'svelte';
 	import type { AddProtocolAction } from 'maplibre-gl';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -499,6 +500,15 @@
 	function handleSidebarClose() {
 		// Just change the URL - state will update automatically
 		goto('/', { replaceState: false, keepFocus: true, noScroll: true });
+		// Focus the map canvas so arrow keys work for panning
+		map?.getCanvas().focus();
+	}
+
+	function handleLayoutKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape' && selectedFeature) {
+			e.preventDefault();
+			handleSidebarClose();
+		}
 	}
 
 	function handleMapLoad() {
@@ -582,6 +592,8 @@
 	<title>{selectedFeature ? `${selectedFeature.name} — Satellite Water Temps` : 'Satellite Water Temperature Monitoring'}</title>
 </svelte:head>
 
+<svelte:window onkeydown={handleLayoutKeydown} />
+
 <Sidebar.Provider open={sidebarOpen} onOpenChange={(open) => { if (!open) handleSidebarClose(); }}>
 	<div class="flex h-screen w-full">
 		<!-- Feature Sidebar (desktop only) – only in DOM when a feature is selected -->
@@ -591,10 +603,21 @@
 					<span class="font-semibold text-foreground truncate">
 						{selectedFeature.name ?? selectedFeature.id ?? 'Water body'}
 					</span>
-					<Button variant="ghost" size="icon-sm" onclick={handleSidebarClose} class="shrink-0">
-						<XIcon class="size-4" />
-						<span class="sr-only">Close</span>
-					</Button>
+					<Tooltip.Provider>
+						<Tooltip.Root>
+							<Tooltip.Trigger>
+								{#snippet child({ props })}
+									<Button {...props} variant="ghost" size="icon-sm" onclick={handleSidebarClose} class="shrink-0">
+										<XIcon class="size-4" />
+										<span class="sr-only">Close</span>
+									</Button>
+								{/snippet}
+							</Tooltip.Trigger>
+							<Tooltip.Content side="bottom">
+								<span class="inline-flex items-center gap-1.5"><Kbd>Esc</Kbd> Close</span>
+							</Tooltip.Content>
+						</Tooltip.Root>
+					</Tooltip.Provider>
 				</Sidebar.Header>
 				<Sidebar.Content class="flex flex-col min-h-0 bg-background">
 					<FeatureSidebar
