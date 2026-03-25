@@ -33,6 +33,7 @@
 	let { children }: { children: Snippet } = $props();
 
 	let map: Map | undefined = $state();
+	let featureSidebarRef: FeatureSidebar | undefined = $state();
 	let geojsonData: any = $state(null);
 	let mapReady = $state(false);
 
@@ -621,6 +622,7 @@
 				</Sidebar.Header>
 				<Sidebar.Content class="flex flex-col min-h-0 bg-background">
 					<FeatureSidebar
+						bind:this={featureSidebarRef}
 						featureId={selectedFeature.id}
 						featureName={selectedFeature.name ?? ''}
 						isOpen={true}
@@ -754,12 +756,16 @@
 
 				<!-- Keyboard navigation hint (desktop only, when feature has data loaded) -->
 				{#if !isMobile.current && selectedFeature && tileLoadFn}
-					<div class="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none flex items-center gap-2 rounded-md bg-background/80 backdrop-blur-sm px-3 py-1.5 shadow-sm border border-border/50">
-						<span class="inline-flex items-center gap-0.5"><Kbd>{modKeyLabel}</Kbd><Kbd>←</Kbd></span>
-						<span class="text-[11px] text-muted-foreground">Previous observation</span>
+					<div class="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-md bg-background/80 backdrop-blur-sm px-3 py-1.5 shadow-sm border border-border/50">
+						<button class="inline-flex items-center gap-1 cursor-pointer hover:text-foreground text-muted-foreground transition-colors" onclick={() => featureSidebarRef?.navigateDate(-1)}>
+							<span class="inline-flex items-center gap-0.5"><Kbd>{modKeyLabel}</Kbd><Kbd>←</Kbd></span>
+							<span class="text-[11px]">Previous</span>
+						</button>
 						<span class="text-muted-foreground/40 mx-1">|</span>
-						<span class="text-[11px] text-muted-foreground">Next observation</span>
-						<span class="inline-flex items-center gap-0.5"><Kbd>{modKeyLabel}</Kbd><Kbd>→</Kbd></span>
+						<button class="inline-flex items-center gap-1 cursor-pointer hover:text-foreground text-muted-foreground transition-colors" onclick={() => featureSidebarRef?.navigateDate(1)}>
+							<span class="text-[11px]">Next</span>
+							<span class="inline-flex items-center gap-0.5"><Kbd>{modKeyLabel}</Kbd><Kbd>→</Kbd></span>
+						</button>
 					</div>
 				{/if}
 			</div>
@@ -805,6 +811,7 @@
 				</Drawer.Header>
 				<div class="overflow-y-auto flex-1 min-h-0">
 					<FeatureSidebar
+						bind:this={featureSidebarRef}
 						featureId={selectedFeature.id}
 						featureName={selectedFeature.name ?? ''}
 						isOpen={true}

@@ -220,7 +220,7 @@
 		);
 	}
 
-	function navigateDate(direction: -1 | 1) {
+	export function navigateDate(direction: -1 | 1) {
 		if (!featureId || !selectedDate || dateEntries.length === 0) return;
 		// Filter to entries matching current data source
 		const sameSourceEntries = dateEntries.filter(e => e.source === dataSource);
