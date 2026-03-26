@@ -71,6 +71,7 @@ export class DeckTemperatureOverlay {
 
 	constructor() {
 		this.overlay = new MapboxOverlay({
+			interleaved: true,
 			layers: []
 		});
 	}
@@ -119,6 +120,8 @@ export class DeckTemperatureOverlay {
 
 		const layer = new GridCellLayer({
 			id: 'temperature-cells',
+			// Render below MapLibre's selected-point layer so the marker is visible
+			beforeId: 'selected-point-layer',
 			data: { length: count },
 			// GridCellLayer expects bottom-left corner; triplets store center
 			getPosition: (_: unknown, { index }: { index: number }) => {

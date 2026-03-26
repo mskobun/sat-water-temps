@@ -23,7 +23,6 @@
 
 	export let featureId: string;
 	export let featureName: string = '';
-	export let isOpen: boolean = false;
 	export let selectedDate: string = '';
 	export let selectedColorScale: 'relative' | 'fixed' | 'gray' = 'relative';
 	// Pre-computed stats from server (in Kelvin)
@@ -37,7 +36,6 @@
 	export let waterOff: boolean = false;
 	export let temperatureLoading: boolean = false;
 	export let initialDate: string = '';
-	export let disableFilter: boolean = false;
 
 	$: session = $page.data.session;
 
@@ -344,9 +342,6 @@
 							</Select.Root>
 						</div>
 						<!-- Temperature Filter -->
-						{#if disableFilter}
-							<p class="text-xs text-muted-foreground">Temperature filtering is not available on mobile</p>
-						{:else}
 						<div class="space-y-2">
 							<label class="text-xs text-muted-foreground flex items-baseline gap-1.5">
 								<FilterIcon class="size-3 relative top-px" />
@@ -396,7 +391,6 @@
 								</div>
 							</div>
 						</div>
-						{/if}
 					</div>
 				</div>
 

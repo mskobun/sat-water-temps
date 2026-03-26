@@ -86,7 +86,6 @@
 	let pointHistoryOpen = $state(false);
 	let rasterPngUrl: string | null = $state(null);
 	let loadGen = 0; // incremented each time loadTemperatureData starts; guards stale async results
-	let mobilePointsBuffer: Float32Array | null = $state(null);
 	let selectedPoint: { longitude: number; latitude: number } | null = $state(null);
 	let pointHistory: PointHistoryEntry[] = $state([]);
 	const globalMin = 273.15;
@@ -97,7 +96,6 @@
 		deckHasData = false;
 		desktopTriplets = null;
 		rasterPngUrl = null;
-		mobilePointsBuffer = null;
 		relativeMin = 0;
 		relativeMax = 0;
 		avgTemp = 0;
@@ -294,39 +292,8 @@
 
 	function handleMapClick(e: MapMouseEvent) {
 		if (!map) return;
-		const lngLat = map.unproject(e.point);
-		const clickLng = lngLat.lng;
-		const clickLat = lngLat.lat;
 
-		// On mobile with raster overlay, do nearest-point lookup from buffer
-		if (isMobile.current && mobilePointsBuffer && mobilePointsBuffer.length >= 3) {
-			let bestDist = Infinity;
-			let bestTemp: number | null = null;
-			const count = mobilePointsBuffer.length / 3;
-			for (let i = 0; i < count; i++) {
-				const off = i * 3;
-				const dLng = mobilePointsBuffer[off] - clickLng;
-				const dLat = mobilePointsBuffer[off + 1] - clickLat;
-				const dist = dLng * dLng + dLat * dLat;
-				if (dist < bestDist) {
-					bestDist = dist;
-					bestTemp = mobilePointsBuffer[off + 2];
-				}
-			}
-			// Threshold: ~0.01 deg (~1km) squared
-			if (bestTemp != null && bestDist < 0.0001) {
-				hoveredTemp = bestTemp;
-				tooltipX = e.point.x;
-				tooltipY = e.point.y;
-				if (selectedFeature) {
-					selectPointForHistory(clickLng, clickLat);
-				}
-				return;
-			}
-			hoveredTemp = null;
-		}
-
-		// On desktop, deck.gl's onClick handles temperature picks and sets hoveredTemp.
+		// deck.gl's onClick handles temperature picks and sets hoveredTemp.
 		// If hoveredTemp is set, the user clicked on temperature data — don't navigate.
 		if (hoveredTemp != null) return;
 
@@ -463,14 +430,9 @@
 			avgTemp = stats.avg;
 			histogramData = stats.histogram;
 
-			if (isMobile.current) {
-				// Mobile: keep raster overlay, store points for tap lookup
-				mobilePointsBuffer = new Float32Array(pointsBuffer);
-			} else {
-				// Desktop: render via deck.gl GridCellLayer
+			{
 				const f32 = new Float32Array(pointsBuffer);
 				desktopTriplets = f32;
-				mobilePointsBuffer = f32; // for click fallback
 				const bounds = selectedFeature!.bounds as [[number,number],[number,number]];
 				const centerLat = (bounds[0][1] + bounds[1][1]) / 2;
 				const psx = pixelSizeXDeg ?? pixelSizeDeg ?? 0.0007;
@@ -524,15 +486,15 @@
 			const enc = encodeURIComponent(selectedFeature.id);
 			rasterPngUrl = `/api/feature/${enc}/tif/${encodeURIComponent(selectedDate)}/${event.detail}`;
 		}
-		// Update deck.gl layer colors on desktop
-		if (!isMobile.current && desktopTriplets) updateDeckLayer();
+		// Update deck.gl layer colors
+		if (desktopTriplets) updateDeckLayer();
 	}
 
 	function handleTempFilterChange(event: CustomEvent<{ min: number | null; max: number | null }>) {
 		tempFilterMin = event.detail.min;
 		tempFilterMax = event.detail.max;
-		// Update deck.gl layer filtering on desktop
-		if (!isMobile.current && desktopTriplets) updateDeckLayer();
+		// Update deck.gl layer filtering
+		if (desktopTriplets) updateDeckLayer();
 	}
 
 	function updateDeckLayer() {
@@ -690,9 +652,9 @@
 		};
 	});
 
-	// deck.gl overlay lifecycle: create when map is ready on desktop, clean up on destroy
+	// deck.gl overlay lifecycle: create when map is ready, clean up on destroy
 	$effect(() => {
-		if (!map || !mapReady || isMobile.current) return;
+		if (!map || !mapReady) return;
 
 		let overlay: DeckTemperatureOverlay;
 
@@ -750,7 +712,6 @@
 						bind:this={featureSidebarRef}
 						featureId={selectedFeature.id}
 						featureName={selectedFeature.name ?? ''}
-						isOpen={true}
 						initialDate={urlDate}
 						bind:selectedDate
 						bind:selectedColorScale
@@ -766,7 +727,6 @@
 						on:dateChange={handleDateChange}
 						on:colorScaleChange={handleColorScaleChange}
 						on:tempFilterChange={handleTempFilterChange}
-						disableFilter={isMobile.current}
 					/>
 				</Sidebar.Content>
 			</Sidebar.Sidebar>
@@ -956,7 +916,6 @@
 						bind:this={featureSidebarRef}
 						featureId={selectedFeature.id}
 						featureName={selectedFeature.name ?? ''}
-						isOpen={true}
 						initialDate={urlDate}
 						bind:selectedDate
 						bind:selectedColorScale
@@ -972,7 +931,6 @@
 						on:dateChange={handleDateChange}
 						on:colorScaleChange={handleColorScaleChange}
 						on:tempFilterChange={handleTempFilterChange}
-						disableFilter={isMobile.current}
 					/>
 				</div>
 			</Drawer.Content>
@@ -988,7 +946,6 @@
 					{pointHistoryLoading}
 					unit={currentUnit}
 					title="Point history"
-					maxRows={8}
 					on:close={closePointHistory}
 				/>
 			</Dialog.Content>
