@@ -127,7 +127,12 @@ async function getDb(source: SourceType): Promise<duckdb.AsyncDuckDB> {
 
 	dbPromises[source] = (async () => {
 		const bundle = await duckdb.selectBundle(CDN_BUNDLES);
-		const worker = new Worker(bundle.mainWorker!);
+		// Cross-origin workers are blocked by browsers; proxy through a blob URL
+		const workerUrl = bundle.mainWorker!;
+		const blob = new Blob([`importScripts(${JSON.stringify(workerUrl)});`], {
+			type: 'text/javascript'
+		});
+		const worker = new Worker(URL.createObjectURL(blob));
 		const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker);
 		await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
 		await db.open({
@@ -170,10 +175,13 @@ async function registerRemoteParquet(
 	name: string,
 	url: string
 ) {
+	// DuckDB WASM passes the URL to XMLHttpRequest.open() which requires an
+	// absolute URL. Resolve relative paths against the current origin.
+	const absoluteUrl = new URL(url, globalThis.location.origin).href;
 	// directIO: false — let the buffer manager coalesce nearby reads into fewer,
 	// larger range requests. Range-request enforcement is handled at the DB level
 	// via forceFullHTTPReads: false + allowFullHTTPReads: false in db.open().
-	await db.registerFileURL(name, url, duckdb.DuckDBDataProtocol.HTTP, false);
+	await db.registerFileURL(name, absoluteUrl, duckdb.DuckDBDataProtocol.HTTP, false);
 }
 
 /**
