@@ -19,6 +19,7 @@
 	import UserMenu from '$lib/components/UserMenu.svelte';
 	import { IsMobile } from '$lib/hooks/is-mobile.svelte.js';
 	import type { DeckTemperatureOverlay } from '$lib/deck-temperature-overlay';
+	import type { AffineTransform } from '$lib/landsat-pixel-quads';
 	import { Kbd } from '$lib/components/ui/kbd';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import type { Snippet } from 'svelte';
@@ -68,7 +69,10 @@
 	// Temperature data (fetched here so map can use it for heatmap)
 	let deckOverlay: DeckTemperatureOverlay | null = null;
 	let deckHasData = $state(false);
-	let desktopTriplets: Float32Array | null = null;
+	let desktopTriplets: Float64Array | null = null;
+	let desktopRowCol: Int32Array | null = null;
+	let landsatSourceCrs: string | null = null;
+	let landsatTransform: AffineTransform | null = null;
 	let desktopCellSizeXM = 0;
 	let desktopCellSizeYM = 0;
 	let desktopHalfPixelX = 0;
@@ -95,6 +99,9 @@
 		deckOverlay?.clear();
 		deckHasData = false;
 		desktopTriplets = null;
+		desktopRowCol = null;
+		landsatSourceCrs = null;
+		landsatTransform = null;
 		rasterPngUrl = null;
 		relativeMin = 0;
 		relativeMax = 0;
@@ -401,6 +408,13 @@
 				source?: string;
 				pixel_size?: number | null;
 				pixel_size_x?: number | null;
+				source_crs?: string | null;
+				transform_a?: number | null;
+				transform_b?: number | null;
+				transform_c?: number | null;
+				transform_d?: number | null;
+				transform_e?: number | null;
+				transform_f?: number | null;
 			};
 			if (meta.error) return;
 
@@ -417,12 +431,31 @@
 			if (gen !== loadGen) return;
 			if (!parquetResult) return;
 
-			const { points: pointsBuffer, stats } = parquetResult;
+			const { points: pointsBuffer, stats, rowCol: rowColBuffer } = parquetResult;
 
-			if (pointsBuffer.byteLength < 12 || pointsBuffer.byteLength % 12 !== 0) return;
+			if (pointsBuffer.byteLength < 24 || pointsBuffer.byteLength % 24 !== 0) return;
 
 			pixelSizeDeg = meta.pixel_size ?? null;
 			pixelSizeXDeg = meta.pixel_size_x ?? pixelSizeDeg;
+
+			landsatSourceCrs = meta.source_crs ?? null;
+			const hasTf =
+				meta.transform_a != null &&
+				meta.transform_b != null &&
+				meta.transform_c != null &&
+				meta.transform_d != null &&
+				meta.transform_e != null &&
+				meta.transform_f != null;
+			landsatTransform = hasTf
+				? {
+						a: Number(meta.transform_a),
+						b: Number(meta.transform_b),
+						c: Number(meta.transform_c),
+						d: Number(meta.transform_d),
+						e: Number(meta.transform_e),
+						f: Number(meta.transform_f)
+					}
+				: null;
 
 			// Stats must be set before deck layer update so relative color scale works
 			relativeMin = stats.min;
@@ -430,9 +463,13 @@
 			avgTemp = stats.avg;
 			histogramData = stats.histogram;
 
+			waterOff = meta.wtoff || false;
+			dataSource = meta.source || 'ecostress';
+
 			{
-				const f32 = new Float32Array(pointsBuffer);
-				desktopTriplets = f32;
+				const f64 = new Float64Array(pointsBuffer);
+				desktopTriplets = f64;
+				desktopRowCol = rowColBuffer ? new Int32Array(rowColBuffer) : null;
 				const bounds = selectedFeature!.bounds as [[number,number],[number,number]];
 				const centerLat = (bounds[0][1] + bounds[1][1]) / 2;
 				const psx = pixelSizeXDeg ?? pixelSizeDeg ?? 0.0007;
@@ -448,8 +485,6 @@
 					if (gen === loadGen) rasterPngUrl = null;
 				});
 			}
-			waterOff = meta.wtoff || false;
-			dataSource = meta.source || 'ecostress';
 			if (selectedPoint) {
 				void loadPointHistory(featureId, selectedPoint.longitude, selectedPoint.latitude);
 			}
@@ -511,6 +546,9 @@
 			cellSizeYMeters: desktopCellSizeYM,
 			halfPixelX: desktopHalfPixelX,
 			halfPixelY: desktopHalfPixelY,
+			landsatSourceCrs: dataSource === 'landsat' ? landsatSourceCrs : null,
+			landsatTransform: dataSource === 'landsat' ? landsatTransform : null,
+			rowCol: dataSource === 'landsat' ? desktopRowCol : null,
 			colorScale: selectedColorScale,
 			minTemp,
 			maxTemp,

@@ -26,6 +26,7 @@ from shapely.geometry import shape, mapping
 from processor import (
     _get_aid_folder_mapping,
     _get_s3_client,
+    affine_transform_to_dict,
     tif_to_png,
     upload_to_r2,
     upload_csv_to_r2,
@@ -267,6 +268,8 @@ def process_one_record(body):
         df = pd.DataFrame({
             "longitude": lons,
             "latitude": lats,
+            "row": row_idx.flatten(),
+            "col": col_idx.flatten(),
             "LST_filter": filtered_lst.flatten(),
             "QA_PIXEL": qa_data.flatten(),
         })
@@ -329,6 +332,8 @@ def process_one_record(body):
             "filter_stats": filter_stats,
             "pixel_size": float(pixel_deg_y),
             "pixel_size_x": float(pixel_deg_x),
+            "source_crs": st_meta["crs"].to_string() if st_meta.get("crs") else None,
+            "transform": affine_transform_to_dict(st_transform),
         }
 
         # Upload metadata JSON

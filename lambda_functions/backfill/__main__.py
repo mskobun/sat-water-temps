@@ -4,6 +4,8 @@ Usage:
     uv run python -m backfill parquet                  # all features, run locally
     uv run python -m backfill parquet NamTheun2        # one feature, run locally
     uv run python -m backfill parquet --via-sqs        # fan out via SQS
+    uv run python -m backfill raster_meta              # backfill D1 source_crs + transform from TIFs
+    uv run python -m backfill raster_meta Magat --force
 """
 
 import argparse
@@ -20,6 +22,7 @@ load_dotenv()
 
 from backfill.base import list_features, send_sqs_message
 from backfill.parquet import handle as handle_parquet
+from backfill.raster_meta import handle as handle_raster_meta
 from backfill.regzip import handle as handle_regzip
 
 
@@ -52,6 +55,27 @@ def cmd_regzip(args):
     _run_backfill(args, "backfill:regzip", handle_regzip)
 
 
+def cmd_raster_meta(args):
+    features = args.features or list_features()
+    if not features:
+        print("No features found")
+        return
+    print(f"Backfilling backfill:raster_meta for {len(features)} feature(s)")
+    if args.via_sqs:
+        for fid in features:
+            send_sqs_message(
+                {"type": "backfill:raster_meta", "feature_id": fid, "force": args.force}
+            )
+            print(f"  Sent SQS message for {fid}")
+        print(f"Done — sent {len(features)} SQS message(s)")
+    else:
+        for fid in features:
+            try:
+                handle_raster_meta({"feature_id": fid, "force": args.force})
+            except Exception as e:
+                print(f"  ERROR processing {fid}: {e}")
+
+
 def main():
     parser = argparse.ArgumentParser(prog="backfill", description="Backfill data operations")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -65,6 +89,19 @@ def main():
     p_regzip.add_argument("features", nargs="*", help="Feature IDs (default: all)")
     p_regzip.add_argument("--via-sqs", action="store_true", help="Fan out via SQS instead of running locally")
     p_regzip.set_defaults(func=cmd_regzip)
+
+    p_geom = subparsers.add_parser(
+        "raster_meta",
+        help="Backfill source_crs and affine transform from GeoTIFFs in R2",
+    )
+    p_geom.add_argument("features", nargs="*", help="Feature IDs (default: all)")
+    p_geom.add_argument("--via-sqs", action="store_true", help="Fan out via SQS instead of running locally")
+    p_geom.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing source_crs/transform columns",
+    )
+    p_geom.set_defaults(func=cmd_raster_meta)
 
     args = parser.parse_args()
     args.func(args)

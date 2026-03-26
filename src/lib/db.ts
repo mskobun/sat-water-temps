@@ -9,6 +9,15 @@ export type ObservationMeta = {
   source: string;
   pixel_size: number | null;
   pixel_size_x: number | null;
+  /** Raster CRS (e.g. EPSG:32651 for Landsat UTM). */
+  source_crs: string | null;
+  /** Affine transform coefficients a..f (rasterio order). */
+  transform_a: number | null;
+  transform_b: number | null;
+  transform_c: number | null;
+  transform_d: number | null;
+  transform_e: number | null;
+  transform_f: number | null;
 };
 
 export async function queryObservationMeta(
@@ -19,7 +28,9 @@ export async function queryObservationMeta(
   try {
     const row = await db
       .prepare(
-        'SELECT wtoff, source, pixel_size, pixel_size_x FROM temperature_metadata WHERE feature_id = ? AND date = ?'
+        `SELECT wtoff, source, pixel_size, pixel_size_x,
+         source_crs, transform_a, transform_b, transform_c, transform_d, transform_e, transform_f
+         FROM temperature_metadata WHERE feature_id = ? AND date = ?`
       )
       .bind(featureId, date)
       .first();
@@ -30,13 +41,22 @@ export async function queryObservationMeta(
     const pixel_size = ps != null && ps !== '' ? Number(ps) : null;
     const psx = row.pixel_size_x;
     const pixel_size_x = psx != null && psx !== '' ? Number(psx) : null;
+    const num = (v: unknown) =>
+      v != null && v !== '' && !Number.isNaN(Number(v)) ? Number(v) : null;
 
     return {
       date,
       wtoff: Boolean(row.wtoff),
       source: String(row.source || 'ecostress'),
       pixel_size,
-      pixel_size_x
+      pixel_size_x,
+      source_crs: row.source_crs != null && row.source_crs !== '' ? String(row.source_crs) : null,
+      transform_a: num(row.transform_a),
+      transform_b: num(row.transform_b),
+      transform_c: num(row.transform_c),
+      transform_d: num(row.transform_d),
+      transform_e: num(row.transform_e),
+      transform_f: num(row.transform_f)
     };
   } catch (err) {
     console.error('Error fetching observation meta:', err);

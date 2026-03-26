@@ -99,6 +99,28 @@ def get_csv_date_mapping(feature_id):
         return {}
 
 
+def get_csv_date_tif_rows(feature_id):
+    """Return list of {csv_path, date, tif_path} for all rows with a CSV path."""
+    result = query_d1(
+        "SELECT csv_path, date, tif_path FROM temperature_metadata WHERE feature_id = ?",
+        [feature_id],
+        fatal=True,
+    )
+    try:
+        rows = result["result"][0]["results"]
+        return [
+            {
+                "csv_path": row["csv_path"],
+                "date": row["date"],
+                "tif_path": row.get("tif_path"),
+            }
+            for row in rows
+            if row.get("csv_path")
+        ]
+    except (KeyError, IndexError):
+        return []
+
+
 def update_parquet_path_in_d1(feature_id, date, parquet_path):
     """Set parquet_path on an existing temperature_metadata row."""
     query_d1(

@@ -13,6 +13,7 @@ from shared import get_token, create_http_session, extract_metadata, to_iso_date
 
 import boto3
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import rasterio
 
@@ -27,6 +28,52 @@ HTTP_READ_TIMEOUT = 120
 DOWNLOAD_CHUNK_SIZE = 64 * 1024
 GLOBAL_MIN = 273.15  # Kelvin
 GLOBAL_MAX = 308.15  # Kelvin
+
+
+def parquet_feature_schema() -> pa.Schema:
+    """Canonical schema for per-feature Parquet (ECOSTRESS + Landsat)."""
+    return pa.schema(
+        [
+            pa.field("longitude", pa.float64()),
+            pa.field("latitude", pa.float64()),
+            pa.field("temperature", pa.float32()),
+            pa.field("date", pa.string()),
+            pa.field("row", pa.int32(), nullable=True),
+            pa.field("col", pa.int32(), nullable=True),
+        ]
+    )
+
+
+def align_parquet_table_to_feature_schema(tbl: pa.Table) -> pa.Table:
+    """Cast legacy row groups (float32 lon/lat, no row/col) to the current schema."""
+    target = parquet_feature_schema()
+    n = tbl.num_rows
+    out: Dict[str, pa.Array] = {}
+    for field in target:
+        name = field.name
+        if name in tbl.column_names:
+            col = tbl.column(name)
+            if col.type != field.type:
+                col = pc.cast(col, field.type)
+            out[name] = col
+        elif name in ("row", "col"):
+            out[name] = pa.array([None] * n, type=field.type)
+        else:
+            raise ValueError(f"Missing required Parquet column {name}")
+    return pa.table(out, schema=target)
+
+
+def affine_transform_to_dict(affine) -> Dict[str, float]:
+    """Serialize rasterio Affine to dict keys a..f for D1 columns."""
+    return {
+        "a": float(affine.a),
+        "b": float(affine.b),
+        "c": float(affine.c),
+        "d": float(affine.d),
+        "e": float(affine.e),
+        "f": float(affine.f),
+    }
+
 
 # Module-level caches (persist across warm invocations)
 _aid_folder_mapping = None
@@ -112,13 +159,15 @@ def insert_metadata_to_d1(
     (feature_id, date, min_temp, max_temp, mean_temp, median_temp, std_dev,
      data_points, water_pixel_count, land_pixel_count, wtoff,
      csv_path, tif_path, png_path, filter_stats, source, pixel_size, pixel_size_x,
-     parquet_path)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     parquet_path, source_crs, transform_a, transform_b, transform_c, transform_d,
+     transform_e, transform_f)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
 
     # Serialize filter_stats to JSON
     filter_stats_json = json.dumps(metadata.get("filter_stats", {}))
 
+    tf = metadata.get("transform") or {}
     meta_params = [
         feature_id,
         date,
@@ -139,6 +188,13 @@ def insert_metadata_to_d1(
         metadata.get("pixel_size"),
         metadata.get("pixel_size_x"),
         parquet_path,
+        metadata.get("source_crs"),
+        tf.get("a"),
+        tf.get("b"),
+        tf.get("c"),
+        tf.get("d"),
+        tf.get("e"),
+        tf.get("f"),
     ]
     with xray_recorder.capture("d1_insert_temperature_metadata") as subsegment:
         subsegment.put_metadata("feature_id", feature_id)
@@ -241,23 +297,24 @@ def upload_csv_to_r2(s3_client, bucket_name, key, csv_file_path):
 def upload_parquet_to_r2(s3_client, bucket_name, parquet_key, df, date):
     """Append a row group to a per-feature Parquet file in R2.
 
-    Schema: longitude (float32), latitude (float32), temperature (float32), date (string).
+    Schema: longitude/latitude (float64), temperature (float32), date (string),
+    row/col (int32, nullable in legacy row groups).
     Each date becomes one row group. If the file already exists, existing row groups are
     preserved and the new date is appended (or replaced if already present).
     """
-    schema = pa.schema([
-        ("longitude", pa.float32()),
-        ("latitude", pa.float32()),
-        ("temperature", pa.float32()),
-        ("date", pa.string()),
-    ])
+    schema = parquet_feature_schema()
 
-    new_table = pa.table({
-        "longitude": pa.array(df["longitude"].values, type=pa.float32()),
-        "latitude": pa.array(df["latitude"].values, type=pa.float32()),
-        "temperature": pa.array(df["LST_filter"].values, type=pa.float32()),
-        "date": pa.array([date] * len(df), type=pa.string()),
-    }, schema=schema)
+    new_table = pa.table(
+        {
+            "longitude": pa.array(df["longitude"].values, type=pa.float64()),
+            "latitude": pa.array(df["latitude"].values, type=pa.float64()),
+            "temperature": pa.array(df["LST_filter"].values, type=pa.float32()),
+            "date": pa.array([date] * len(df), type=pa.string()),
+            "row": pa.array(df["row"].astype("int32").values, type=pa.int32()),
+            "col": pa.array(df["col"].astype("int32").values, type=pa.int32()),
+        },
+        schema=schema,
+    )
 
     # Download existing Parquet if it exists, to append
     existing_tables = []
@@ -281,7 +338,7 @@ def upload_parquet_to_r2(s3_client, bucket_name, parquet_key, df, date):
     buf = io.BytesIO()
     writer = pq.ParquetWriter(buf, schema, compression="zstd")
     for t in existing_tables:
-        writer.write_table(t)
+        writer.write_table(align_parquet_table_to_feature_schema(t))
     writer.write_table(new_table)
     writer.close()
 
@@ -452,6 +509,8 @@ def process_rasters(
         {
             "longitude": lons,
             "latitude": lats,
+            "row": row_idx.flatten(),
+            "col": col_idx.flatten(),
             **{key: arr.flatten() for key, arr in arrays.items()},
         }
     )
@@ -567,6 +626,8 @@ def process_rasters(
         "filter_stats": filter_stats,
         "pixel_size": float(pixel_size_deg_y),
         "pixel_size_x": float(pixel_size_deg_x),
+        "source_crs": LST.crs.to_string() if LST.crs else None,
+        "transform": affine_transform_to_dict(LST.transform),
     }
     metadata_path = os.path.join(work_dir, f"{base_name}_metadata.json")
     with open(metadata_path, "w") as f:

@@ -1,15 +1,28 @@
 import { MapboxOverlay } from '@deck.gl/mapbox';
-import { GridCellLayer } from '@deck.gl/layers';
+import { SolidPolygonLayer } from '@deck.gl/layers';
 import type { Map } from 'maplibre-gl';
 import type { PickingInfo } from '@deck.gl/core';
 
+import type { AffineTransform } from '$lib/landsat-pixel-quads';
+import {
+	computeLandsatQuadsFlat,
+	flatQuadsToPolygons,
+	hasLandsatQuadInputs
+} from '$lib/landsat-pixel-quads';
+
 export interface UpdateOptions {
-	triplets: Float32Array;
+	triplets: Float64Array;
 	cellSizeXMeters: number;
 	cellSizeYMeters: number;
-	/** Offset to shift from center → bottom-left corner (degrees) */
+	/** Half pixel width in degrees (triplets are pixel centers; X/Y may differ for non-square pixels) */
 	halfPixelX: number;
+	/** Half pixel height in degrees */
 	halfPixelY: number;
+	/** Landsat: native CRS + affine + per-pixel row/col → exact WGS84 quads */
+	landsatSourceCrs?: string | null;
+	landsatTransform?: AffineTransform | null;
+	/** Interleaved row, col per pixel (length 2 * count); use with landsat fields */
+	rowCol?: Int32Array | null;
 	colorScale: 'relative' | 'fixed' | 'gray';
 	minTemp: number;
 	maxTemp: number;
@@ -65,6 +78,99 @@ function tempToRGBA(
 	return [r, g, b, 255];
 }
 
+function createTemperatureLayer(
+	opts: UpdateOptions,
+	mode: 'rect' | 'landsat-precomputed',
+	landsatPolygons: [number, number][][] | null
+): SolidPolygonLayer {
+	const {
+		triplets,
+		halfPixelX,
+		halfPixelY,
+		colorScale,
+		minTemp,
+		maxTemp,
+		filterMin,
+		filterMax,
+		onHover,
+		onClick
+	} = opts;
+
+	const count = (triplets.length / 3) | 0;
+	const hasFilter = filterMin != null && filterMax != null;
+	const fMin = filterMin ?? 0;
+	const fMax = filterMax ?? 0;
+
+	const data =
+		mode === 'landsat-precomputed' && landsatPolygons ? landsatPolygons : { length: count };
+
+	return new SolidPolygonLayer({
+		id: 'temperature-cells',
+		beforeId: 'selected-point-layer',
+		data,
+		getPolygon:
+			mode === 'landsat-precomputed' && landsatPolygons
+				? (d: [number, number][]) => d
+				: (_: unknown, { index }: { index: number }) => {
+						const o = index * 3;
+						const lng = triplets[o];
+						const lat = triplets[o + 1];
+						const x0 = lng - halfPixelX;
+						const x1 = lng + halfPixelX;
+						const y0 = lat - halfPixelY;
+						const y1 = lat + halfPixelY;
+						return [
+							[x0, y0],
+							[x1, y0],
+							[x1, y1],
+							[x0, y1]
+						];
+					},
+		extruded: false,
+		filled: true,
+		getFillColor: (_: unknown, { index }: { index: number }) => {
+			const temp = triplets[index * 3 + 2];
+			if (hasFilter && (temp < fMin || temp > fMax)) {
+				return [0, 0, 0, 0];
+			}
+			return tempToRGBA(temp, colorScale, minTemp, maxTemp);
+		},
+		material: false,
+		pickable: true,
+		onHover: (info: PickingInfo) => {
+			if (info.index >= 0) {
+				const temp = triplets[info.index * 3 + 2];
+				if (hasFilter && (temp < fMin || temp > fMax)) {
+					onHover({ temperature: null, x: info.x, y: info.y });
+				} else {
+					onHover({ temperature: temp, x: info.x, y: info.y });
+				}
+			} else {
+				onHover({ temperature: null, x: info.x, y: info.y });
+			}
+		},
+		onClick: (info: PickingInfo) => {
+			if (info.index >= 0) {
+				const o = info.index * 3;
+				const temp = triplets[o + 2];
+				if (hasFilter && (temp < fMin || temp > fMax)) return;
+				onClick({
+					longitude: triplets[o],
+					latitude: triplets[o + 1],
+					temperature: temp
+				});
+			}
+		},
+		updateTriggers: {
+			getFillColor: [colorScale, minTemp, maxTemp, filterMin, filterMax],
+			getPolygon:
+				mode === 'landsat-precomputed' && landsatPolygons
+					? [landsatPolygons]
+					: [triplets, halfPixelX, halfPixelY]
+		}
+	});
+}
+
 export class DeckTemperatureOverlay {
 	private overlay: MapboxOverlay;
 	private map: Map | null = null;
@@ -78,7 +184,6 @@ export class DeckTemperatureOverlay {
 
 	addTo(map: Map): void {
 		this.map = map;
-		// MapboxOverlay implements IControl
 		map.addControl(this.overlay as unknown as maplibregl.IControl);
 	}
 
@@ -92,17 +197,9 @@ export class DeckTemperatureOverlay {
 	update(opts: UpdateOptions): void {
 		const {
 			triplets,
-			cellSizeXMeters,
-			cellSizeYMeters,
-			halfPixelX,
-			halfPixelY,
-			colorScale,
-			minTemp,
-			maxTemp,
-			filterMin,
-			filterMax,
-			onHover,
-			onClick
+			landsatSourceCrs,
+			landsatTransform,
+			rowCol
 		} = opts;
 
 		const count = (triplets.length / 3) | 0;
@@ -111,65 +208,30 @@ export class DeckTemperatureOverlay {
 			return;
 		}
 
-		const hasFilter = filterMin != null && filterMax != null;
-		const fMin = filterMin ?? 0;
-		const fMax = filterMax ?? 0;
+		const useLandsatQuads =
+			hasLandsatQuadInputs(landsatSourceCrs ?? null, landsatTransform ?? null, rowCol ?? null) &&
+			rowCol!.length === count * 2 &&
+			rowCol![0] !== -1;
 
-		// Use max dimension for square cell size
-		const cellSize = Math.max(cellSizeXMeters, cellSizeYMeters);
+		if (!useLandsatQuads) {
+			const layer = createTemperatureLayer(opts, 'rect', null);
+			this.overlay.setProps({ layers: [layer] });
+			return;
+		}
 
-		const layer = new GridCellLayer({
-			id: 'temperature-cells',
-			// Render below MapLibre's selected-point layer so the marker is visible
-			beforeId: 'selected-point-layer',
-			data: { length: count },
-			// GridCellLayer expects bottom-left corner; triplets store center
-			getPosition: (_: unknown, { index }: { index: number }) => {
-				const o = index * 3;
-				return [triplets[o] - halfPixelX, triplets[o + 1] - halfPixelY];
-			},
-			getFillColor: (_: unknown, { index }: { index: number }) => {
-				const temp = triplets[index * 3 + 2];
-				if (hasFilter && (temp < fMin || temp > fMax)) {
-					return [0, 0, 0, 0];
-				}
-				return tempToRGBA(temp, colorScale, minTemp, maxTemp);
-			},
-			cellSize,
-			extruded: false,
-			material: false,
-			pickable: true,
-			onHover: (info: PickingInfo) => {
-				if (info.index >= 0) {
-					const temp = triplets[info.index * 3 + 2];
-					if (hasFilter && (temp < fMin || temp > fMax)) {
-						onHover({ temperature: null, x: info.x, y: info.y });
-					} else {
-						onHover({ temperature: temp, x: info.x, y: info.y });
-					}
-				} else {
-					onHover({ temperature: null, x: info.x, y: info.y });
-				}
-			},
-			onClick: (info: PickingInfo) => {
-				if (info.index >= 0) {
-					const o = info.index * 3;
-					const temp = triplets[o + 2];
-					if (hasFilter && (temp < fMin || temp > fMax)) return;
-					onClick({
-						longitude: triplets[o],
-						latitude: triplets[o + 1],
-						temperature: temp
-					});
-				}
-			},
-			updateTriggers: {
-				getFillColor: [colorScale, minTemp, maxTemp, filterMin, filterMax],
-				getPosition: [triplets]
-			}
-		});
+		const crs = landsatSourceCrs!;
+		const tf = landsatTransform!;
 
-		this.overlay.setProps({ layers: [layer] });
+		try {
+			const flat = computeLandsatQuadsFlat(crs, tf, rowCol!, count);
+			const polygons = flatQuadsToPolygons(flat, count);
+			const layer = createTemperatureLayer(opts, 'landsat-precomputed', polygons);
+			this.overlay.setProps({ layers: [layer] });
+		} catch (err) {
+			console.error('[deck] Landsat quad compute failed:', err);
+			const layer = createTemperatureLayer(opts, 'rect', null);
+			this.overlay.setProps({ layers: [layer] });
+		}
 	}
 
 	clear(): void {

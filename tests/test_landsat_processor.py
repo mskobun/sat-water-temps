@@ -358,6 +358,9 @@ class TestLandsatProcessOneRecordFixture:
         assert row["metadata"]["max_temp"] is not None
         assert "LANDSAT/Magat/lake/" in row["csv_r2_key"]
         assert "filter_stats" in row["metadata"]
+        assert row["metadata"].get("source_crs")
+        tf = row["metadata"].get("transform")
+        assert tf and "a" in tf and abs(tf["a"]) > 1e-6
 
     @pytest.mark.filterwarnings("ignore:All-NaN slice encountered:RuntimeWarning")
     def test_csv_coordinates_are_wgs84(self, magat_landsat_body, monkeypatch, tmp_path):

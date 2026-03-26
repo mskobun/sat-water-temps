@@ -5,6 +5,7 @@ import importlib
 
 _HANDLERS = {
     "backfill:parquet": "backfill.parquet",
+    "backfill:raster_meta": "backfill.raster_meta",
     "backfill:regzip": "backfill.regzip",
 }
 

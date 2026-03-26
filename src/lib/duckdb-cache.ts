@@ -68,7 +68,7 @@ function featureFileName(featureId: string, index: number): string {
 }
 
 function computeHistogram(
-	temps: Float32Array,
+	temps: Float64Array,
 	numBins = 6
 ): Array<{ range: string; count: number }> {
 	if (!temps.length) return [];
@@ -98,12 +98,12 @@ function computeHistogram(
 	}));
 }
 
-function computeStats(points: Float32Array): TemperatureStats {
+function computeStats(points: Float64Array): TemperatureStats {
 	const count = points.length / 3;
 	let min = Infinity;
 	let max = -Infinity;
 	let sum = 0;
-	const temps = new Float32Array(count);
+	const temps = new Float64Array(count);
 
 	for (let i = 0; i < count; i++) {
 		const temp = points[i * 3 + 2];
@@ -245,25 +245,55 @@ export async function fetchDuckDBFeature(
 }
 
 /**
- * Extract points for a specific date. Returns packed Float32 triplets
+ * Extract points for a specific date. Returns packed Float64 triplets
  * (lng, lat, temperature) and summary stats for the selected date.
+ * Landsat: also returns rowCol (interleaved row, col per point) when present in Parquet.
  */
 export async function getPointsForDate(
 	feature: CachedDuckDBFeature,
 	date: string,
 	source: SourceType
-): Promise<{ points: ArrayBuffer; stats: TemperatureStats } | null> {
-	const chunks: Float32Array[] = [];
+): Promise<{
+	points: ArrayBuffer;
+	stats: TemperatureStats;
+	rowCol?: ArrayBufferLike;
+} | null> {
+	const chunks: Float64Array[] = [];
+	const rowColChunks: Int32Array[] = [];
 	let totalRows = 0;
+	let landsatHasRowCol: boolean | null = source === 'landsat' ? null : false;
 
 	for (const file of feature.files) {
-		const table = await withConnection(source, (connection) =>
-			connection.query(`
+		let table;
+		if (source === 'landsat' && landsatHasRowCol !== false) {
+			try {
+				table = await withConnection(source, (connection) =>
+					connection.query(`
+				SELECT longitude, latitude, temperature, "row", "col"
+				FROM ${quoteSqlLiteral(file.name)}
+				WHERE date = ${quoteSqlLiteral(date)}
+			`)
+				);
+				landsatHasRowCol = true;
+			} catch {
+				table = await withConnection(source, (connection) =>
+					connection.query(`
 				SELECT longitude, latitude, temperature
 				FROM ${quoteSqlLiteral(file.name)}
 				WHERE date = ${quoteSqlLiteral(date)}
 			`)
-		);
+				);
+				landsatHasRowCol = false;
+			}
+		} else {
+			table = await withConnection(source, (connection) =>
+				connection.query(`
+				SELECT longitude, latitude, temperature
+				FROM ${quoteSqlLiteral(file.name)}
+				WHERE date = ${quoteSqlLiteral(date)}
+			`)
+			);
+		}
 
 		if (table.numRows === 0) continue;
 		const longitude = table.getChild('longitude');
@@ -271,7 +301,7 @@ export async function getPointsForDate(
 		const temperature = table.getChild('temperature');
 		if (!longitude || !latitude || !temperature) continue;
 
-		const chunk = new Float32Array(table.numRows * 3);
+		const chunk = new Float64Array(table.numRows * 3);
 		let offset = 0;
 		for (let i = 0; i < table.numRows; i++) {
 			chunk[offset++] = Number(longitude.get(i));
@@ -280,19 +310,54 @@ export async function getPointsForDate(
 		}
 		totalRows += table.numRows;
 		chunks.push(chunk);
+
+		if (landsatHasRowCol === true) {
+			const rowChild = table.getChild('row');
+			const colChild = table.getChild('col');
+			if (!rowChild || !colChild) {
+				landsatHasRowCol = false;
+			} else {
+				const rc = new Int32Array(table.numRows * 2);
+				let ro = 0;
+				for (let i = 0; i < table.numRows; i++) {
+					rc[ro++] = Number(rowChild.get(i));
+					rc[ro++] = Number(colChild.get(i));
+				}
+				rowColChunks.push(rc);
+			}
+		}
 	}
 
 	if (totalRows === 0) return null;
-	const out = new Float32Array(totalRows * 3);
+	const out = new Float64Array(totalRows * 3);
 	let cursor = 0;
 	for (const chunk of chunks) {
 		out.set(chunk, cursor);
 		cursor += chunk.length;
 	}
 
+	let rowColOut: Int32Array | undefined;
+	if (
+		landsatHasRowCol === true &&
+		rowColChunks.length === chunks.length &&
+		rowColChunks.length > 0
+	) {
+		const merged = new Int32Array(totalRows * 2);
+		let rcCursor = 0;
+		for (const rc of rowColChunks) {
+			merged.set(rc, rcCursor);
+			rcCursor += rc.length;
+		}
+		rowColOut = merged;
+	} else if (source === 'landsat') {
+		// Sentinel so deck overlay falls back to lon/lat rectangles
+		rowColOut = new Int32Array(totalRows * 2).fill(-1);
+	}
+
 	return {
 		points: out.buffer,
-		stats: computeStats(out)
+		stats: computeStats(out),
+		...(rowColOut ? { rowCol: rowColOut.buffer.slice(0) } : {})
 	};
 }
 
