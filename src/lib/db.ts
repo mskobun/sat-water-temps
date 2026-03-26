@@ -5,13 +5,17 @@ import Papa from 'papaparse';
 
 type GeoPoint = { lng: number; lat: number; temperature: number };
 
-/** Read R2 object text, decompressing gzip if the key ends in .gz or contentEncoding says so. */
+/** Read R2 object text. Decompresses gzip if R2 didn't do it transparently. */
 async function r2Text(obj: R2ObjectBody): Promise<string> {
-  if (obj.key?.endsWith('.gz') || obj.httpMetadata?.contentEncoding === 'gzip') {
-    const decompressed = (obj.body as unknown as ReadableStream).pipeThrough(new DecompressionStream('gzip'));
-    return new Response(decompressed).text();
+  const raw = await obj.arrayBuffer();
+  const bytes = new Uint8Array(raw);
+  if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+    const decompressed = new Response(
+      new Response(raw).body!.pipeThrough(new DecompressionStream('gzip'))
+    );
+    return decompressed.text();
   }
-  return obj.text();
+  return new TextDecoder().decode(raw);
 }
 
 /**

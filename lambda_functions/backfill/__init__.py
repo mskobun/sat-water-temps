@@ -5,6 +5,7 @@ import importlib
 
 _HANDLERS = {
     "backfill:parquet": "backfill.parquet",
+    "backfill:regzip": "backfill.regzip",
 }
 
 
