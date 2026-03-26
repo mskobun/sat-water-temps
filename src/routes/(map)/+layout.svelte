@@ -82,6 +82,15 @@
 	let mobilePointsBuffer: Float32Array | null = $state(null);
 	const globalMin = 273.15;
 	const globalMax = 308.15;
+	const jetColorStops: Array<[number, string]> = [
+		[0.0, 'rgb(0,0,127)'],
+		[0.125, 'rgb(0,0,255)'],
+		[0.375, 'rgb(0,255,255)'],
+		[0.5, 'rgb(127,255,127)'],
+		[0.625, 'rgb(255,255,0)'],
+		[0.875, 'rgb(255,0,0)'],
+		[1.0, 'rgb(127,0,0)']
+	];
 
 	function resetTileState() {
 		destroyTileIndex?.();
@@ -238,8 +247,11 @@
 
 	// Shared color expression for both zoomed-out circles and zoomed-in cells.
 	let temperatureColorExpr = $derived.by(() => {
-		let minTemp = selectedColorScale === 'relative' ? relativeMin : globalMin;
-		let maxTemp = selectedColorScale === 'relative' ? relativeMax : globalMax;
+		// Match PNG behavior:
+		// - fixed: global range
+		// - relative + gray: per-date relative range
+		let minTemp = selectedColorScale === 'fixed' ? globalMin : relativeMin;
+		let maxTemp = selectedColorScale === 'fixed' ? globalMax : relativeMax;
 
 		// Ensure valid range for interpolation
 		if (minTemp >= maxTemp) {
@@ -247,7 +259,8 @@
 			maxTemp = globalMax;
 		}
 
-		// Color ramp based on scale type - interpolates temperature to color
+		// Keep the vector color ramp close to the PNG colormap ("jet") so the
+		// raster->vector transition appears seamless after tiles finish rendering.
 		const colorExpr = selectedColorScale === 'gray'
 			? [
 				'interpolate',
@@ -260,11 +273,10 @@
 				'interpolate',
 				['linear'],
 				['get', 'temperature'],
-				minTemp, 'rgb(0,0,255)',
-				minTemp + (maxTemp - minTemp) * 0.25, 'rgb(0,255,255)',
-				minTemp + (maxTemp - minTemp) * 0.5, 'rgb(0,255,0)',
-				minTemp + (maxTemp - minTemp) * 0.75, 'rgb(255,255,0)',
-				maxTemp, 'rgb(255,0,0)'
+				...jetColorStops.flatMap(([position, color]) => [
+					minTemp + (maxTemp - minTemp) * position,
+					color
+				])
 			];
 
 		return colorExpr;
