@@ -7,7 +7,6 @@ extracts longitude/latitude/temperature columns, and writes a single
 Parquet file with one row group per date (using the full D1 timestamp).
 """
 
-import gzip
 import io
 
 import pandas as pd
@@ -65,8 +64,7 @@ def handle(body: dict):
         for csv_path, date in sorted(entries, key=lambda e: e[1]):
             try:
                 resp = s3.get_object(Bucket=bucket, Key=csv_path)
-                compressed = resp["Body"].read()
-                csv_text = gzip.decompress(compressed).decode("utf-8")
+                csv_text = resp["Body"].read().decode("utf-8")
                 df = pd.read_csv(io.StringIO(csv_text))
 
                 # Find the right columns

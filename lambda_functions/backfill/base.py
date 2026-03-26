@@ -4,6 +4,7 @@ import json
 import os
 
 import boto3
+from botocore.config import Config
 
 from d1 import query_d1
 
@@ -16,6 +17,7 @@ def get_s3_client():
         aws_access_key_id=os.environ.get("R2_ACCESS_KEY_ID"),
         aws_secret_access_key=os.environ.get("R2_SECRET_ACCESS_KEY"),
         region_name="auto",
+        config=Config(request_checksum_calculation="when_required", response_checksum_validation="when_required"),
     )
 
 
@@ -24,7 +26,7 @@ def get_bucket_name():
 
 
 def get_sqs_client():
-    return boto3.client("sqs", region_name=os.environ.get("AWS_REGION", "ap-southeast-1"))
+    return boto3.client("sqs", region_name=os.environ.get("AWS_REGION", "us-west-2"))
 
 
 def get_queue_url():
