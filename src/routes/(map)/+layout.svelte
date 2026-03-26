@@ -3,45 +3,44 @@
 	import { browser } from '$app/environment';
 	import { goto, replaceState } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { MapLibre, GeoJSONSource, VectorTileSource, ImageSource, Protocol, FillLayer, LineLayer, CircleLayer, RasterLayer } from 'svelte-maplibre-gl';
+	import { MapLibre, GeoJSONSource, ImageSource, FillLayer, LineLayer, CircleLayer, RasterLayer } from 'svelte-maplibre-gl';
 	import type {
 		Map,
 		MapMouseEvent,
-		LngLatBoundsLike,
-		FillLayerSpecification,
-		CircleLayerSpecification,
-		FilterSpecification
+		LngLatBoundsLike
 	} from 'maplibre-gl';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import * as Drawer from '$lib/components/ui/drawer';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import FeatureSidebar from '$lib/components/FeatureSidebar.svelte';
+	import PointHistoryPanel from '$lib/components/PointHistoryPanel.svelte';
 	import FeatureSearch from '$lib/components/FeatureSearch.svelte';
 	import UserMenu from '$lib/components/UserMenu.svelte';
 	import { IsMobile } from '$lib/hooks/is-mobile.svelte.js';
-	import { createTileIndex } from '$lib/tile-protocol';
+	import type { DeckTemperatureOverlay } from '$lib/deck-temperature-overlay';
 	import { Kbd } from '$lib/components/ui/kbd';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import type { Snippet } from 'svelte';
-	import type { AddProtocolAction } from 'maplibre-gl';
 	import XIcon from '@lucide/svelte/icons/x';
 	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
 
 	const isMobile = new IsMobile();
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 	const modKeyLabel = isMac ? '⌥' : 'Alt';
-	type ParquetCacheModule = typeof import('$lib/parquet-cache');
-	let parquetCacheModulePromise: Promise<ParquetCacheModule> | null = null;
+	type DuckDBCacheModule = typeof import('$lib/duckdb-cache');
+	type PointHistoryEntry = import('$lib/duckdb-cache').PointHistoryEntry;
+	let duckdbCacheModulePromise: Promise<DuckDBCacheModule> | null = null;
 
-	async function getParquetCacheModule(): Promise<ParquetCacheModule | null> {
+	async function getDuckDBCacheModule(): Promise<DuckDBCacheModule | null> {
 		if (!browser) return null;
-		parquetCacheModulePromise ??= import('$lib/parquet-cache');
-		return parquetCacheModulePromise;
+		duckdbCacheModulePromise ??= import('$lib/duckdb-cache');
+		return duckdbCacheModulePromise;
 	}
 
-	async function clearParquetCache() {
-		const parquetCache = await getParquetCacheModule();
-		parquetCache?.clearCache();
+	async function clearDuckDBCache() {
+		const duckdbCache = await getDuckDBCacheModule();
+		await duckdbCache?.clearCache();
 	}
 
 	let { children }: { children: Snippet } = $props();
@@ -67,7 +66,13 @@
 	let tooltipY = $state(0);
 
 	// Temperature data (fetched here so map can use it for heatmap)
-	let tileLoadFn: AddProtocolAction | null = $state.raw(null);
+	let deckOverlay: DeckTemperatureOverlay | null = null;
+	let deckHasData = $state(false);
+	let desktopTriplets: Float32Array | null = null;
+	let desktopCellSizeXM = 0;
+	let desktopCellSizeYM = 0;
+	let desktopHalfPixelX = 0;
+	let desktopHalfPixelY = 0;
 	let relativeMin = $state(0);
 	let relativeMax = $state(0);
 	let avgTemp = $state(0);
@@ -77,33 +82,20 @@
 	let pixelSizeDeg = $state<number | null>(null);
 	let pixelSizeXDeg = $state<number | null>(null);
 	let temperatureLoading = $state(false);
-	let destroyTileIndex: (() => void) | null = null;
+	let pointHistoryLoading = $state(false);
+	let pointHistoryOpen = $state(false);
 	let rasterPngUrl: string | null = $state(null);
+	let loadGen = 0; // incremented each time loadTemperatureData starts; guards stale async results
 	let mobilePointsBuffer: Float32Array | null = $state(null);
+	let selectedPoint: { longitude: number; latitude: number } | null = $state(null);
+	let pointHistory: PointHistoryEntry[] = $state([]);
 	const globalMin = 273.15;
 	const globalMax = 308.15;
-	const jetColorStops: Array<[number, string]> = [
-		[0.0, 'rgb(0,0,127)'],
-		[0.125, 'rgb(0,0,255)'],
-		[0.375, 'rgb(0,255,255)'],
-		[0.5, 'rgb(127,255,127)'],
-		[0.625, 'rgb(255,255,0)'],
-		[0.875, 'rgb(255,0,0)'],
-		[1.0, 'rgb(127,0,0)']
-	];
 
 	function resetTileState() {
-		destroyTileIndex?.();
-		destroyTileIndex = null;
-		tileLoadFn = null;
-		// Remove raster source from MapLibre before clearing URL to avoid
-		// "source already exists" when the {#key} block recreates it.
-		if (rasterPngUrl && map) {
-			try {
-				if (map.getLayer('temperature-raster-layer')) map.removeLayer('temperature-raster-layer');
-				if (map.getSource('temperature-raster')) map.removeSource('temperature-raster');
-			} catch { /* already removed */ }
-		}
+		deckOverlay?.clear();
+		deckHasData = false;
+		desktopTriplets = null;
 		rasterPngUrl = null;
 		mobilePointsBuffer = null;
 		relativeMin = 0;
@@ -115,6 +107,28 @@
 		dataSource = '';
 		pixelSizeDeg = null;
 		pixelSizeXDeg = null;
+	}
+
+	function resetPointHistory() {
+		selectedPoint = null;
+		pointHistory = [];
+		pointHistoryLoading = false;
+		pointHistoryOpen = false;
+	}
+
+	function closePointHistory() {
+		selectedPoint = null;
+		pointHistory = [];
+		pointHistoryLoading = false;
+		pointHistoryOpen = false;
+	}
+
+	function getPointHistoryTolerance(): number {
+		const base = Math.max(pixelSizeDeg ?? 0, pixelSizeXDeg ?? 0);
+		if (base > 0) {
+			return Math.min(Math.max(base * 1.5, 0.0005), 0.01);
+		}
+		return 0.01;
 	}
 
 	// Default map view (MapLibre uses [lng, lat])
@@ -228,7 +242,8 @@
 			selectedDate = '';
 			selectedColorScale = 'relative';
 			resetTileState();
-			void clearParquetCache();
+			resetPointHistory();
+			void clearDuckDBCache();
 		} else if (currentFeatureId && previousFeatureId && currentFeatureId !== previousFeatureId) {
 			// Switching features: just zoom to new feature
 			if (bounds) {
@@ -238,100 +253,13 @@
 			selectedDate = '';
 			selectedColorScale = 'relative';
 			resetTileState();
-			void clearParquetCache();
+			resetPointHistory();
+			void clearDuckDBCache();
 		}
 
 		previousFeatureId = currentFeatureId;
 	});
 
-
-	// Shared color expression for both zoomed-out circles and zoomed-in cells.
-	let temperatureColorExpr = $derived.by(() => {
-		// Match PNG behavior:
-		// - fixed: global range
-		// - relative + gray: per-date relative range
-		let minTemp = selectedColorScale === 'fixed' ? globalMin : relativeMin;
-		let maxTemp = selectedColorScale === 'fixed' ? globalMax : relativeMax;
-
-		// Ensure valid range for interpolation
-		if (minTemp >= maxTemp) {
-			minTemp = globalMin;
-			maxTemp = globalMax;
-		}
-
-		// Keep the vector color ramp close to the PNG colormap ("jet") so the
-		// raster->vector transition appears seamless after tiles finish rendering.
-		const colorExpr = selectedColorScale === 'gray'
-			? [
-				'interpolate',
-				['linear'],
-				['get', 'temperature'],
-				minTemp, 'rgb(40,40,40)',
-				maxTemp, 'rgb(255,255,255)'
-			]
-			: [
-				'interpolate',
-				['linear'],
-				['get', 'temperature'],
-				...jetColorStops.flatMap(([position, color]) => [
-					minTemp + (maxTemp - minTemp) * position,
-					color
-				])
-			];
-
-		return colorExpr;
-	});
-
-	// Crossfade from circles at overview zooms to true cell footprints when zoomed in.
-	let fillPaint = $derived.by(() => {
-		return {
-			'fill-color': temperatureColorExpr,
-			'fill-opacity': [
-				'interpolate',
-				['linear'],
-				['zoom'],
-				8,
-				0,
-				10,
-				0.4,
-				11,
-				0.8
-			]
-		} as unknown as FillLayerSpecification['paint'];
-	});
-
-	let circlePaint = $derived.by(() => {
-		return {
-			'circle-color': temperatureColorExpr,
-			'circle-radius': [
-				'interpolate',
-				['linear'],
-				['zoom'],
-				4,
-				1.5,
-				7,
-				2.5,
-				9,
-				4,
-				11,
-				6
-			],
-			'circle-opacity': [
-				'interpolate',
-				['linear'],
-				['zoom'],
-				4,
-				0.85,
-				8,
-				0.7,
-				10,
-				0.25,
-				11,
-				0
-			],
-			'circle-stroke-width': 0
-		} as unknown as CircleLayerSpecification['paint'];
-	});
 
 	// MapLibre style with Esri World Imagery tiles
 	const mapStyle = {
@@ -357,22 +285,21 @@
 		]
 	};
 
-	// All user interactions just change the URL
-	function getTemperatureLayerIds(): string[] {
-		if (!map) return [];
-		return ['temperature-circles-layer', 'temperature-squares-layer'].filter((layerId) =>
-			Boolean(map.getLayer(layerId))
-		);
+	function selectPointForHistory(longitude: number, latitude: number) {
+		if (!selectedFeature) return;
+		selectedPoint = { longitude, latitude };
+		pointHistoryOpen = true;
+		void loadPointHistory(selectedFeature.id, longitude, latitude);
 	}
 
 	function handleMapClick(e: MapMouseEvent) {
 		if (!map) return;
+		const lngLat = map.unproject(e.point);
+		const clickLng = lngLat.lng;
+		const clickLat = lngLat.lat;
 
 		// On mobile with raster overlay, do nearest-point lookup from buffer
 		if (isMobile.current && mobilePointsBuffer && mobilePointsBuffer.length >= 3) {
-			const lngLat = map.unproject(e.point);
-			const clickLng = lngLat.lng;
-			const clickLat = lngLat.lat;
 			let bestDist = Infinity;
 			let bestTemp: number | null = null;
 			const count = mobilePointsBuffer.length / 3;
@@ -391,27 +318,17 @@
 				hoveredTemp = bestTemp;
 				tooltipX = e.point.x;
 				tooltipY = e.point.y;
+				if (selectedFeature) {
+					selectPointForHistory(clickLng, clickLat);
+				}
 				return;
 			}
 			hoveredTemp = null;
 		}
 
-		// On mobile with vector tiles, tapping the heatmap shows a temperature tooltip
-		const temperatureLayerIds = getTemperatureLayerIds();
-		if (isMobile.current && temperatureLayerIds.length > 0) {
-			const tempFeatures = map.queryRenderedFeatures(e.point, { layers: temperatureLayerIds });
-			if (tempFeatures && tempFeatures.length > 0) {
-				const temp = tempFeatures[0].properties?.temperature;
-				if (temp != null) {
-					hoveredTemp = temp;
-					tooltipX = e.point.x;
-					tooltipY = e.point.y;
-					return;
-				}
-			}
-			// Tapped outside heatmap — dismiss tooltip
-			hoveredTemp = null;
-		}
+		// On desktop, deck.gl's onClick handles temperature picks and sets hoveredTemp.
+		// If hoveredTemp is set, the user clicked on temperature data — don't navigate.
+		if (hoveredTemp != null) return;
 
 		if (!map.getLayer('polygons-fill')) return;
 
@@ -437,24 +354,13 @@
 
 	function handleMouseMove(e: MapMouseEvent) {
 		if (!map) return;
-		
-		// Check temperature layer first
-		const temperatureLayerIds = getTemperatureLayerIds();
-		if (temperatureLayerIds.length > 0) {
-			const tempFeatures = map.queryRenderedFeatures(e.point, { layers: temperatureLayerIds });
-			if (tempFeatures && tempFeatures.length > 0) {
-				const temp = tempFeatures[0].properties?.temperature;
-				if (temp != null) {
-					hoveredTemp = temp;
-					tooltipX = e.point.x;
-					tooltipY = e.point.y;
-					map.getCanvas().style.cursor = 'crosshair';
-					return;
-				}
-			}
+
+		// deck.gl's onHover sets hoveredTemp; if hovering temperature data, show crosshair
+		if (hoveredTemp != null) {
+			map.getCanvas().style.cursor = 'crosshair';
+			return;
 		}
-		hoveredTemp = null;
-		
+
 		// Check polygon layer
 		if (!map.getLayer('polygons-fill')) return;
 
@@ -473,7 +379,36 @@
 		}
 	}
 
+	async function loadPointHistory(featureId: string, longitude: number, latitude: number) {
+		pointHistoryLoading = true;
+		try {
+			const source = dataSource === 'landsat' ? 'landsat' : 'ecostress';
+			const duckdbCache = await getDuckDBCacheModule();
+			if (!duckdbCache) return;
+			const feature = await duckdbCache.fetchDuckDBFeature(featureId, source);
+			if (!feature) {
+				pointHistory = [];
+				return;
+			}
+			pointHistory = await duckdbCache.getPointHistory(
+				feature,
+				longitude,
+				latitude,
+				getPointHistoryTolerance(),
+				source
+			);
+		} catch (err) {
+			console.error('Error loading point history:', err);
+			pointHistory = [];
+		} finally {
+			pointHistoryLoading = false;
+		}
+	}
+
 	async function loadTemperatureData(featureId: string, date: string) {
+		// Stamp this invocation so stale completions can be detected and discarded.
+		const gen = ++loadGen;
+
 		// Clear previous tile state but keep parquet cache (same feature, different date)
 		resetTileState();
 		waterOff = false;
@@ -488,17 +423,8 @@
 			// Show raster PNG immediately — no awaits needed, browser starts fetching on render
 			rasterPngUrl = `/api/feature/${enc}/tif/${encodeURIComponent(date)}/${selectedColorScale}`;
 
-			// Parallel fetch: D1 metadata + Parquet points (range requests)
-			const [metaRes, parquetResult] = await Promise.all([
-				fetch(metaUrl),
-				(async () => {
-					const parquetCache = await getParquetCacheModule();
-					if (!parquetCache) return null;
-					const parquet = await parquetCache.fetchParquet(featureId);
-					if (!parquet) return null;
-					return parquetCache.getPointsForDate(parquet, date);
-				})()
-			]);
+			const metaRes = await fetch(metaUrl);
+			if (gen !== loadGen) return; // newer load started
 
 			if (!metaRes.ok) return;
 
@@ -511,7 +437,19 @@
 			};
 			if (meta.error) return;
 
+			const source = meta.source === 'landsat' ? 'landsat' : 'ecostress';
+			const duckdbCache = await getDuckDBCacheModule();
+			if (gen !== loadGen) return;
+			if (!duckdbCache) return;
+
+			const feature = await duckdbCache.fetchDuckDBFeature(featureId, source);
+			if (gen !== loadGen) return;
+			if (!feature) return;
+
+			const parquetResult = await duckdbCache.getPointsForDate(feature, date, source);
+			if (gen !== loadGen) return;
 			if (!parquetResult) return;
+
 			const { points: pointsBuffer, stats } = parquetResult;
 
 			if (pointsBuffer.byteLength < 12 || pointsBuffer.byteLength % 12 !== 0) return;
@@ -519,29 +457,44 @@
 			pixelSizeDeg = meta.pixel_size ?? null;
 			pixelSizeXDeg = meta.pixel_size_x ?? pixelSizeDeg;
 
-			if (isMobile.current) {
-				// Mobile: keep raster overlay, store points for tap lookup
-				mobilePointsBuffer = new Float32Array(pointsBuffer);
-			} else {
-				// Desktop: build vector tiles in Web Worker, raster stays underneath until rendered
-				const idx = await createTileIndex(pointsBuffer, pixelSizeXDeg, pixelSizeDeg);
-				destroyTileIndex = idx.destroy;
-				tileLoadFn = idx.loadFn;
-				// Wait for vector tiles to actually render, then remove raster
-				map?.once('idle', () => { rasterPngUrl = null; });
-			}
-
-			// Stats computed client-side from Parquet data
+			// Stats must be set before deck layer update so relative color scale works
 			relativeMin = stats.min;
 			relativeMax = stats.max;
 			avgTemp = stats.avg;
 			histogramData = stats.histogram;
+
+			if (isMobile.current) {
+				// Mobile: keep raster overlay, store points for tap lookup
+				mobilePointsBuffer = new Float32Array(pointsBuffer);
+			} else {
+				// Desktop: render via deck.gl GridCellLayer
+				const f32 = new Float32Array(pointsBuffer);
+				desktopTriplets = f32;
+				mobilePointsBuffer = f32; // for click fallback
+				const bounds = selectedFeature!.bounds as [[number,number],[number,number]];
+				const centerLat = (bounds[0][1] + bounds[1][1]) / 2;
+				const psx = pixelSizeXDeg ?? pixelSizeDeg ?? 0.0007;
+				const psy = pixelSizeDeg ?? 0.0007;
+				desktopCellSizeXM = psx * 111_320 * Math.cos(centerLat * Math.PI / 180);
+				desktopCellSizeYM = psy * 110_540;
+				desktopHalfPixelX = psx / 2;
+				desktopHalfPixelY = psy / 2;
+				updateDeckLayer();
+				deckHasData = true;
+				// Remove raster once deck.gl has rendered
+				map?.once('idle', () => {
+					if (gen === loadGen) rasterPngUrl = null;
+				});
+			}
 			waterOff = meta.wtoff || false;
 			dataSource = meta.source || 'ecostress';
+			if (selectedPoint) {
+				void loadPointHistory(featureId, selectedPoint.longitude, selectedPoint.latitude);
+			}
 		} catch (err) {
 			console.error('Error loading temperature data:', err);
 		} finally {
-			temperatureLoading = false;
+			if (gen === loadGen) temperatureLoading = false;
 		}
 	}
 
@@ -571,24 +524,47 @@
 			const enc = encodeURIComponent(selectedFeature.id);
 			rasterPngUrl = `/api/feature/${enc}/tif/${encodeURIComponent(selectedDate)}/${event.detail}`;
 		}
+		// Update deck.gl layer colors on desktop
+		if (!isMobile.current && desktopTriplets) updateDeckLayer();
 	}
 
 	function handleTempFilterChange(event: CustomEvent<{ min: number | null; max: number | null }>) {
 		tempFilterMin = event.detail.min;
 		tempFilterMax = event.detail.max;
+		// Update deck.gl layer filtering on desktop
+		if (!isMobile.current && desktopTriplets) updateDeckLayer();
 	}
 
-	// MapLibre filter expression for temperature filtering (GPU-accelerated)
-	let tempLayerFilter = $derived.by((): FilterSpecification | undefined => {
-		if (tempFilterMin === null || tempFilterMax === null) {
-			return undefined; // No filter - show all points
+	function updateDeckLayer() {
+		if (!deckOverlay || !desktopTriplets) return;
+		let minTemp = selectedColorScale === 'relative' ? relativeMin : globalMin;
+		let maxTemp = selectedColorScale === 'relative' ? relativeMax : globalMax;
+		if (minTemp >= maxTemp) {
+			minTemp = globalMin;
+			maxTemp = globalMax;
 		}
-		return [
-			'all',
-			['>=', ['get', 'temperature'], tempFilterMin],
-			['<=', ['get', 'temperature'], tempFilterMax]
-		] as unknown as FilterSpecification;
-	});
+		deckOverlay.update({
+			triplets: desktopTriplets,
+			cellSizeXMeters: desktopCellSizeXM,
+			cellSizeYMeters: desktopCellSizeYM,
+			halfPixelX: desktopHalfPixelX,
+			halfPixelY: desktopHalfPixelY,
+			colorScale: selectedColorScale,
+			minTemp,
+			maxTemp,
+			filterMin: tempFilterMin,
+			filterMax: tempFilterMax,
+			onHover: (info) => {
+				hoveredTemp = info.temperature;
+				tooltipX = info.x;
+				tooltipY = info.y;
+			},
+			onClick: (info) => {
+				hoveredTemp = info.temperature;
+				selectPointForHistory(info.longitude, info.latitude);
+			}
+		});
+	}
 
 	function handleSidebarClose() {
 		// Just change the URL - state will update automatically
@@ -691,6 +667,51 @@
 			[minLng, minLat], // bottom-left
 		];
 	});
+
+	let selectedPointGeoJSON = $derived.by(() => {
+		if (!selectedPoint) {
+			return {
+				type: 'FeatureCollection' as const,
+				features: []
+			};
+		}
+		return {
+			type: 'FeatureCollection' as const,
+			features: [
+				{
+					type: 'Feature' as const,
+					properties: {},
+					geometry: {
+						type: 'Point' as const,
+						coordinates: [selectedPoint.longitude, selectedPoint.latitude] as [number, number]
+					}
+				}
+			]
+		};
+	});
+
+	// deck.gl overlay lifecycle: create when map is ready on desktop, clean up on destroy
+	$effect(() => {
+		if (!map || !mapReady || isMobile.current) return;
+
+		let overlay: DeckTemperatureOverlay;
+
+		// Dynamic import for code-splitting — deck.gl only loads when needed
+		import('$lib/deck-temperature-overlay').then(({ DeckTemperatureOverlay: Cls }) => {
+			overlay = new Cls();
+			overlay.addTo(map!);
+			deckOverlay = overlay;
+			// If data was loaded before overlay was ready, render it now
+			if (desktopTriplets) updateDeckLayer();
+		});
+
+		return () => {
+			if (overlay) {
+				overlay.remove();
+			}
+			deckOverlay = null;
+		};
+	});
 </script>
 
 <svelte:head>
@@ -763,10 +784,11 @@
 					zoom={defaultZoom}
 					minZoom={2}
 					maxZoom={19}
-					onclick={handleMapClick}
-					onmousemove={handleMouseMove}
-					onmovestart={() => { hoveredTemp = null; }}
-					onload={handleMapLoad}
+				onclick={handleMapClick}
+				onmousemove={handleMouseMove}
+				onmouseout={() => { hoveredTemp = null; }}
+				onmovestart={() => { hoveredTemp = null; }}
+				onload={handleMapLoad}
 				>
 					{#if geojsonData}
 						<!-- GeoJSON Source for polygons -->
@@ -814,48 +836,35 @@
 							/>
 						</GeoJSONSource>
 					{/if}
+					<GeoJSONSource id="selected-point" data={selectedPointGeoJSON}>
+						<CircleLayer
+							id="selected-point-layer"
+							paint={{
+								'circle-radius': 5,
+								'circle-color': '#ffffff',
+								'circle-stroke-color': '#111827',
+								'circle-stroke-width': 2
+							}}
+						/>
+					</GeoJSONSource>
 
-					{#if rasterPngUrl && rasterCoordinates}
-						<!-- Raster PNG overlay (instant preview; stays underneath vector tiles until they render) -->
-						{#key rasterPngUrl}
-							<ImageSource
-								id="temperature-raster"
-								url={rasterPngUrl}
-								coordinates={rasterCoordinates}
-							>
-								<RasterLayer
-									id="temperature-raster-layer"
-									paint={{ 'raster-opacity': 0.85, 'raster-fade-duration': 0, 'raster-resampling': 'nearest' }}
-								/>
-							</ImageSource>
-						{/key}
-					{/if}
-					{#if tileLoadFn}
-						<!-- Vector tiles via custom protocol (renders on top of raster) -->
-						{#key selectedDate}
-							<Protocol scheme="temp" loadFn={tileLoadFn} />
-							<VectorTileSource
-								id="temperature-tiles"
-								tiles={["temp://tiles/{z}/{x}/{y}"]}
-								maxzoom={14}
-							>
-								<CircleLayer
-									id="temperature-circles-layer"
-									sourceLayer="points"
-									paint={circlePaint}
-									filter={tempLayerFilter}
-									maxzoom={11}
-								/>
-								<FillLayer
-									id="temperature-squares-layer"
-									sourceLayer="squares"
-									paint={fillPaint}
-									filter={tempLayerFilter}
-									minzoom={8}
-								/>
-							</VectorTileSource>
-						{/key}
-					{/if}
+				{#if rasterCoordinates}
+					<!-- Raster PNG overlay (instant preview; stays underneath vector tiles until they render).
+					     Kept always mounted (no {#key}) so MapLibre calls updateImage() on URL changes
+					     instead of removeSource/addSource, which avoids "Source already exists" races. -->
+					<ImageSource
+						id="temperature-raster"
+						url={rasterPngUrl ?? 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'}
+						coordinates={rasterCoordinates}
+					>
+						{#if rasterPngUrl}
+							<RasterLayer
+								id="temperature-raster-layer"
+								paint={{ 'raster-opacity': 0.85, 'raster-fade-duration': 0, 'raster-resampling': 'nearest' }}
+							/>
+						{/if}
+					</ImageSource>
+				{/if}
 				</MapLibre>
 				<!-- Floating search bar (top left) -->
 				{#if !sidebarOpen}
@@ -874,8 +883,21 @@
 					</div>
 				{/if}
 
+				{#if !isMobile.current && pointHistoryOpen}
+					<div class="absolute right-4 bottom-4 z-40">
+						<PointHistoryPanel
+							{selectedPoint}
+							{pointHistory}
+							{pointHistoryLoading}
+							unit={currentUnit}
+							title="Point history"
+							on:close={closePointHistory}
+						/>
+					</div>
+				{/if}
+
 				<!-- Keyboard navigation hint (desktop only, when feature has data loaded) -->
-				{#if !isMobile.current && selectedFeature && tileLoadFn}
+				{#if !isMobile.current && selectedFeature && deckHasData}
 					<div class="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-md bg-background/80 backdrop-blur-sm px-3 py-1.5 shadow-sm border border-border/50">
 						<button class="inline-flex items-center gap-1 cursor-pointer hover:text-foreground text-muted-foreground transition-colors" onclick={() => featureSidebarRef?.navigateDate(-1)}>
 							<span class="inline-flex items-center gap-0.5"><Kbd>{modKeyLabel}</Kbd><Kbd>←</Kbd></span>
@@ -955,6 +977,22 @@
 				</div>
 			</Drawer.Content>
 		</Drawer.Root>
+	{/if}
+
+	{#if isMobile.current}
+		<Dialog.Root bind:open={pointHistoryOpen}>
+			<Dialog.Content class="max-w-[calc(100%-1.5rem)] p-0" showCloseButton={false}>
+				<PointHistoryPanel
+					{selectedPoint}
+					{pointHistory}
+					{pointHistoryLoading}
+					unit={currentUnit}
+					title="Point history"
+					maxRows={8}
+					on:close={closePointHistory}
+				/>
+			</Dialog.Content>
+		</Dialog.Root>
 	{/if}
 
 	<!-- Hidden slot for child pages (they don't render anything) -->

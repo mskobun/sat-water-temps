@@ -19,9 +19,28 @@ async function handleParquetFile(
 		if (!head) {
 			return new Response(null, { status: 404 });
 		}
+		const size = head.size;
+
+		// If the client sent a Range header (e.g. DuckDB probing with "bytes=0-"),
+		// respond 206 so DuckDB knows this endpoint supports range requests.
+		const rangeHeader = request.headers.get('range');
+		if (rangeHeader) {
+			const { start } = parseRangeHeader(rangeHeader);
+			const end = size - 1;
+			return new Response(null, {
+				status: 206,
+				headers: {
+					'content-length': String(size - start),
+					'content-range': `bytes ${start}-${end}/${size}`,
+					'accept-ranges': 'bytes',
+					'cache-control': 'public, max-age=300'
+				}
+			});
+		}
+
 		return new Response(null, {
 			headers: {
-				'content-length': String(head.size),
+				'content-length': String(size),
 				'accept-ranges': 'bytes',
 				'cache-control': 'public, max-age=300'
 			}
