@@ -50,9 +50,10 @@
     "aws4fetch": "^1.0.20",
     "date-fns": "^4.1.0",
     "geojson-vt": "^4.0.2",
+    "hyparquet": "^1.25.1",
+    "hyparquet-compressors": "^1.1.1",
     "maplibre-gl": "^5.0.1",
     "mode-watcher": "^1.1.0",
-    "papaparse": "^5.5.3",
     "pmtiles": "^4.4.0",
     "svelte-maplibre-gl": "^1.0.2",
     "vt-pbf": "^3.1.3"

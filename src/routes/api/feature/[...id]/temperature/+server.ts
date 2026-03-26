@@ -1,13 +1,12 @@
 import { json } from '@sveltejs/kit';
-import { getLatestDate, queryTemperatureMetadata } from '$lib/db';
+import { getLatestDate, queryObservationMeta } from '$lib/db';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params, platform }) => {
 	const db = platform?.env?.DB;
-	const r2 = platform?.env?.R2_DATA;
-	
-	if (!db || !r2) {
-		return json({ error: 'Database or storage not available' }, { status: 500 });
+
+	if (!db) {
+		return json({ error: 'Database not available' }, { status: 500 });
 	}
 
 	// Join the array from rest parameter back into a string
@@ -19,8 +18,7 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 		return json({ error: 'Feature not found' }, { status: 404 });
 	}
 
-	// Query temperature data (metadata from D1, CSV from R2)
-	const result = await queryTemperatureMetadata(db, r2, featureId, latestDate);
+	const result = await queryObservationMeta(db, featureId, latestDate);
 	if (!result) {
 		return json({ error: 'Temperature data not found' }, { status: 404 });
 	}
@@ -31,4 +29,3 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 		}
 	});
 };
-

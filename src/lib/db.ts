@@ -1,73 +1,9 @@
-// Hybrid architecture: D1 for metadata, R2 for temperature data
+// D1 for metadata, R2 for data files (Parquet, TIFs, PNGs)
 
-import type { D1Database, R2Bucket, R2ObjectBody } from '@cloudflare/workers-types';
-import Papa from 'papaparse';
+import type { D1Database } from '@cloudflare/workers-types';
 
-type GeoPoint = { lng: number; lat: number; temperature: number };
-
-/** Read R2 object text, streaming gzip decompression for .gz keys. */
-async function r2Text(obj: R2ObjectBody): Promise<string> {
-  if (obj.key?.endsWith('.gz')) {
-    const decompressed = (obj.body as unknown as ReadableStream).pipeThrough(new DecompressionStream('gzip'));
-    return new Response(decompressed).text();
-  }
-  return obj.text();
-}
-
-/**
- * Parse CSV text into geographic coordinate array
- * CSV now contains longitude, latitude directly (no pixel coordinate conversion needed)
- */
-function parseCSV(csvText: string): GeoPoint[] {
-  const result = Papa.parse(csvText, {
-    header: true,
-    skipEmptyLines: true,
-    transformHeader: (header: string) => header.trim(),
-    transform: (value: string) => value.trim()
-  });
-
-  if (result.errors.length > 0) {
-    console.warn('CSV parsing errors:', result.errors);
-  }
-
-  return result.data.map((row: any) => ({
-    lng: parseFloat(row.longitude || row.x || 0),
-    lat: parseFloat(row.latitude || row.y || 0),
-    temperature: parseFloat(row.LST_filter || row.temperature || 0)
-  }));
-}
-
-/**
- * Compute histogram bins from temperature data
- */
-function computeHistogram(temps: number[], numBins = 6): Array<{ range: string; count: number }> {
-  if (!temps.length) return [];
-  
-  let min = Infinity;
-  let max = -Infinity;
-  for (const t of temps) {
-    if (t < min) min = t;
-    if (t > max) max = t;
-  }
-  const binWidth = (max - min) / numBins;
-  
-  const bins = new Array(numBins).fill(0);
-  for (const t of temps) {
-    const idx = Math.min(Math.floor((t - min) / binWidth), numBins - 1);
-    bins[idx]++;
-  }
-  
-  return bins.map((count, i) => ({
-    range: (min + i * binWidth).toFixed(1),
-    count
-  }));
-}
-
-/** JSON payload for chart/sidebar (no point geometry). */
-export type TemperatureMetadata = {
-  min_max: [unknown, unknown];
-  histogram: Array<{ range: string; count: number }>;
-  avg: number;
+/** D1-only observation metadata (no CSV parsing). */
+export type ObservationMeta = {
   date: string;
   wtoff: boolean;
   source: string;
@@ -75,122 +11,44 @@ export type TemperatureMetadata = {
   pixel_size_x: number | null;
 };
 
-async function getObservationCsvText(
+export async function queryObservationMeta(
   db: D1Database,
-  r2: R2Bucket,
   featureId: string,
   date: string
-): Promise<{ csvText: string; metaResult: Record<string, unknown> } | null> {
-  const metaResult = await db
-    .prepare(
-      'SELECT min_temp, max_temp, mean_temp, wtoff, csv_path, source, pixel_size, pixel_size_x FROM temperature_metadata WHERE feature_id = ? AND date = ?'
-    )
-    .bind(featureId, date)
-    .first();
-
-  if (!metaResult) {
-    return null;
-  }
-
-  if (!metaResult.csv_path) {
-    console.error(`No CSV path in metadata for ${featureId} ${date}`);
-    return null;
-  }
-
-  const csvPath = String(metaResult.csv_path);
-  const csvObject = await r2.get(csvPath);
-
-  if (!csvObject) {
-    console.error(`CSV not found in R2: ${csvPath}`);
-    return null;
-  }
-
-  const csvText = await r2Text(csvObject);
-  return { csvText, metaResult };
-}
-
-/**
- * Temperature sidebar + color scale metadata (D1 + one CSV parse for histogram/avg).
- */
-export async function queryTemperatureMetadata(
-  db: D1Database,
-  r2: R2Bucket | undefined,
-  featureId: string,
-  date: string
-): Promise<TemperatureMetadata | null> {
+): Promise<ObservationMeta | null> {
   try {
-    if (!r2) {
-      console.error(`R2 bucket not available`);
-      return null;
-    }
+    const row = await db
+      .prepare(
+        'SELECT wtoff, source, pixel_size, pixel_size_x FROM temperature_metadata WHERE feature_id = ? AND date = ?'
+      )
+      .bind(featureId, date)
+      .first();
 
-    const loaded = await getObservationCsvText(db, r2, featureId, date);
-    if (!loaded) return null;
+    if (!row) return null;
 
-    const { csvText, metaResult } = loaded;
-    const geoPoints = parseCSV(csvText);
-    const temps = geoPoints.map((p) => p.temperature);
-
-    const ps = metaResult.pixel_size;
+    const ps = row.pixel_size;
     const pixel_size = ps != null && ps !== '' ? Number(ps) : null;
-    const psx = metaResult.pixel_size_x;
+    const psx = row.pixel_size_x;
     const pixel_size_x = psx != null && psx !== '' ? Number(psx) : null;
 
-    const meanFromDb = metaResult.mean_temp;
-    const avgFromDb =
-      meanFromDb != null && meanFromDb !== '' && Number.isFinite(Number(meanFromDb))
-        ? Number(meanFromDb)
-        : null;
-
     return {
-      min_max: [metaResult.min_temp, metaResult.max_temp],
-      histogram: computeHistogram(temps),
-      avg: avgFromDb ?? (temps.length ? temps.reduce((a, b) => a + b, 0) / temps.length : 0),
       date,
-      wtoff: Boolean(metaResult.wtoff),
-      source: String(metaResult.source || 'ecostress'),
+      wtoff: Boolean(row.wtoff),
+      source: String(row.source || 'ecostress'),
       pixel_size,
       pixel_size_x
     };
   } catch (err) {
-    console.error('Error fetching temperature metadata:', err);
+    console.error('Error fetching observation meta:', err);
     return null;
   }
 }
 
-/** Packed float32 triplets: lng, lat, temperature (Kelvin), little-endian. */
-export async function queryTemperaturePointsBuffer(
-  db: D1Database,
-  r2: R2Bucket | undefined,
-  featureId: string,
-  date: string
-): Promise<ArrayBuffer | null> {
-  try {
-    if (!r2) {
-      console.error(`R2 bucket not available`);
-      return null;
-    }
-
-    const loaded = await getObservationCsvText(db, r2, featureId, date);
-    if (!loaded) return null;
-
-    const geoPoints = parseCSV(loaded.csvText);
-    if (!geoPoints.length) {
-      return new ArrayBuffer(0);
-    }
-
-    const out = new Float32Array(geoPoints.length * 3);
-    let o = 0;
-    for (const p of geoPoints) {
-      out[o++] = p.lng;
-      out[o++] = p.lat;
-      out[o++] = p.temperature;
-    }
-    return out.buffer;
-  } catch (err) {
-    console.error('Error fetching temperature points buffer:', err);
-    return null;
-  }
+export async function getParquetPaths(db: D1Database, featureId: string): Promise<string[]> {
+  const result = await db.prepare(
+    'SELECT DISTINCT parquet_path FROM temperature_metadata WHERE feature_id = ? AND parquet_path IS NOT NULL'
+  ).bind(featureId).all();
+  return (result.results || []).map((r: any) => String(r.parquet_path));
 }
 
 export async function getFeatureDates(db: D1Database, featureId: string) {

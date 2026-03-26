@@ -19,6 +19,7 @@
 	import UserMenu from '$lib/components/UserMenu.svelte';
 	import { IsMobile } from '$lib/hooks/is-mobile.svelte';
 	import { createTileIndex } from '$lib/tile-protocol';
+	import { fetchParquet, getPointsForDate, clearCache as clearParquetCache, type TemperatureStats } from '$lib/parquet-cache';
 	import { Kbd } from '$lib/components/ui/kbd';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import type { Snippet } from 'svelte';
@@ -193,6 +194,7 @@
 			selectedDate = '';
 			selectedColorScale = 'relative';
 			resetTileState();
+			clearParquetCache();
 		} else if (currentFeatureId && previousFeatureId && currentFeatureId !== previousFeatureId) {
 			// Switching features: just zoom to new feature
 			if (bounds) {
@@ -202,6 +204,7 @@
 			selectedDate = '';
 			selectedColorScale = 'relative';
 			resetTileState();
+			clearParquetCache();
 		}
 
 		previousFeatureId = currentFeatureId;
@@ -406,7 +409,7 @@
 	}
 
 	async function loadTemperatureData(featureId: string, date: string) {
-		// Clear previous data first
+		// Clear previous tile state but keep parquet cache (same feature, different date)
 		resetTileState();
 		waterOff = false;
 
@@ -416,41 +419,48 @@
 		try {
 			const enc = encodeURIComponent(featureId);
 			const metaUrl = `/api/feature/${enc}/temperature/${encodeURIComponent(date)}`;
-			const pointsUrl = `/api/feature/${enc}/temperature/${encodeURIComponent(date)}/points`;
 
-			const [metaRes, pointsRes] = await Promise.all([fetch(metaUrl), fetch(pointsUrl)]);
+			// Parallel fetch: D1 metadata + Parquet points (range requests)
+			const [metaRes, parquetResult] = await Promise.all([
+				fetch(metaUrl),
+				(async () => {
+					const parquet = await fetchParquet(featureId);
+					if (!parquet) return null;
+					return getPointsForDate(parquet, date);
+				})()
+			]);
 
-			if (!metaRes.ok || !pointsRes.ok) return;
+			if (!metaRes.ok) return;
 
-			const data = (await metaRes.json()) as {
+			const meta = (await metaRes.json()) as {
 				error?: string;
-				min_max?: [number, number];
-				histogram?: Array<{ range: string; count: number }>;
-				avg?: number;
 				wtoff?: boolean;
 				source?: string;
 				pixel_size?: number | null;
 				pixel_size_x?: number | null;
 			};
-			if (data.error) return;
+			if (meta.error) return;
 
-			const pointsBuffer = await pointsRes.arrayBuffer();
+			if (!parquetResult) return;
+			const { points: pointsBuffer, stats } = parquetResult;
+
 			if (pointsBuffer.byteLength < 12 || pointsBuffer.byteLength % 12 !== 0) return;
 
-			pixelSizeDeg = data.pixel_size ?? null;
-			pixelSizeXDeg = data.pixel_size_x ?? pixelSizeDeg;
+			pixelSizeDeg = meta.pixel_size ?? null;
+			pixelSizeXDeg = meta.pixel_size_x ?? pixelSizeDeg;
 
 			// Build tile index in Web Worker; buffer is transferred (detached) inside createTileIndex
 			const idx = await createTileIndex(pointsBuffer, pixelSizeXDeg, pixelSizeDeg);
 			destroyTileIndex = idx.destroy;
 			tileLoadFn = idx.loadFn;
 
-			relativeMin = data.min_max?.[0] || 0;
-			relativeMax = data.min_max?.[1] || 0;
-			avgTemp = data.avg || 0;
-			histogramData = data.histogram || [];
-			waterOff = data.wtoff || false;
-			dataSource = data.source || 'ecostress';
+			// Stats computed client-side from Parquet data
+			relativeMin = stats.min;
+			relativeMax = stats.max;
+			avgTemp = stats.avg;
+			histogramData = stats.histogram;
+			waterOff = meta.wtoff || false;
+			dataSource = meta.source || 'ecostress';
 		} catch (err) {
 			console.error('Error loading temperature data:', err);
 		} finally {

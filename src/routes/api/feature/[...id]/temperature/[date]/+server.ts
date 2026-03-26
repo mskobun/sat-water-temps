@@ -1,19 +1,18 @@
 import { json } from '@sveltejs/kit';
-import { queryTemperatureMetadata } from '$lib/db';
+import { queryObservationMeta } from '$lib/db';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params, platform }) => {
 	const db = platform?.env?.DB;
-	const r2 = platform?.env?.R2_DATA;
-	
-	if (!db || !r2) {
-		return json({ error: 'Database or storage not available' }, { status: 500 });
+
+	if (!db) {
+		return json({ error: 'Database not available' }, { status: 500 });
 	}
 
 	const featureId = params.id;
 	const date = params.date;
-	
-	const result = await queryTemperatureMetadata(db, r2, featureId, date);
+
+	const result = await queryObservationMeta(db, featureId, date);
 
 	if (!result) {
 		return json({ error: 'Temperature data not found' }, { status: 404 });
