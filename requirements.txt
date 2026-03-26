@@ -54,6 +54,8 @@ pandas==2.3.3
     # via sat-water-temps (pyproject.toml)
 pillow==11.3.0
     # via sat-water-temps (pyproject.toml)
+pyarrow==23.0.1
+    # via sat-water-temps (pyproject.toml)
 pyparsing==3.3.2
     # via rasterio
 pystac==1.14.3

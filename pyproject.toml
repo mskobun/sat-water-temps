@@ -11,6 +11,7 @@ dependencies = [
     "numpy>=2.0.2",
     "pillow>=11.0.0",
     "pandas>=2.3.3",
+    "pyarrow>=19.0.0",
     "pystac-client>=0.8.3",
     "python-dotenv>=1.1.1",
     "rasterio>=1.4.3",

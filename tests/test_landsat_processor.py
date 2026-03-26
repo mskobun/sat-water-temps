@@ -311,7 +311,7 @@ class TestLandsatProcessOneRecordFixture:
         inserted = []
         uploaded_csvs = {}
 
-        def capture_insert(feature_id, date, metadata, csv_r2_key, tif_r2_key, png_r2_keys, source="ecostress"):
+        def capture_insert(feature_id, date, metadata, csv_r2_key, tif_r2_key, png_r2_keys, source="ecostress", parquet_path=None):
             inserted.append(
                 {
                     "feature_id": feature_id,
@@ -321,6 +321,7 @@ class TestLandsatProcessOneRecordFixture:
                     "tif_r2_key": tif_r2_key,
                     "png_r2_keys": png_r2_keys,
                     "source": source,
+                    "parquet_path": parquet_path,
                 }
             )
 
@@ -335,6 +336,8 @@ class TestLandsatProcessOneRecordFixture:
 
         with patch("landsat_processor.upload_to_r2", side_effect=capture_upload) as _upload, patch(
             "landsat_processor.upload_csv_to_r2", side_effect=capture_csv_upload
+        ), patch(
+            "landsat_processor.upload_parquet_to_r2"
         ), patch(
             "landsat_processor.insert_metadata_to_d1", side_effect=capture_insert
         ), patch("landsat_processor.log_job_to_d1"), patch(
@@ -376,6 +379,8 @@ class TestLandsatProcessOneRecordFixture:
 
         with patch("landsat_processor.upload_to_r2", side_effect=capture_upload), patch(
             "landsat_processor.upload_csv_to_r2", side_effect=capture_csv_upload
+        ), patch(
+            "landsat_processor.upload_parquet_to_r2"
         ), patch(
             "landsat_processor.insert_metadata_to_d1"
         ), patch("landsat_processor.log_job_to_d1"), patch(

@@ -29,6 +29,7 @@ from processor import (
     tif_to_png,
     upload_to_r2,
     upload_csv_to_r2,
+    upload_parquet_to_r2,
     compute_filter_stats,
     insert_metadata_to_d1,
     GLOBAL_MIN,
@@ -285,6 +286,10 @@ def process_one_record(body):
         csv_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.csv.gz"
         upload_csv_to_r2(s3_client, bucket_name, csv_key, filter_csv_path)
 
+        # Parquet (one file per feature, one row group per date)
+        parquet_key = f"{R2_PREFIX}/{name}/{location}/{name}_{location}.parquet"
+        upload_parquet_to_r2(s3_client, bucket_name, parquet_key, df_valid, date_str)
+
         # PNGs
         png_r2_keys = {}
         for scale in ["relative", "fixed", "gray"]:
@@ -335,7 +340,7 @@ def process_one_record(body):
 
         # Insert into D1 with source='landsat'
         insert_metadata_to_d1(feature_id, date_str, metadata, csv_key, tif_key, png_r2_keys,
-                              source="landsat")
+                              source="landsat", parquet_path=parquet_key)
 
         duration_ms = int((time.time() - start_time) * 1000)
         log_job_to_d1(

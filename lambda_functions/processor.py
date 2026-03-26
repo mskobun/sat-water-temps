@@ -12,6 +12,8 @@ from d1 import query_d1, log_job_to_d1
 from shared import get_token, create_http_session, extract_metadata, to_iso_datetime
 
 import boto3
+import pyarrow as pa
+import pyarrow.parquet as pq
 import rasterio
 
 # Patch all supported libraries for automatic X-Ray tracing
@@ -66,6 +68,7 @@ def insert_metadata_to_d1(
     tif_r2_key: str,
     png_r2_keys: Dict[str, str],
     source: str = "ecostress",
+    parquet_path: str = None,
 ):
     """Insert only metadata into D1 (temperature data stays in R2).
 
@@ -108,8 +111,9 @@ def insert_metadata_to_d1(
     INSERT OR REPLACE INTO temperature_metadata
     (feature_id, date, min_temp, max_temp, mean_temp, median_temp, std_dev,
      data_points, water_pixel_count, land_pixel_count, wtoff,
-     csv_path, tif_path, png_path, filter_stats, source, pixel_size, pixel_size_x)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     csv_path, tif_path, png_path, filter_stats, source, pixel_size, pixel_size_x,
+     parquet_path)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
 
     # Serialize filter_stats to JSON
@@ -134,6 +138,7 @@ def insert_metadata_to_d1(
         source,
         metadata.get("pixel_size"),
         metadata.get("pixel_size_x"),
+        parquet_path,
     ]
     with xray_recorder.capture("d1_insert_temperature_metadata") as subsegment:
         subsegment.put_metadata("feature_id", feature_id)
@@ -231,6 +236,62 @@ def upload_csv_to_r2(s3_client, bucket_name, key, csv_file_path):
         ContentType="application/gzip",
     )
     print(f"Uploaded {csv_file_path} to {key} (gzip, {len(compressed):,} bytes)")
+
+
+def upload_parquet_to_r2(s3_client, bucket_name, parquet_key, df, date):
+    """Append a row group to a per-feature Parquet file in R2.
+
+    Schema: longitude (float32), latitude (float32), temperature (float32), date (string).
+    Each date becomes one row group. If the file already exists, existing row groups are
+    preserved and the new date is appended (or replaced if already present).
+    """
+    schema = pa.schema([
+        ("longitude", pa.float32()),
+        ("latitude", pa.float32()),
+        ("temperature", pa.float32()),
+        ("date", pa.string()),
+    ])
+
+    new_table = pa.table({
+        "longitude": pa.array(df["longitude"].values, type=pa.float32()),
+        "latitude": pa.array(df["latitude"].values, type=pa.float32()),
+        "temperature": pa.array(df["LST_filter"].values, type=pa.float32()),
+        "date": pa.array([date] * len(df), type=pa.string()),
+    }, schema=schema)
+
+    # Download existing Parquet if it exists, to append
+    existing_tables = []
+    try:
+        resp = s3_client.get_object(Bucket=bucket_name, Key=parquet_key)
+        existing_buf = resp["Body"].read()
+        existing_pf = pq.ParquetFile(pa.BufferReader(existing_buf))
+        for i in range(existing_pf.metadata.num_row_groups):
+            rg_table = existing_pf.read_row_group(i)
+            # Skip row groups for the same date (we're replacing)
+            rg_dates = rg_table.column("date").to_pylist()
+            if rg_dates and rg_dates[0] != date:
+                existing_tables.append(rg_table)
+    except Exception as e:
+        err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
+        if err_code not in ("NoSuchKey", "404"):
+            # If we can't read existing, just write new (first write or corruption)
+            print(f"Warning: could not read existing Parquet {parquet_key}: {e}")
+
+    # Write all row groups (existing + new) to a buffer
+    buf = io.BytesIO()
+    writer = pq.ParquetWriter(buf, schema, compression="zstd")
+    for t in existing_tables:
+        writer.write_table(t)
+    writer.write_table(new_table)
+    writer.close()
+
+    buf.seek(0)
+    s3_client.put_object(
+        Bucket=bucket_name, Key=parquet_key, Body=buf.getvalue(),
+        ContentType="application/octet-stream",
+    )
+    print(f"Uploaded Parquet to {parquet_key} ({len(existing_tables) + 1} row groups, {len(buf.getvalue()):,} bytes)")
+    return parquet_key
 
 
 def compute_filter_stats(filter_flags, total_pixels, padding_count=0):
@@ -457,6 +518,10 @@ def process_rasters(
     csv_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.csv.gz"
     upload_csv_to_r2(s3_client, bucket_name, csv_key, filter_csv_path)
 
+    # Parquet (one file per feature, one row group per date)
+    parquet_key = f"{R2_PREFIX}/{name}/{location}/{name}_{location}.parquet"
+    upload_parquet_to_r2(s3_client, bucket_name, parquet_key, df, date)
+
     # PNGs for all scales
     png_r2_keys = {}
     for scale in ["relative", "fixed", "gray"]:
@@ -511,7 +576,8 @@ def process_rasters(
 
     # Insert metadata into D1 with actual R2 paths
     feature_id = f"{name}/{location}" if location != "lake" else name
-    insert_metadata_to_d1(feature_id, date, metadata, csv_key, tif_key, png_r2_keys)
+    insert_metadata_to_d1(feature_id, date, metadata, csv_key, tif_key, png_r2_keys,
+                          parquet_path=parquet_key)
 
 
 
@@ -692,6 +758,19 @@ def handler(event, context):
     for record in records:
         message_id = record["messageId"]
         body = json.loads(record["body"])
+
+        # Route backfill messages to the backfill package
+        if body.get("type", "").startswith("backfill:"):
+            try:
+                from backfill import dispatch
+                dispatch(body)
+                continue
+            except Exception as e:
+                import traceback
+                print(f"[Backfill] ✗ Failed: {e}")
+                print(f"[Backfill] Traceback: {traceback.format_exc()}")
+                failed_message_ids.append(message_id)
+                continue
 
         # Route Landsat messages to the Landsat processor
         if body.get("source") == "landsat":
