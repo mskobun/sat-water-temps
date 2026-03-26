@@ -1,16 +1,13 @@
 <script lang="ts">
-	import { onMount, tick, untrack } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { browser } from '$app/environment';
 	import { goto, replaceState } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { MapLibre, GeoJSONSource, VectorTileSource, ImageSource, Protocol, FillLayer, LineLayer, CircleLayer, RasterLayer } from 'svelte-maplibre-gl';
+	import { MapLibre, GeoJSONSource, ImageSource, FillLayer, LineLayer, CircleLayer, RasterLayer } from 'svelte-maplibre-gl';
 	import type {
 		Map,
 		MapMouseEvent,
-		LngLatBoundsLike,
-		FillLayerSpecification,
-		CircleLayerSpecification,
-		FilterSpecification
+		LngLatBoundsLike
 	} from 'maplibre-gl';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import * as Drawer from '$lib/components/ui/drawer';
@@ -21,11 +18,10 @@
 	import FeatureSearch from '$lib/components/FeatureSearch.svelte';
 	import UserMenu from '$lib/components/UserMenu.svelte';
 	import { IsMobile } from '$lib/hooks/is-mobile.svelte.js';
-	import { createTileIndex } from '$lib/tile-protocol';
+	import type { DeckTemperatureOverlay } from '$lib/deck-temperature-overlay';
 	import { Kbd } from '$lib/components/ui/kbd';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import type { Snippet } from 'svelte';
-	import type { AddProtocolAction } from 'maplibre-gl';
 	import XIcon from '@lucide/svelte/icons/x';
 	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
 
@@ -70,7 +66,13 @@
 	let tooltipY = $state(0);
 
 	// Temperature data (fetched here so map can use it for heatmap)
-	let tileLoadFn: AddProtocolAction | null = $state.raw(null);
+	let deckOverlay: DeckTemperatureOverlay | null = null;
+	let deckHasData = $state(false);
+	let desktopTriplets: Float32Array | null = null;
+	let desktopCellSizeXM = 0;
+	let desktopCellSizeYM = 0;
+	let desktopHalfPixelX = 0;
+	let desktopHalfPixelY = 0;
 	let relativeMin = $state(0);
 	let relativeMax = $state(0);
 	let avgTemp = $state(0);
@@ -82,7 +84,6 @@
 	let temperatureLoading = $state(false);
 	let pointHistoryLoading = $state(false);
 	let pointHistoryOpen = $state(false);
-	let destroyTileIndex: (() => void) | null = null;
 	let rasterPngUrl: string | null = $state(null);
 	let loadGen = 0; // incremented each time loadTemperatureData starts; guards stale async results
 	let mobilePointsBuffer: Float32Array | null = $state(null);
@@ -92,14 +93,9 @@
 	const globalMax = 308.15;
 
 	function resetTileState() {
-		// Capture and clear the destroy callback before nulling tileLoadFn so it
-		// won't be double-called if resetTileState is invoked again before the tick.
-		const pendingDestroy = destroyTileIndex;
-		destroyTileIndex = null;
-		tileLoadFn = null;
-		// Setting rasterPngUrl = null unmounts the {#if} block; svelte-maplibre-gl's
-		// own lifecycle removes the MapLibre source/layer. Never touch them manually
-		// here — that causes a double-removal crash when the reactive teardown fires.
+		deckOverlay?.clear();
+		deckHasData = false;
+		desktopTriplets = null;
 		rasterPngUrl = null;
 		mobilePointsBuffer = null;
 		relativeMin = 0;
@@ -111,13 +107,6 @@
 		dataSource = '';
 		pixelSizeDeg = null;
 		pixelSizeXDeg = null;
-
-		// Defer the actual worker destruction until after Svelte has flushed
-		// tileLoadFn = null and unmounted the VectorTileSource. By then MapLibre
-		// has fired abort() on every in-flight tile request, so the worker can be
-		// terminated safely without triggering "TileIndex destroyed" errors or
-		// the infinite-retry freeze that happens when we reject aborted requests.
-		if (pendingDestroy) tick().then(pendingDestroy);
 	}
 
 	function resetPointHistory() {
@@ -272,91 +261,6 @@
 	});
 
 
-	// Shared color expression for both zoomed-out circles and zoomed-in cells.
-	let temperatureColorExpr = $derived.by(() => {
-		let minTemp = selectedColorScale === 'relative' ? relativeMin : globalMin;
-		let maxTemp = selectedColorScale === 'relative' ? relativeMax : globalMax;
-
-		// Ensure valid range for interpolation
-		if (minTemp >= maxTemp) {
-			minTemp = globalMin;
-			maxTemp = globalMax;
-		}
-
-		// Color ramp based on scale type - interpolates temperature to color
-		const colorExpr = selectedColorScale === 'gray'
-			? [
-				'interpolate',
-				['linear'],
-				['get', 'temperature'],
-				minTemp, 'rgb(40,40,40)',
-				maxTemp, 'rgb(255,255,255)'
-			]
-			: [
-				'interpolate',
-				['linear'],
-				['get', 'temperature'],
-				minTemp, 'rgb(0,0,255)',
-				minTemp + (maxTemp - minTemp) * 0.25, 'rgb(0,255,255)',
-				minTemp + (maxTemp - minTemp) * 0.5, 'rgb(0,255,0)',
-				minTemp + (maxTemp - minTemp) * 0.75, 'rgb(255,255,0)',
-				maxTemp, 'rgb(255,0,0)'
-			];
-
-		return colorExpr;
-	});
-
-	// Crossfade from circles at overview zooms to true cell footprints when zoomed in.
-	let fillPaint = $derived.by(() => {
-		return {
-			'fill-color': temperatureColorExpr,
-			'fill-opacity': [
-				'interpolate',
-				['linear'],
-				['zoom'],
-				8,
-				0,
-				10,
-				0.4,
-				11,
-				0.8
-			]
-		} as unknown as FillLayerSpecification['paint'];
-	});
-
-	let circlePaint = $derived.by(() => {
-		return {
-			'circle-color': temperatureColorExpr,
-			'circle-radius': [
-				'interpolate',
-				['linear'],
-				['zoom'],
-				4,
-				1.5,
-				7,
-				2.5,
-				9,
-				4,
-				11,
-				6
-			],
-			'circle-opacity': [
-				'interpolate',
-				['linear'],
-				['zoom'],
-				4,
-				0.85,
-				8,
-				0.7,
-				10,
-				0.25,
-				11,
-				0
-			],
-			'circle-stroke-width': 0
-		} as unknown as CircleLayerSpecification['paint'];
-	});
-
 	// MapLibre style with Esri World Imagery tiles
 	const mapStyle = {
 		version: 8 as const,
@@ -380,14 +284,6 @@
 			}
 		]
 	};
-
-	// All user interactions just change the URL
-	function getTemperatureLayerIds(): string[] {
-		if (!map) return [];
-		return ['temperature-circles-layer', 'temperature-squares-layer'].filter((layerId) =>
-			Boolean(map.getLayer(layerId))
-		);
-	}
 
 	function selectPointForHistory(longitude: number, latitude: number) {
 		if (!selectedFeature) return;
@@ -430,39 +326,9 @@
 			hoveredTemp = null;
 		}
 
-		// On mobile with vector tiles, tapping the heatmap shows a temperature tooltip
-		const temperatureLayerIds = getTemperatureLayerIds();
-		if (isMobile.current && temperatureLayerIds.length > 0) {
-			const tempFeatures = map.queryRenderedFeatures(e.point, { layers: temperatureLayerIds });
-			if (tempFeatures && tempFeatures.length > 0) {
-				const temp = tempFeatures[0].properties?.temperature;
-				if (temp != null) {
-					hoveredTemp = temp;
-					tooltipX = e.point.x;
-					tooltipY = e.point.y;
-					if (selectedFeature) {
-						selectPointForHistory(clickLng, clickLat);
-					}
-					return;
-				}
-			}
-			// Tapped outside heatmap — dismiss tooltip
-			hoveredTemp = null;
-		}
-
-		if (selectedFeature && temperatureLayerIds.length > 0) {
-			const tempFeatures = map.queryRenderedFeatures(e.point, { layers: temperatureLayerIds });
-			if (tempFeatures && tempFeatures.length > 0) {
-				const temp = tempFeatures[0].properties?.temperature;
-				if (temp != null) {
-					hoveredTemp = temp;
-					tooltipX = e.point.x;
-					tooltipY = e.point.y;
-					selectPointForHistory(clickLng, clickLat);
-					return;
-				}
-			}
-		}
+		// On desktop, deck.gl's onClick handles temperature picks and sets hoveredTemp.
+		// If hoveredTemp is set, the user clicked on temperature data — don't navigate.
+		if (hoveredTemp != null) return;
 
 		if (!map.getLayer('polygons-fill')) return;
 
@@ -488,24 +354,13 @@
 
 	function handleMouseMove(e: MapMouseEvent) {
 		if (!map) return;
-		
-		// Check temperature layer first
-		const temperatureLayerIds = getTemperatureLayerIds();
-		if (temperatureLayerIds.length > 0) {
-			const tempFeatures = map.queryRenderedFeatures(e.point, { layers: temperatureLayerIds });
-			if (tempFeatures && tempFeatures.length > 0) {
-				const temp = tempFeatures[0].properties?.temperature;
-				if (temp != null) {
-					hoveredTemp = temp;
-					tooltipX = e.point.x;
-					tooltipY = e.point.y;
-					map.getCanvas().style.cursor = 'crosshair';
-					return;
-				}
-			}
+
+		// deck.gl's onHover sets hoveredTemp; if hovering temperature data, show crosshair
+		if (hoveredTemp != null) {
+			map.getCanvas().style.cursor = 'crosshair';
+			return;
 		}
-		hoveredTemp = null;
-		
+
 		// Check polygon layer
 		if (!map.getLayer('polygons-fill')) return;
 
@@ -602,30 +457,35 @@
 			pixelSizeDeg = meta.pixel_size ?? null;
 			pixelSizeXDeg = meta.pixel_size_x ?? pixelSizeDeg;
 
-			if (isMobile.current) {
-				// Mobile: keep raster overlay, store points for tap lookup
-				mobilePointsBuffer = new Float32Array(pointsBuffer);
-			} else {
-				// Desktop: build vector tiles in Web Worker, raster stays underneath until rendered
-				const idx = await createTileIndex(pointsBuffer, pixelSizeXDeg, pixelSizeDeg);
-				if (gen !== loadGen) {
-					// A newer load superseded us; discard the tile index we just built.
-					idx.destroy();
-					return;
-				}
-				destroyTileIndex = idx.destroy;
-				tileLoadFn = idx.loadFn;
-				// Wait for vector tiles to actually render, then remove raster
-				map?.once('idle', () => {
-					if (gen === loadGen) rasterPngUrl = null;
-				});
-			}
-
-			// Stats computed client-side from Parquet data
+			// Stats must be set before deck layer update so relative color scale works
 			relativeMin = stats.min;
 			relativeMax = stats.max;
 			avgTemp = stats.avg;
 			histogramData = stats.histogram;
+
+			if (isMobile.current) {
+				// Mobile: keep raster overlay, store points for tap lookup
+				mobilePointsBuffer = new Float32Array(pointsBuffer);
+			} else {
+				// Desktop: render via deck.gl GridCellLayer
+				const f32 = new Float32Array(pointsBuffer);
+				desktopTriplets = f32;
+				mobilePointsBuffer = f32; // for click fallback
+				const bounds = selectedFeature!.bounds as [[number,number],[number,number]];
+				const centerLat = (bounds[0][1] + bounds[1][1]) / 2;
+				const psx = pixelSizeXDeg ?? pixelSizeDeg ?? 0.0007;
+				const psy = pixelSizeDeg ?? 0.0007;
+				desktopCellSizeXM = psx * 111_320 * Math.cos(centerLat * Math.PI / 180);
+				desktopCellSizeYM = psy * 110_540;
+				desktopHalfPixelX = psx / 2;
+				desktopHalfPixelY = psy / 2;
+				updateDeckLayer();
+				deckHasData = true;
+				// Remove raster once deck.gl has rendered
+				map?.once('idle', () => {
+					if (gen === loadGen) rasterPngUrl = null;
+				});
+			}
 			waterOff = meta.wtoff || false;
 			dataSource = meta.source || 'ecostress';
 			if (selectedPoint) {
@@ -664,24 +524,47 @@
 			const enc = encodeURIComponent(selectedFeature.id);
 			rasterPngUrl = `/api/feature/${enc}/tif/${encodeURIComponent(selectedDate)}/${event.detail}`;
 		}
+		// Update deck.gl layer colors on desktop
+		if (!isMobile.current && desktopTriplets) updateDeckLayer();
 	}
 
 	function handleTempFilterChange(event: CustomEvent<{ min: number | null; max: number | null }>) {
 		tempFilterMin = event.detail.min;
 		tempFilterMax = event.detail.max;
+		// Update deck.gl layer filtering on desktop
+		if (!isMobile.current && desktopTriplets) updateDeckLayer();
 	}
 
-	// MapLibre filter expression for temperature filtering (GPU-accelerated)
-	let tempLayerFilter = $derived.by((): FilterSpecification | undefined => {
-		if (tempFilterMin === null || tempFilterMax === null) {
-			return undefined; // No filter - show all points
+	function updateDeckLayer() {
+		if (!deckOverlay || !desktopTriplets) return;
+		let minTemp = selectedColorScale === 'relative' ? relativeMin : globalMin;
+		let maxTemp = selectedColorScale === 'relative' ? relativeMax : globalMax;
+		if (minTemp >= maxTemp) {
+			minTemp = globalMin;
+			maxTemp = globalMax;
 		}
-		return [
-			'all',
-			['>=', ['get', 'temperature'], tempFilterMin],
-			['<=', ['get', 'temperature'], tempFilterMax]
-		] as unknown as FilterSpecification;
-	});
+		deckOverlay.update({
+			triplets: desktopTriplets,
+			cellSizeXMeters: desktopCellSizeXM,
+			cellSizeYMeters: desktopCellSizeYM,
+			halfPixelX: desktopHalfPixelX,
+			halfPixelY: desktopHalfPixelY,
+			colorScale: selectedColorScale,
+			minTemp,
+			maxTemp,
+			filterMin: tempFilterMin,
+			filterMax: tempFilterMax,
+			onHover: (info) => {
+				hoveredTemp = info.temperature;
+				tooltipX = info.x;
+				tooltipY = info.y;
+			},
+			onClick: (info) => {
+				hoveredTemp = info.temperature;
+				selectPointForHistory(info.longitude, info.latitude);
+			}
+		});
+	}
 
 	function handleSidebarClose() {
 		// Just change the URL - state will update automatically
@@ -804,6 +687,29 @@
 					}
 				}
 			]
+		};
+	});
+
+	// deck.gl overlay lifecycle: create when map is ready on desktop, clean up on destroy
+	$effect(() => {
+		if (!map || !mapReady || isMobile.current) return;
+
+		let overlay: DeckTemperatureOverlay;
+
+		// Dynamic import for code-splitting — deck.gl only loads when needed
+		import('$lib/deck-temperature-overlay').then(({ DeckTemperatureOverlay: Cls }) => {
+			overlay = new Cls();
+			overlay.addTo(map!);
+			deckOverlay = overlay;
+			// If data was loaded before overlay was ready, render it now
+			if (desktopTriplets) updateDeckLayer();
+		});
+
+		return () => {
+			if (overlay) {
+				overlay.remove();
+			}
+			deckOverlay = null;
 		};
 	});
 </script>
@@ -959,32 +865,6 @@
 						{/if}
 					</ImageSource>
 				{/if}
-					{#if tileLoadFn}
-						<!-- Vector tiles via custom protocol (renders on top of raster) -->
-						{#key selectedDate}
-							<Protocol scheme="temp" loadFn={tileLoadFn} />
-							<VectorTileSource
-								id="temperature-tiles"
-								tiles={["temp://tiles/{z}/{x}/{y}"]}
-								maxzoom={14}
-							>
-								<CircleLayer
-									id="temperature-circles-layer"
-									sourceLayer="points"
-									paint={circlePaint}
-									filter={tempLayerFilter}
-									maxzoom={11}
-								/>
-								<FillLayer
-									id="temperature-squares-layer"
-									sourceLayer="squares"
-									paint={fillPaint}
-									filter={tempLayerFilter}
-									minzoom={8}
-								/>
-							</VectorTileSource>
-						{/key}
-					{/if}
 				</MapLibre>
 				<!-- Floating search bar (top left) -->
 				{#if !sidebarOpen}
@@ -1017,7 +897,7 @@
 				{/if}
 
 				<!-- Keyboard navigation hint (desktop only, when feature has data loaded) -->
-				{#if !isMobile.current && selectedFeature && tileLoadFn}
+				{#if !isMobile.current && selectedFeature && deckHasData}
 					<div class="absolute bottom-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-md bg-background/80 backdrop-blur-sm px-3 py-1.5 shadow-sm border border-border/50">
 						<button class="inline-flex items-center gap-1 cursor-pointer hover:text-foreground text-muted-foreground transition-colors" onclick={() => featureSidebarRef?.navigateDate(-1)}>
 							<span class="inline-flex items-center gap-0.5"><Kbd>{modKeyLabel}</Kbd><Kbd>←</Kbd></span>
