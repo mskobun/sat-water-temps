@@ -1,13 +1,9 @@
 // Hybrid architecture: D1 for metadata, R2 for temperature data
 
 import type { D1Database, R2Bucket, R2ObjectBody } from '@cloudflare/workers-types';
-import { parquetRead } from 'hyparquet';
-import { compressors } from 'hyparquet-compressors';
 import Papa from 'papaparse';
-import { getCache, setCache } from './cache';
 
 type GeoPoint = { lng: number; lat: number; temperature: number };
-
 
 /** Read R2 object text, decompressing gzip if the key ends in .gz or contentEncoding says so. */
 async function r2Text(obj: R2ObjectBody): Promise<string> {
@@ -19,7 +15,8 @@ async function r2Text(obj: R2ObjectBody): Promise<string> {
 }
 
 /**
- * Parse CSV text into geographic coordinate array (fallback for rows without parquet_path)
+ * Parse CSV text into geographic coordinate array
+ * CSV now contains longitude, latitude directly (no pixel coordinate conversion needed)
  */
 function parseCSV(csvText: string): GeoPoint[] {
   const result = Papa.parse(csvText, {
@@ -38,47 +35,6 @@ function parseCSV(csvText: string): GeoPoint[] {
     lat: parseFloat(row.latitude || row.y || 0),
     temperature: parseFloat(row.LST_filter || row.temperature || 0)
   }));
-}
-
-/**
- * Parse Parquet file from R2, filtering to a specific date.
- * Each row group contains a single date's observations.
- */
-async function parseParquet(r2: R2Bucket, parquetPath: string, date: string): Promise<GeoPoint[]> {
-  let arrayBuffer = await getCache(parquetPath);
-
-  if (arrayBuffer) {
-    console.log(`[parquet] cache hit: ${parquetPath}`);
-  } else {
-    const obj = await r2.get(parquetPath);
-    if (!obj) {
-      console.error(`Parquet not found in R2: ${parquetPath}`);
-      return [];
-    }
-    arrayBuffer = await obj.arrayBuffer();
-    await setCache(parquetPath, arrayBuffer);
-    console.log(`[parquet] R2 fetch: ${parquetPath} (${arrayBuffer.byteLength} bytes)`);
-  }
-
-  const points: GeoPoint[] = [];
-  await parquetRead({
-    file: { byteLength: arrayBuffer.byteLength, slice: (start: number, end: number) => arrayBuffer.slice(start, end) },
-    columns: ['longitude', 'latitude', 'temperature'],
-    rowFormat: 'object' as const,
-    compressors,
-    filter: { date: { $eq: date } },
-    onComplete: (rows: Record<string, any>[]) => {
-      for (const row of rows) {
-        points.push({
-          lng: row.longitude,
-          lat: row.latitude,
-          temperature: row.temperature
-        });
-      }
-    }
-  });
-
-  return points;
 }
 
 /**
@@ -119,15 +75,15 @@ export type TemperatureMetadata = {
   pixel_size_x: number | null;
 };
 
-async function getObservationData(
+async function getObservationCsvText(
   db: D1Database,
   r2: R2Bucket,
   featureId: string,
   date: string
-): Promise<{ points: GeoPoint[]; metaResult: Record<string, unknown> } | null> {
+): Promise<{ csvText: string; metaResult: Record<string, unknown> } | null> {
   const metaResult = await db
     .prepare(
-      'SELECT min_temp, max_temp, mean_temp, wtoff, csv_path, parquet_path, source, pixel_size, pixel_size_x FROM temperature_metadata WHERE feature_id = ? AND date = ?'
+      'SELECT min_temp, max_temp, mean_temp, wtoff, csv_path, source, pixel_size, pixel_size_x FROM temperature_metadata WHERE feature_id = ? AND date = ?'
     )
     .bind(featureId, date)
     .first();
@@ -136,17 +92,8 @@ async function getObservationData(
     return null;
   }
 
-  // Prefer Parquet, fall back to CSV
-  if (metaResult.parquet_path) {
-    const points = await parseParquet(r2, String(metaResult.parquet_path), date);
-    if (points.length > 0) {
-      return { points, metaResult };
-    }
-    console.warn(`Parquet returned 0 points for ${featureId} ${date}, falling back to CSV`);
-  }
-
   if (!metaResult.csv_path) {
-    console.error(`No data path in metadata for ${featureId} ${date}`);
+    console.error(`No CSV path in metadata for ${featureId} ${date}`);
     return null;
   }
 
@@ -159,7 +106,7 @@ async function getObservationData(
   }
 
   const csvText = await r2Text(csvObject);
-  return { points: parseCSV(csvText), metaResult };
+  return { csvText, metaResult };
 }
 
 /**
@@ -177,10 +124,11 @@ export async function queryTemperatureMetadata(
       return null;
     }
 
-    const loaded = await getObservationData(db, r2, featureId, date);
+    const loaded = await getObservationCsvText(db, r2, featureId, date);
     if (!loaded) return null;
 
-    const { points: geoPoints, metaResult } = loaded;
+    const { csvText, metaResult } = loaded;
+    const geoPoints = parseCSV(csvText);
     const temps = geoPoints.map((p) => p.temperature);
 
     const ps = metaResult.pixel_size;
@@ -223,10 +171,10 @@ export async function queryTemperaturePointsBuffer(
       return null;
     }
 
-    const loaded = await getObservationData(db, r2, featureId, date);
+    const loaded = await getObservationCsvText(db, r2, featureId, date);
     if (!loaded) return null;
 
-    const geoPoints = loaded.points;
+    const geoPoints = parseCSV(loaded.csvText);
     if (!geoPoints.length) {
       return new ArrayBuffer(0);
     }
