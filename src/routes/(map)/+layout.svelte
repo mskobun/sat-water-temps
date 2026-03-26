@@ -3,7 +3,7 @@
 	import { browser } from '$app/environment';
 	import { goto, replaceState } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { MapLibre, GeoJSONSource, VectorTileSource, Protocol, FillLayer, LineLayer, CircleLayer } from 'svelte-maplibre-gl';
+	import { MapLibre, GeoJSONSource, VectorTileSource, ImageSource, Protocol, FillLayer, LineLayer, CircleLayer, RasterLayer } from 'svelte-maplibre-gl';
 	import type {
 		Map,
 		MapMouseEvent,
@@ -78,6 +78,8 @@
 	let pixelSizeXDeg = $state<number | null>(null);
 	let temperatureLoading = $state(false);
 	let destroyTileIndex: (() => void) | null = null;
+	let rasterPngUrl: string | null = $state(null);
+	let mobilePointsBuffer: Float32Array | null = $state(null);
 	const globalMin = 273.15;
 	const globalMax = 308.15;
 
@@ -85,6 +87,8 @@
 		destroyTileIndex?.();
 		destroyTileIndex = null;
 		tileLoadFn = null;
+		rasterPngUrl = null;
+		mobilePointsBuffer = null;
 		relativeMin = 0;
 		relativeMax = 0;
 		avgTemp = 0;
@@ -344,7 +348,35 @@
 	function handleMapClick(e: MapMouseEvent) {
 		if (!map) return;
 
-		// On mobile, tapping the heatmap shows a temperature tooltip
+		// On mobile with raster overlay, do nearest-point lookup from buffer
+		if (isMobile.current && mobilePointsBuffer && mobilePointsBuffer.length >= 3) {
+			const lngLat = map.unproject(e.point);
+			const clickLng = lngLat.lng;
+			const clickLat = lngLat.lat;
+			let bestDist = Infinity;
+			let bestTemp: number | null = null;
+			const count = mobilePointsBuffer.length / 3;
+			for (let i = 0; i < count; i++) {
+				const off = i * 3;
+				const dLng = mobilePointsBuffer[off] - clickLng;
+				const dLat = mobilePointsBuffer[off + 1] - clickLat;
+				const dist = dLng * dLng + dLat * dLat;
+				if (dist < bestDist) {
+					bestDist = dist;
+					bestTemp = mobilePointsBuffer[off + 2];
+				}
+			}
+			// Threshold: ~0.01 deg (~1km) squared
+			if (bestTemp != null && bestDist < 0.0001) {
+				hoveredTemp = bestTemp;
+				tooltipX = e.point.x;
+				tooltipY = e.point.y;
+				return;
+			}
+			hoveredTemp = null;
+		}
+
+		// On mobile with vector tiles, tapping the heatmap shows a temperature tooltip
 		const temperatureLayerIds = getTemperatureLayerIds();
 		if (isMobile.current && temperatureLayerIds.length > 0) {
 			const tempFeatures = map.queryRenderedFeatures(e.point, { layers: temperatureLayerIds });
@@ -433,6 +465,9 @@
 			const enc = encodeURIComponent(featureId);
 			const metaUrl = `/api/feature/${enc}/temperature/${encodeURIComponent(date)}`;
 
+			// Show raster PNG immediately — no awaits needed, browser starts fetching on render
+			rasterPngUrl = `/api/feature/${enc}/tif/${encodeURIComponent(date)}/${selectedColorScale}`;
+
 			// Parallel fetch: D1 metadata + Parquet points (range requests)
 			const [metaRes, parquetResult] = await Promise.all([
 				fetch(metaUrl),
@@ -464,10 +499,17 @@
 			pixelSizeDeg = meta.pixel_size ?? null;
 			pixelSizeXDeg = meta.pixel_size_x ?? pixelSizeDeg;
 
-			// Build tile index in Web Worker; buffer is transferred (detached) inside createTileIndex
-			const idx = await createTileIndex(pointsBuffer, pixelSizeXDeg, pixelSizeDeg);
-			destroyTileIndex = idx.destroy;
-			tileLoadFn = idx.loadFn;
+			if (isMobile.current) {
+				// Mobile: keep raster overlay, store points for tap lookup
+				mobilePointsBuffer = new Float32Array(pointsBuffer);
+			} else {
+				// Desktop: build vector tiles in Web Worker, raster stays underneath until rendered
+				const idx = await createTileIndex(pointsBuffer, pixelSizeXDeg, pixelSizeDeg);
+				destroyTileIndex = idx.destroy;
+				tileLoadFn = idx.loadFn;
+				// Wait for vector tiles to actually render, then remove raster
+				map?.once('idle', () => { rasterPngUrl = null; });
+			}
 
 			// Stats computed client-side from Parquet data
 			relativeMin = stats.min;
@@ -504,6 +546,11 @@
 
 	function handleColorScaleChange(event: CustomEvent<'relative' | 'fixed' | 'gray'>) {
 		selectedColorScale = event.detail;
+		// Update raster PNG URL when using raster overlay (mobile always, desktop during loading)
+		if (rasterPngUrl && selectedFeature && selectedDate) {
+			const enc = encodeURIComponent(selectedFeature.id);
+			rasterPngUrl = `/api/feature/${enc}/tif/${encodeURIComponent(selectedDate)}/${event.detail}`;
+		}
 	}
 
 	function handleTempFilterChange(event: CustomEvent<{ min: number | null; max: number | null }>) {
@@ -612,6 +659,18 @@
 	let tooltipTempDisplay = $derived(
 		hoveredTemp != null ? convertTemp(hoveredTemp).toFixed(1) + unitSymbol + tooltipSourceLabel : ''
 	);
+
+	// Image source coordinates for mobile raster overlay: [topLeft, topRight, bottomRight, bottomLeft]
+	let rasterCoordinates = $derived.by((): [[number,number],[number,number],[number,number],[number,number]] | null => {
+		if (!selectedFeature?.bounds) return null;
+		const [[minLng, minLat], [maxLng, maxLat]] = selectedFeature.bounds as [[number,number],[number,number]];
+		return [
+			[minLng, maxLat], // top-left
+			[maxLng, maxLat], // top-right
+			[maxLng, minLat], // bottom-right
+			[minLng, minLat], // bottom-left
+		];
+	});
 </script>
 
 <svelte:head>
@@ -666,6 +725,7 @@
 						on:dateChange={handleDateChange}
 						on:colorScaleChange={handleColorScaleChange}
 						on:tempFilterChange={handleTempFilterChange}
+						disableFilter={isMobile.current}
 					/>
 				</Sidebar.Content>
 			</Sidebar.Sidebar>
@@ -735,8 +795,23 @@
 						</GeoJSONSource>
 					{/if}
 
+					{#if rasterPngUrl && rasterCoordinates}
+						<!-- Raster PNG overlay (instant preview; stays underneath vector tiles until they render) -->
+						{#key rasterPngUrl}
+							<ImageSource
+								id="temperature-raster"
+								url={rasterPngUrl}
+								coordinates={rasterCoordinates}
+							>
+								<RasterLayer
+									id="temperature-raster-layer"
+									paint={{ 'raster-opacity': 0.85, 'raster-fade-duration': 0, 'raster-resampling': 'nearest' }}
+								/>
+							</ImageSource>
+						{/key}
+					{/if}
 					{#if tileLoadFn}
-						<!-- Temperature overlay: vector tiles via custom protocol -->
+						<!-- Vector tiles via custom protocol (renders on top of raster) -->
 						{#key selectedDate}
 							<Protocol scheme="temp" loadFn={tileLoadFn} />
 							<VectorTileSource
@@ -855,6 +930,7 @@
 						on:dateChange={handleDateChange}
 						on:colorScaleChange={handleColorScaleChange}
 						on:tempFilterChange={handleTempFilterChange}
+						disableFilter={isMobile.current}
 					/>
 				</div>
 			</Drawer.Content>
