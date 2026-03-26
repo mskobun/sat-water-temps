@@ -1,6 +1,7 @@
 name = "sat-water-temps"
 pages_build_output_dir = ".svelte-kit/cloudflare"
 compatibility_date = "2025-12-11"
+compatibility_flags = [ "nodejs_compat" ]
 
 # R2 bindings for Pages Functions
 # Using production bucket for both dev and prod (read-only for local dev)
