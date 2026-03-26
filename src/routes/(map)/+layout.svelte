@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
+	import { browser } from '$app/environment';
 	import { goto, replaceState } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { MapLibre, GeoJSONSource, VectorTileSource, Protocol, FillLayer, LineLayer, CircleLayer } from 'svelte-maplibre-gl';
@@ -17,9 +18,8 @@
 	import FeatureSidebar from '$lib/components/FeatureSidebar.svelte';
 	import FeatureSearch from '$lib/components/FeatureSearch.svelte';
 	import UserMenu from '$lib/components/UserMenu.svelte';
-	import { IsMobile } from '$lib/hooks/is-mobile.svelte';
+	import { IsMobile } from '$lib/hooks/is-mobile.svelte.js';
 	import { createTileIndex } from '$lib/tile-protocol';
-	import { fetchParquet, getPointsForDate, clearCache as clearParquetCache, type TemperatureStats } from '$lib/parquet-cache';
 	import { Kbd } from '$lib/components/ui/kbd';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import type { Snippet } from 'svelte';
@@ -30,6 +30,19 @@
 	const isMobile = new IsMobile();
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 	const modKeyLabel = isMac ? '⌥' : 'Alt';
+	type ParquetCacheModule = typeof import('$lib/parquet-cache');
+	let parquetCacheModulePromise: Promise<ParquetCacheModule> | null = null;
+
+	async function getParquetCacheModule(): Promise<ParquetCacheModule | null> {
+		if (!browser) return null;
+		parquetCacheModulePromise ??= import('$lib/parquet-cache');
+		return parquetCacheModulePromise;
+	}
+
+	async function clearParquetCache() {
+		const parquetCache = await getParquetCacheModule();
+		parquetCache?.clearCache();
+	}
 
 	let { children }: { children: Snippet } = $props();
 
@@ -194,7 +207,7 @@
 			selectedDate = '';
 			selectedColorScale = 'relative';
 			resetTileState();
-			clearParquetCache();
+			void clearParquetCache();
 		} else if (currentFeatureId && previousFeatureId && currentFeatureId !== previousFeatureId) {
 			// Switching features: just zoom to new feature
 			if (bounds) {
@@ -204,7 +217,7 @@
 			selectedDate = '';
 			selectedColorScale = 'relative';
 			resetTileState();
-			clearParquetCache();
+			void clearParquetCache();
 		}
 
 		previousFeatureId = currentFeatureId;
@@ -424,9 +437,11 @@
 			const [metaRes, parquetResult] = await Promise.all([
 				fetch(metaUrl),
 				(async () => {
-					const parquet = await fetchParquet(featureId);
+					const parquetCache = await getParquetCacheModule();
+					if (!parquetCache) return null;
+					const parquet = await parquetCache.fetchParquet(featureId);
 					if (!parquet) return null;
-					return getPointsForDate(parquet, date);
+					return parquetCache.getPointsForDate(parquet, date);
 				})()
 			]);
 
