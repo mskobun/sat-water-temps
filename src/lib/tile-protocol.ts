@@ -35,7 +35,7 @@ export async function createTileIndex(
 	});
 
 	let nextId = 0;
-	const pending = new Map<number, { resolve: (buf: ArrayBuffer) => void; reject: (e: Error) => void }>();
+	const pending = new Map<number, { resolve: (buf: ArrayBuffer) => void; reject: (e: unknown) => void }>();
 
 	worker.onmessage = (e) => {
 		const msg = e.data;
@@ -48,7 +48,7 @@ export async function createTileIndex(
 		}
 	};
 
-	const loadFn: AddProtocolAction = (params, _abortController) => {
+	const loadFn: AddProtocolAction = (params, abortController) => {
 		const match = params.url.match(tileUrlRe);
 		if (!match) {
 			return Promise.reject(new Error(`Invalid tile URL: ${params.url}`));
@@ -60,18 +60,38 @@ export async function createTileIndex(
 		const id = nextId++;
 
 		return new Promise<{ data: ArrayBuffer }>((resolve, reject) => {
+			if (abortController.signal.aborted) {
+				reject(new DOMException('Aborted', 'AbortError'));
+				return;
+			}
+
+			const onAbort = () => {
+				pending.delete(id);
+				reject(new DOMException('Aborted', 'AbortError'));
+			};
+			abortController.signal.addEventListener('abort', onAbort, { once: true });
+
 			pending.set(id, {
-				resolve: (buffer) => resolve({ data: buffer }),
-				reject
+				resolve: (buffer) => {
+					abortController.signal.removeEventListener('abort', onAbort);
+					resolve({ data: buffer });
+				},
+				reject: (err) => {
+					abortController.signal.removeEventListener('abort', onAbort);
+					reject(err);
+				}
 			});
 			worker.postMessage({ type: 'getTile', id, z, x, y });
 		});
 	};
 
 	function destroy() {
-		for (const entry of pending.values()) {
-			entry.reject(new Error('TileIndex destroyed'));
-		}
+		// Don't actively reject pending promises — MapLibre retries any tile that
+		// immediately rejects, causing an infinite error loop. Instead, let the
+		// promises hang. When Svelte unmounts the VectorTileSource (because
+		// tileLoadFn was set to null in the same state flush), MapLibre calls
+		// abort() on every in-flight tile via its AbortController, which triggers
+		// our onAbort listener and rejects with AbortError silently.
 		pending.clear();
 		worker.terminate();
 	}

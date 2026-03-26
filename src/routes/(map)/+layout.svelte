@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, untrack } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
 	import { browser } from '$app/environment';
 	import { goto, replaceState } from '$app/navigation';
 	import { page } from '$app/stores';
@@ -14,8 +14,10 @@
 	} from 'maplibre-gl';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import * as Drawer from '$lib/components/ui/drawer';
+	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
 	import FeatureSidebar from '$lib/components/FeatureSidebar.svelte';
+	import PointHistoryPanel from '$lib/components/PointHistoryPanel.svelte';
 	import FeatureSearch from '$lib/components/FeatureSearch.svelte';
 	import UserMenu from '$lib/components/UserMenu.svelte';
 	import { IsMobile } from '$lib/hooks/is-mobile.svelte.js';
@@ -30,18 +32,19 @@
 	const isMobile = new IsMobile();
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 	const modKeyLabel = isMac ? '⌥' : 'Alt';
-	type ParquetCacheModule = typeof import('$lib/parquet-cache');
-	let parquetCacheModulePromise: Promise<ParquetCacheModule> | null = null;
+	type DuckDBCacheModule = typeof import('$lib/duckdb-cache');
+	type PointHistoryEntry = import('$lib/duckdb-cache').PointHistoryEntry;
+	let duckdbCacheModulePromise: Promise<DuckDBCacheModule> | null = null;
 
-	async function getParquetCacheModule(): Promise<ParquetCacheModule | null> {
+	async function getDuckDBCacheModule(): Promise<DuckDBCacheModule | null> {
 		if (!browser) return null;
-		parquetCacheModulePromise ??= import('$lib/parquet-cache');
-		return parquetCacheModulePromise;
+		duckdbCacheModulePromise ??= import('$lib/duckdb-cache');
+		return duckdbCacheModulePromise;
 	}
 
-	async function clearParquetCache() {
-		const parquetCache = await getParquetCacheModule();
-		parquetCache?.clearCache();
+	async function clearDuckDBCache() {
+		const duckdbCache = await getDuckDBCacheModule();
+		await duckdbCache?.clearCache();
 	}
 
 	let { children }: { children: Snippet } = $props();
@@ -77,24 +80,26 @@
 	let pixelSizeDeg = $state<number | null>(null);
 	let pixelSizeXDeg = $state<number | null>(null);
 	let temperatureLoading = $state(false);
+	let pointHistoryLoading = $state(false);
+	let pointHistoryOpen = $state(false);
 	let destroyTileIndex: (() => void) | null = null;
 	let rasterPngUrl: string | null = $state(null);
+	let loadGen = 0; // incremented each time loadTemperatureData starts; guards stale async results
 	let mobilePointsBuffer: Float32Array | null = $state(null);
+	let selectedPoint: { longitude: number; latitude: number } | null = $state(null);
+	let pointHistory: PointHistoryEntry[] = $state([]);
 	const globalMin = 273.15;
 	const globalMax = 308.15;
 
 	function resetTileState() {
-		destroyTileIndex?.();
+		// Capture and clear the destroy callback before nulling tileLoadFn so it
+		// won't be double-called if resetTileState is invoked again before the tick.
+		const pendingDestroy = destroyTileIndex;
 		destroyTileIndex = null;
 		tileLoadFn = null;
-		// Remove raster source from MapLibre before clearing URL to avoid
-		// "source already exists" when the {#key} block recreates it.
-		if (rasterPngUrl && map) {
-			try {
-				if (map.getLayer('temperature-raster-layer')) map.removeLayer('temperature-raster-layer');
-				if (map.getSource('temperature-raster')) map.removeSource('temperature-raster');
-			} catch { /* already removed */ }
-		}
+		// Setting rasterPngUrl = null unmounts the {#if} block; svelte-maplibre-gl's
+		// own lifecycle removes the MapLibre source/layer. Never touch them manually
+		// here — that causes a double-removal crash when the reactive teardown fires.
 		rasterPngUrl = null;
 		mobilePointsBuffer = null;
 		relativeMin = 0;
@@ -106,6 +111,35 @@
 		dataSource = '';
 		pixelSizeDeg = null;
 		pixelSizeXDeg = null;
+
+		// Defer the actual worker destruction until after Svelte has flushed
+		// tileLoadFn = null and unmounted the VectorTileSource. By then MapLibre
+		// has fired abort() on every in-flight tile request, so the worker can be
+		// terminated safely without triggering "TileIndex destroyed" errors or
+		// the infinite-retry freeze that happens when we reject aborted requests.
+		if (pendingDestroy) tick().then(pendingDestroy);
+	}
+
+	function resetPointHistory() {
+		selectedPoint = null;
+		pointHistory = [];
+		pointHistoryLoading = false;
+		pointHistoryOpen = false;
+	}
+
+	function closePointHistory() {
+		selectedPoint = null;
+		pointHistory = [];
+		pointHistoryLoading = false;
+		pointHistoryOpen = false;
+	}
+
+	function getPointHistoryTolerance(): number {
+		const base = Math.max(pixelSizeDeg ?? 0, pixelSizeXDeg ?? 0);
+		if (base > 0) {
+			return Math.min(Math.max(base * 1.5, 0.0005), 0.01);
+		}
+		return 0.01;
 	}
 
 	// Default map view (MapLibre uses [lng, lat])
@@ -219,7 +253,8 @@
 			selectedDate = '';
 			selectedColorScale = 'relative';
 			resetTileState();
-			void clearParquetCache();
+			resetPointHistory();
+			void clearDuckDBCache();
 		} else if (currentFeatureId && previousFeatureId && currentFeatureId !== previousFeatureId) {
 			// Switching features: just zoom to new feature
 			if (bounds) {
@@ -229,7 +264,8 @@
 			selectedDate = '';
 			selectedColorScale = 'relative';
 			resetTileState();
-			void clearParquetCache();
+			resetPointHistory();
+			void clearDuckDBCache();
 		}
 
 		previousFeatureId = currentFeatureId;
@@ -353,14 +389,21 @@
 		);
 	}
 
+	function selectPointForHistory(longitude: number, latitude: number) {
+		if (!selectedFeature) return;
+		selectedPoint = { longitude, latitude };
+		pointHistoryOpen = true;
+		void loadPointHistory(selectedFeature.id, longitude, latitude);
+	}
+
 	function handleMapClick(e: MapMouseEvent) {
 		if (!map) return;
+		const lngLat = map.unproject(e.point);
+		const clickLng = lngLat.lng;
+		const clickLat = lngLat.lat;
 
 		// On mobile with raster overlay, do nearest-point lookup from buffer
 		if (isMobile.current && mobilePointsBuffer && mobilePointsBuffer.length >= 3) {
-			const lngLat = map.unproject(e.point);
-			const clickLng = lngLat.lng;
-			const clickLat = lngLat.lat;
 			let bestDist = Infinity;
 			let bestTemp: number | null = null;
 			const count = mobilePointsBuffer.length / 3;
@@ -379,6 +422,9 @@
 				hoveredTemp = bestTemp;
 				tooltipX = e.point.x;
 				tooltipY = e.point.y;
+				if (selectedFeature) {
+					selectPointForHistory(clickLng, clickLat);
+				}
 				return;
 			}
 			hoveredTemp = null;
@@ -394,11 +440,28 @@
 					hoveredTemp = temp;
 					tooltipX = e.point.x;
 					tooltipY = e.point.y;
+					if (selectedFeature) {
+						selectPointForHistory(clickLng, clickLat);
+					}
 					return;
 				}
 			}
 			// Tapped outside heatmap — dismiss tooltip
 			hoveredTemp = null;
+		}
+
+		if (selectedFeature && temperatureLayerIds.length > 0) {
+			const tempFeatures = map.queryRenderedFeatures(e.point, { layers: temperatureLayerIds });
+			if (tempFeatures && tempFeatures.length > 0) {
+				const temp = tempFeatures[0].properties?.temperature;
+				if (temp != null) {
+					hoveredTemp = temp;
+					tooltipX = e.point.x;
+					tooltipY = e.point.y;
+					selectPointForHistory(clickLng, clickLat);
+					return;
+				}
+			}
 		}
 
 		if (!map.getLayer('polygons-fill')) return;
@@ -461,7 +524,36 @@
 		}
 	}
 
+	async function loadPointHistory(featureId: string, longitude: number, latitude: number) {
+		pointHistoryLoading = true;
+		try {
+			const source = dataSource === 'landsat' ? 'landsat' : 'ecostress';
+			const duckdbCache = await getDuckDBCacheModule();
+			if (!duckdbCache) return;
+			const feature = await duckdbCache.fetchDuckDBFeature(featureId, source);
+			if (!feature) {
+				pointHistory = [];
+				return;
+			}
+			pointHistory = await duckdbCache.getPointHistory(
+				feature,
+				longitude,
+				latitude,
+				getPointHistoryTolerance(),
+				source
+			);
+		} catch (err) {
+			console.error('Error loading point history:', err);
+			pointHistory = [];
+		} finally {
+			pointHistoryLoading = false;
+		}
+	}
+
 	async function loadTemperatureData(featureId: string, date: string) {
+		// Stamp this invocation so stale completions can be detected and discarded.
+		const gen = ++loadGen;
+
 		// Clear previous tile state but keep parquet cache (same feature, different date)
 		resetTileState();
 		waterOff = false;
@@ -476,17 +568,8 @@
 			// Show raster PNG immediately — no awaits needed, browser starts fetching on render
 			rasterPngUrl = `/api/feature/${enc}/tif/${encodeURIComponent(date)}/${selectedColorScale}`;
 
-			// Parallel fetch: D1 metadata + Parquet points (range requests)
-			const [metaRes, parquetResult] = await Promise.all([
-				fetch(metaUrl),
-				(async () => {
-					const parquetCache = await getParquetCacheModule();
-					if (!parquetCache) return null;
-					const parquet = await parquetCache.fetchParquet(featureId);
-					if (!parquet) return null;
-					return parquetCache.getPointsForDate(parquet, date);
-				})()
-			]);
+			const metaRes = await fetch(metaUrl);
+			if (gen !== loadGen) return; // newer load started
 
 			if (!metaRes.ok) return;
 
@@ -499,7 +582,19 @@
 			};
 			if (meta.error) return;
 
+			const source = meta.source === 'landsat' ? 'landsat' : 'ecostress';
+			const duckdbCache = await getDuckDBCacheModule();
+			if (gen !== loadGen) return;
+			if (!duckdbCache) return;
+
+			const feature = await duckdbCache.fetchDuckDBFeature(featureId, source);
+			if (gen !== loadGen) return;
+			if (!feature) return;
+
+			const parquetResult = await duckdbCache.getPointsForDate(feature, date, source);
+			if (gen !== loadGen) return;
 			if (!parquetResult) return;
+
 			const { points: pointsBuffer, stats } = parquetResult;
 
 			if (pointsBuffer.byteLength < 12 || pointsBuffer.byteLength % 12 !== 0) return;
@@ -513,10 +608,17 @@
 			} else {
 				// Desktop: build vector tiles in Web Worker, raster stays underneath until rendered
 				const idx = await createTileIndex(pointsBuffer, pixelSizeXDeg, pixelSizeDeg);
+				if (gen !== loadGen) {
+					// A newer load superseded us; discard the tile index we just built.
+					idx.destroy();
+					return;
+				}
 				destroyTileIndex = idx.destroy;
 				tileLoadFn = idx.loadFn;
 				// Wait for vector tiles to actually render, then remove raster
-				map?.once('idle', () => { rasterPngUrl = null; });
+				map?.once('idle', () => {
+					if (gen === loadGen) rasterPngUrl = null;
+				});
 			}
 
 			// Stats computed client-side from Parquet data
@@ -526,10 +628,13 @@
 			histogramData = stats.histogram;
 			waterOff = meta.wtoff || false;
 			dataSource = meta.source || 'ecostress';
+			if (selectedPoint) {
+				void loadPointHistory(featureId, selectedPoint.longitude, selectedPoint.latitude);
+			}
 		} catch (err) {
 			console.error('Error loading temperature data:', err);
 		} finally {
-			temperatureLoading = false;
+			if (gen === loadGen) temperatureLoading = false;
 		}
 	}
 
@@ -679,6 +784,28 @@
 			[minLng, minLat], // bottom-left
 		];
 	});
+
+	let selectedPointGeoJSON = $derived.by(() => {
+		if (!selectedPoint) {
+			return {
+				type: 'FeatureCollection' as const,
+				features: []
+			};
+		}
+		return {
+			type: 'FeatureCollection' as const,
+			features: [
+				{
+					type: 'Feature' as const,
+					properties: {},
+					geometry: {
+						type: 'Point' as const,
+						coordinates: [selectedPoint.longitude, selectedPoint.latitude] as [number, number]
+					}
+				}
+			]
+		};
+	});
 </script>
 
 <svelte:head>
@@ -751,10 +878,11 @@
 					zoom={defaultZoom}
 					minZoom={2}
 					maxZoom={19}
-					onclick={handleMapClick}
-					onmousemove={handleMouseMove}
-					onmovestart={() => { hoveredTemp = null; }}
-					onload={handleMapLoad}
+				onclick={handleMapClick}
+				onmousemove={handleMouseMove}
+				onmouseout={() => { hoveredTemp = null; }}
+				onmovestart={() => { hoveredTemp = null; }}
+				onload={handleMapLoad}
 				>
 					{#if geojsonData}
 						<!-- GeoJSON Source for polygons -->
@@ -802,22 +930,35 @@
 							/>
 						</GeoJSONSource>
 					{/if}
+					<GeoJSONSource id="selected-point" data={selectedPointGeoJSON}>
+						<CircleLayer
+							id="selected-point-layer"
+							paint={{
+								'circle-radius': 5,
+								'circle-color': '#ffffff',
+								'circle-stroke-color': '#111827',
+								'circle-stroke-width': 2
+							}}
+						/>
+					</GeoJSONSource>
 
-					{#if rasterPngUrl && rasterCoordinates}
-						<!-- Raster PNG overlay (instant preview; stays underneath vector tiles until they render) -->
-						{#key rasterPngUrl}
-							<ImageSource
-								id="temperature-raster"
-								url={rasterPngUrl}
-								coordinates={rasterCoordinates}
-							>
-								<RasterLayer
-									id="temperature-raster-layer"
-									paint={{ 'raster-opacity': 0.85, 'raster-fade-duration': 0, 'raster-resampling': 'nearest' }}
-								/>
-							</ImageSource>
-						{/key}
-					{/if}
+				{#if rasterCoordinates}
+					<!-- Raster PNG overlay (instant preview; stays underneath vector tiles until they render).
+					     Kept always mounted (no {#key}) so MapLibre calls updateImage() on URL changes
+					     instead of removeSource/addSource, which avoids "Source already exists" races. -->
+					<ImageSource
+						id="temperature-raster"
+						url={rasterPngUrl ?? 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'}
+						coordinates={rasterCoordinates}
+					>
+						{#if rasterPngUrl}
+							<RasterLayer
+								id="temperature-raster-layer"
+								paint={{ 'raster-opacity': 0.85, 'raster-fade-duration': 0, 'raster-resampling': 'nearest' }}
+							/>
+						{/if}
+					</ImageSource>
+				{/if}
 					{#if tileLoadFn}
 						<!-- Vector tiles via custom protocol (renders on top of raster) -->
 						{#key selectedDate}
@@ -859,6 +1000,19 @@
 						style="left: {tooltipX + 12}px; top: {tooltipY - 12}px;"
 					>
 						{tooltipTempDisplay}
+					</div>
+				{/if}
+
+				{#if !isMobile.current && pointHistoryOpen}
+					<div class="absolute right-4 bottom-4 z-40">
+						<PointHistoryPanel
+							{selectedPoint}
+							{pointHistory}
+							{pointHistoryLoading}
+							unit={currentUnit}
+							title="Point history"
+							on:close={closePointHistory}
+						/>
 					</div>
 				{/if}
 
@@ -943,6 +1097,22 @@
 				</div>
 			</Drawer.Content>
 		</Drawer.Root>
+	{/if}
+
+	{#if isMobile.current}
+		<Dialog.Root bind:open={pointHistoryOpen}>
+			<Dialog.Content class="max-w-[calc(100%-1.5rem)] p-0" showCloseButton={false}>
+				<PointHistoryPanel
+					{selectedPoint}
+					{pointHistory}
+					{pointHistoryLoading}
+					unit={currentUnit}
+					title="Point history"
+					maxRows={8}
+					on:close={closePointHistory}
+				/>
+			</Dialog.Content>
+		</Dialog.Root>
 	{/if}
 
 	<!-- Hidden slot for child pages (they don't render anything) -->
