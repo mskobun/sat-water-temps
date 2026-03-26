@@ -1,8 +1,8 @@
 import * as duckdb from '@duckdb/duckdb-wasm';
-import duckdbWasm from '@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url';
-import duckdbMvpWorker from '@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url';
-import duckdbWasmEh from '@duckdb/duckdb-wasm/dist/duckdb-eh.wasm?url';
-import duckdbEhWorker from '@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url';
+
+// Use runtime CDN assets so large WASM binaries are not emitted into
+// SvelteKit/Pages build artifacts (Cloudflare Pages limit: 25 MiB/file).
+const CDN_BUNDLES: duckdb.DuckDBBundles = duckdb.getJsDelivrBundles();
 
 type SourceType = 'ecostress' | 'landsat';
 
@@ -32,17 +32,6 @@ export interface PointHistoryEntry {
 	distance: number;
 	source: SourceType;
 }
-
-const MANUAL_BUNDLES: duckdb.DuckDBBundles = {
-	mvp: {
-		mainModule: duckdbWasm,
-		mainWorker: duckdbMvpWorker
-	},
-	eh: {
-		mainModule: duckdbWasmEh,
-		mainWorker: duckdbEhWorker
-	}
-};
 
 const dbPromises: Record<SourceType, Promise<duckdb.AsyncDuckDB> | null> = {
 	ecostress: null,
@@ -137,7 +126,7 @@ async function getDb(source: SourceType): Promise<duckdb.AsyncDuckDB> {
 	if (existing) return existing;
 
 	dbPromises[source] = (async () => {
-		const bundle = await duckdb.selectBundle(MANUAL_BUNDLES);
+		const bundle = await duckdb.selectBundle(CDN_BUNDLES);
 		const worker = new Worker(bundle.mainWorker!);
 		const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker);
 		await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
