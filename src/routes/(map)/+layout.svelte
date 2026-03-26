@@ -87,6 +87,14 @@
 		destroyTileIndex?.();
 		destroyTileIndex = null;
 		tileLoadFn = null;
+		// Remove raster source from MapLibre before clearing URL to avoid
+		// "source already exists" when the {#key} block recreates it.
+		if (rasterPngUrl && map) {
+			try {
+				if (map.getLayer('temperature-raster-layer')) map.removeLayer('temperature-raster-layer');
+				if (map.getSource('temperature-raster')) map.removeSource('temperature-raster');
+			} catch { /* already removed */ }
+		}
 		rasterPngUrl = null;
 		mobilePointsBuffer = null;
 		relativeMin = 0;
