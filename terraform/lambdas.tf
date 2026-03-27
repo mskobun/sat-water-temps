@@ -43,8 +43,7 @@ resource "aws_lambda_function" "initiator_lambda" {
     }
   }
 
-  timeout     = 300
-  memory_size = 256
+  timeout = 300
 }
 
 resource "aws_lambda_function" "task_poller_lambda" {
@@ -104,7 +103,7 @@ resource "aws_lambda_function" "processor_lambda" {
   }
 
   timeout     = 900  # 15 minutes max
-  memory_size = 1024
+  memory_size = 3008 # Increased memory for performance
 }
 
 # Lambda Function URL for manual triggers from admin UI
@@ -210,7 +209,7 @@ resource "aws_lambda_function" "landsat_initiator_lambda" {
   }
 
   timeout     = 300
-  memory_size = 256
+  memory_size = 512
 }
 
 resource "aws_lambda_event_source_mapping" "sqs_trigger" {
