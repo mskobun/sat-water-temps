@@ -31,6 +31,10 @@ export interface PointHistoryEntry {
 	latitude: number;
 	distance: number;
 	source: SourceType;
+	/** Landsat raster row (present when source is landsat) */
+	row?: number;
+	/** Landsat raster col (present when source is landsat) */
+	col?: number;
 }
 
 const dbPromises: Record<SourceType, Promise<duckdb.AsyncDuckDB> | null> = {
@@ -380,14 +384,17 @@ export async function getPointHistory(
 	const toleranceSquared = safeTolerance * safeTolerance;
 	const history: PointHistoryEntry[] = [];
 
+	const isLandsat = source === 'landsat';
+
 	for (const file of feature.files) {
+		const rowColSelect = isLandsat ? ', "row", "col"' : '';
 		const query = `
 			WITH candidates AS (
 				SELECT
 					date,
 					longitude,
 					latitude,
-					temperature,
+					temperature${isLandsat ? ', "row", "col"' : ''},
 					POWER(longitude - ${formatFiniteNumber(longitude)}, 2) +
 						POWER(latitude - ${formatFiniteNumber(latitude)}, 2) AS distance_squared
 				FROM ${quoteSqlLiteral(file.name)}
@@ -399,7 +406,7 @@ export async function getPointHistory(
 					date,
 					longitude,
 					latitude,
-					temperature,
+					temperature${rowColSelect},
 					distance_squared,
 					ROW_NUMBER() OVER (
 						PARTITION BY date
@@ -411,7 +418,7 @@ export async function getPointHistory(
 				date,
 				longitude,
 				latitude,
-				temperature,
+				temperature${rowColSelect},
 				SQRT(distance_squared) AS distance
 			FROM ranked
 			WHERE row_number = 1
@@ -432,15 +439,23 @@ export async function getPointHistory(
 			continue;
 		}
 
+		const rowVector = isLandsat ? table.getChild('row') : null;
+		const colVector = isLandsat ? table.getChild('col') : null;
+
 		for (let i = 0; i < table.numRows; i++) {
-			history.push({
+			const entry: PointHistoryEntry = {
 				date: String(dateVector.get(i)),
 				longitude: Number(longitudeVector.get(i)),
 				latitude: Number(latitudeVector.get(i)),
 				temperature: Number(temperatureVector.get(i)),
 				distance: Number(distanceVector.get(i)),
 				source
-			});
+			};
+			if (rowVector && colVector) {
+				entry.row = Number(rowVector.get(i));
+				entry.col = Number(colVector.get(i));
+			}
+			history.push(entry);
 		}
 	}
 

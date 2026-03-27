@@ -20,6 +20,7 @@
 	import { IsMobile } from '$lib/hooks/is-mobile.svelte.js';
 	import type { DeckTemperatureOverlay } from '$lib/deck-temperature-overlay';
 	import type { AffineTransform } from '$lib/landsat-pixel-quads';
+	import { fetchTemperatureMetadata } from '$lib/api';
 	import { Kbd } from '$lib/components/ui/kbd';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import type { Snippet } from 'svelte';
@@ -30,7 +31,6 @@
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 	const modKeyLabel = isMac ? '⌥' : 'Alt';
 	type DuckDBCacheModule = typeof import('$lib/duckdb-cache');
-	type PointHistoryEntry = import('$lib/duckdb-cache').PointHistoryEntry;
 	let duckdbCacheModulePromise: Promise<DuckDBCacheModule> | null = null;
 
 	async function getDuckDBCacheModule(): Promise<DuckDBCacheModule | null> {
@@ -86,12 +86,8 @@
 	let pixelSizeDeg = $state<number | null>(null);
 	let pixelSizeXDeg = $state<number | null>(null);
 	let temperatureLoading = $state(false);
-	let pointHistoryLoading = $state(false);
-	let pointHistoryOpen = $state(false);
 	let rasterPngUrl: string | null = $state(null);
 	let loadGen = 0; // incremented each time loadTemperatureData starts; guards stale async results
-	let selectedPoint: { longitude: number; latitude: number } | null = $state(null);
-	let pointHistory: PointHistoryEntry[] = $state([]);
 	const globalMin = 273.15;
 	const globalMax = 308.15;
 
@@ -114,26 +110,18 @@
 		pixelSizeXDeg = null;
 	}
 
-	function resetPointHistory() {
-		selectedPoint = null;
-		pointHistory = [];
-		pointHistoryLoading = false;
-		pointHistoryOpen = false;
-	}
+	let selectedPoint: { longitude: number; latitude: number } | null = $state(null);
+	let pointHistoryOpen = $state(false);
+
+	let pointHistoryTolerance = $derived.by(() => {
+		const base = Math.max(pixelSizeDeg ?? 0, pixelSizeXDeg ?? 0);
+		if (base > 0) return Math.min(Math.max(base * 1.5, 0.0005), 0.01);
+		return 0.01;
+	});
 
 	function closePointHistory() {
 		selectedPoint = null;
-		pointHistory = [];
-		pointHistoryLoading = false;
 		pointHistoryOpen = false;
-	}
-
-	function getPointHistoryTolerance(): number {
-		const base = Math.max(pixelSizeDeg ?? 0, pixelSizeXDeg ?? 0);
-		if (base > 0) {
-			return Math.min(Math.max(base * 1.5, 0.0005), 0.01);
-		}
-		return 0.01;
 	}
 
 	// Default map view (MapLibre uses [lng, lat])
@@ -247,7 +235,7 @@
 			selectedDate = '';
 			selectedColorScale = 'relative';
 			resetTileState();
-			resetPointHistory();
+			closePointHistory();
 			void clearDuckDBCache();
 		} else if (currentFeatureId && previousFeatureId && currentFeatureId !== previousFeatureId) {
 			// Switching features: just zoom to new feature
@@ -258,7 +246,7 @@
 			selectedDate = '';
 			selectedColorScale = 'relative';
 			resetTileState();
-			resetPointHistory();
+			closePointHistory();
 			void clearDuckDBCache();
 		}
 
@@ -290,12 +278,6 @@
 		]
 	};
 
-	function selectPointForHistory(longitude: number, latitude: number) {
-		if (!selectedFeature) return;
-		selectedPoint = { longitude, latitude };
-		pointHistoryOpen = true;
-		void loadPointHistory(selectedFeature.id, longitude, latitude);
-	}
 
 	function handleMapClick(e: MapMouseEvent) {
 		if (!map) return;
@@ -353,32 +335,6 @@
 		}
 	}
 
-	async function loadPointHistory(featureId: string, longitude: number, latitude: number) {
-		pointHistoryLoading = true;
-		try {
-			const source = dataSource === 'landsat' ? 'landsat' : 'ecostress';
-			const duckdbCache = await getDuckDBCacheModule();
-			if (!duckdbCache) return;
-			const feature = await duckdbCache.fetchDuckDBFeature(featureId, source);
-			if (!feature) {
-				pointHistory = [];
-				return;
-			}
-			pointHistory = await duckdbCache.getPointHistory(
-				feature,
-				longitude,
-				latitude,
-				getPointHistoryTolerance(),
-				source
-			);
-		} catch (err) {
-			console.error('Error loading point history:', err);
-			pointHistory = [];
-		} finally {
-			pointHistoryLoading = false;
-		}
-	}
-
 	async function loadTemperatureData(featureId: string, date: string) {
 		// Stamp this invocation so stale completions can be detected and discarded.
 		const gen = ++loadGen;
@@ -392,33 +348,15 @@
 		temperatureLoading = true;
 		try {
 			const enc = encodeURIComponent(featureId);
-			const metaUrl = `/api/feature/${enc}/temperature/${encodeURIComponent(date)}`;
 
 			// Show raster PNG immediately — no awaits needed, browser starts fetching on render
 			rasterPngUrl = `/api/feature/${enc}/tif/${encodeURIComponent(date)}/${selectedColorScale}`;
 
-			const metaRes = await fetch(metaUrl);
+			const meta = await fetchTemperatureMetadata(featureId, date);
 			if (gen !== loadGen) return; // newer load started
+			if (!meta) return;
 
-			if (!metaRes.ok) return;
-
-			const meta = (await metaRes.json()) as {
-				error?: string;
-				wtoff?: boolean;
-				source?: string;
-				pixel_size?: number | null;
-				pixel_size_x?: number | null;
-				source_crs?: string | null;
-				transform_a?: number | null;
-				transform_b?: number | null;
-				transform_c?: number | null;
-				transform_d?: number | null;
-				transform_e?: number | null;
-				transform_f?: number | null;
-			};
-			if (meta.error) return;
-
-			const source = meta.source === 'landsat' ? 'landsat' : 'ecostress';
+			const source = meta.source;
 			const duckdbCache = await getDuckDBCacheModule();
 			if (gen !== loadGen) return;
 			if (!duckdbCache) return;
@@ -435,27 +373,11 @@
 
 			if (pointsBuffer.byteLength < 24 || pointsBuffer.byteLength % 24 !== 0) return;
 
-			pixelSizeDeg = meta.pixel_size ?? null;
-			pixelSizeXDeg = meta.pixel_size_x ?? pixelSizeDeg;
+			pixelSizeDeg = meta.pixelSize;
+			pixelSizeXDeg = meta.pixelSizeX ?? pixelSizeDeg;
 
-			landsatSourceCrs = meta.source_crs ?? null;
-			const hasTf =
-				meta.transform_a != null &&
-				meta.transform_b != null &&
-				meta.transform_c != null &&
-				meta.transform_d != null &&
-				meta.transform_e != null &&
-				meta.transform_f != null;
-			landsatTransform = hasTf
-				? {
-						a: Number(meta.transform_a),
-						b: Number(meta.transform_b),
-						c: Number(meta.transform_c),
-						d: Number(meta.transform_d),
-						e: Number(meta.transform_e),
-						f: Number(meta.transform_f)
-					}
-				: null;
+			landsatSourceCrs = meta.sourceCrs;
+			landsatTransform = meta.transform;
 
 			// Stats must be set before deck layer update so relative color scale works
 			relativeMin = stats.min;
@@ -485,10 +407,7 @@
 					if (gen === loadGen) rasterPngUrl = null;
 				});
 			}
-			if (selectedPoint) {
-				void loadPointHistory(featureId, selectedPoint.longitude, selectedPoint.latitude);
-			}
-		} catch (err) {
+			} catch (err) {
 			console.error('Error loading temperature data:', err);
 		} finally {
 			if (gen === loadGen) temperatureLoading = false;
@@ -506,12 +425,16 @@
 		replaceState(url, $page.state);
 	}
 
-	function handleDateChange(event: CustomEvent<string>) {
-		selectedDate = event.detail;
+	function switchToDate(date: string) {
+		selectedDate = date;
 		if (selectedFeature) {
-			loadTemperatureData(selectedFeature.id, event.detail);
+			loadTemperatureData(selectedFeature.id, date);
 		}
-		syncDateInUrl(event.detail);
+		syncDateInUrl(date);
+	}
+
+	function handleDateChange(event: CustomEvent<string>) {
+		switchToDate(event.detail);
 	}
 
 	function handleColorScaleChange(event: CustomEvent<'relative' | 'fixed' | 'gray'>) {
@@ -561,7 +484,8 @@
 			},
 			onClick: (info) => {
 				hoveredTemp = info.temperature;
-				selectPointForHistory(info.longitude, info.latitude);
+				selectedPoint = { longitude: info.longitude, latitude: info.latitude };
+				pointHistoryOpen = true;
 			}
 		});
 	}
@@ -669,7 +593,8 @@
 	});
 
 	let selectedPointGeoJSON = $derived.by(() => {
-		if (!selectedPoint) {
+		const pt = selectedPoint;
+		if (!pt) {
 			return {
 				type: 'FeatureCollection' as const,
 				features: []
@@ -683,7 +608,7 @@
 					properties: {},
 					geometry: {
 						type: 'Point' as const,
-						coordinates: [selectedPoint.longitude, selectedPoint.latitude] as [number, number]
+						coordinates: [pt.longitude, pt.latitude] as [number, number]
 					}
 				}
 			]
@@ -885,11 +810,17 @@
 					<div class="absolute right-4 bottom-4 z-40">
 						<PointHistoryPanel
 							{selectedPoint}
-							{pointHistory}
-							{pointHistoryLoading}
+							featureId={selectedFeature?.id ?? null}
+							{dataSource}
+							{selectedDate}
 							unit={currentUnit}
-							title="Point history"
-							on:close={closePointHistory}
+							{deckOverlay}
+							halfPixelX={desktopHalfPixelX}
+							halfPixelY={desktopHalfPixelY}
+							pixelTolerance={pointHistoryTolerance}
+							{getDuckDBCacheModule}
+							onclose={closePointHistory}
+							ondatechange={switchToDate}
 						/>
 					</div>
 				{/if}
@@ -976,15 +907,21 @@
 	{/if}
 
 	{#if isMobile.current}
-		<Dialog.Root bind:open={pointHistoryOpen}>
+		<Dialog.Root open={pointHistoryOpen} onOpenChange={(open) => { if (!open) closePointHistory(); }}>
 			<Dialog.Content class="max-w-[calc(100%-1.5rem)] p-0" showCloseButton={false}>
 				<PointHistoryPanel
 					{selectedPoint}
-					{pointHistory}
-					{pointHistoryLoading}
+					featureId={selectedFeature?.id ?? null}
+					{dataSource}
+					{selectedDate}
 					unit={currentUnit}
-					title="Point history"
-					on:close={closePointHistory}
+					{deckOverlay}
+					halfPixelX={desktopHalfPixelX}
+					halfPixelY={desktopHalfPixelY}
+					pixelTolerance={pointHistoryTolerance}
+					{getDuckDBCacheModule}
+					onclose={closePointHistory}
+					ondatechange={switchToDate}
 				/>
 			</Dialog.Content>
 		</Dialog.Root>

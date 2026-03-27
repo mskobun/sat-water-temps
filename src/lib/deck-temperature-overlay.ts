@@ -1,5 +1,6 @@
 import { MapboxOverlay } from '@deck.gl/mapbox';
-import { SolidPolygonLayer } from '@deck.gl/layers';
+import { SolidPolygonLayer, PathLayer } from '@deck.gl/layers';
+import { PathStyleExtension } from '@deck.gl/extensions';
 import type { Map } from 'maplibre-gl';
 import type { PickingInfo } from '@deck.gl/core';
 
@@ -174,6 +175,9 @@ function createTemperatureLayer(
 export class DeckTemperatureOverlay {
 	private overlay: MapboxOverlay;
 	private map: Map | null = null;
+	private mainLayer: SolidPolygonLayer | null = null;
+	private highlightFill: SolidPolygonLayer | null = null;
+	private highlightStroke: PathLayer | null = null;
 
 	constructor() {
 		this.overlay = new MapboxOverlay({
@@ -214,27 +218,66 @@ export class DeckTemperatureOverlay {
 			rowCol![0] !== -1;
 
 		if (!useLandsatQuads) {
-			const layer = createTemperatureLayer(opts, 'rect', null);
-			this.overlay.setProps({ layers: [layer] });
-			return;
+			this.mainLayer = createTemperatureLayer(opts, 'rect', null);
+		} else {
+			const crs = landsatSourceCrs!;
+			const tf = landsatTransform!;
+
+			try {
+				const flat = computeLandsatQuadsFlat(crs, tf, rowCol!, count);
+				const polygons = flatQuadsToPolygons(flat, count);
+				this.mainLayer = createTemperatureLayer(opts, 'landsat-precomputed', polygons);
+			} catch (err) {
+				console.error('[deck] Landsat quad compute failed:', err);
+				this.mainLayer = createTemperatureLayer(opts, 'rect', null);
+			}
 		}
 
-		const crs = landsatSourceCrs!;
-		const tf = landsatTransform!;
+		this.syncLayers();
+	}
 
-		try {
-			const flat = computeLandsatQuadsFlat(crs, tf, rowCol!, count);
-			const polygons = flatQuadsToPolygons(flat, count);
-			const layer = createTemperatureLayer(opts, 'landsat-precomputed', polygons);
-			this.overlay.setProps({ layers: [layer] });
-		} catch (err) {
-			console.error('[deck] Landsat quad compute failed:', err);
-			const layer = createTemperatureLayer(opts, 'rect', null);
-			this.overlay.setProps({ layers: [layer] });
+	setHighlight(polygon: [number, number][] | null): void {
+		if (!polygon) {
+			this.highlightFill = null;
+			this.highlightStroke = null;
+		} else {
+			// Close the ring for PathLayer
+			const ring = [...polygon, polygon[0]];
+			this.highlightFill = new SolidPolygonLayer({
+				id: 'highlight-pixel-fill',
+				beforeId: 'selected-point-layer',
+				data: [polygon],
+				getPolygon: (d: [number, number][]) => d,
+				getFillColor: [255, 255, 255, 50],
+				extruded: false,
+				material: false,
+				pickable: false
+			});
+			this.highlightStroke = new PathLayer({
+				id: 'highlight-pixel-stroke',
+				beforeId: 'selected-point-layer',
+				data: [ring],
+				getPath: (d: [number, number][]) => d,
+				getColor: [255, 255, 0, 240],
+				widthMinPixels: 3,
+				getDashArray: [6, 4],
+				dashJustified: true,
+				extensions: [new PathStyleExtension({ dash: true })],
+				pickable: false
+			});
 		}
+		this.syncLayers();
+	}
+
+	private syncLayers(): void {
+		const layers = [this.mainLayer, this.highlightFill, this.highlightStroke].filter(Boolean);
+		this.overlay.setProps({ layers });
 	}
 
 	clear(): void {
+		this.mainLayer = null;
+		this.highlightFill = null;
+		this.highlightStroke = null;
 		this.overlay.setProps({ layers: [] });
 	}
 }
