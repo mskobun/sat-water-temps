@@ -1,26 +1,30 @@
 <script lang="ts">
 	import { createEventDispatcher } from 'svelte';
-	import * as Select from '$lib/components/ui/select';
-	import FeatureObservationCalendar from '$lib/components/FeatureObservationCalendar.svelte';
-	import SourceBadge from '$lib/components/SourceBadge.svelte';
-	import { Button } from '$lib/components/ui/button';
+	import FeatureSidebarHeader from '$lib/components/feature-sidebar/FeatureSidebarHeader.svelte';
+	import FeatureSidebarOverlayControls from '$lib/components/feature-sidebar/FeatureSidebarOverlayControls.svelte';
+	import FeatureSidebarSnapshot from '$lib/components/feature-sidebar/FeatureSidebarSnapshot.svelte';
+	import FeatureSidebarTemporalChart from '$lib/components/feature-sidebar/FeatureSidebarTemporalChart.svelte';
+	import FeatureSidebarDistribution from '$lib/components/feature-sidebar/FeatureSidebarDistribution.svelte';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Spinner } from '$lib/components/ui/spinner';
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import { Separator } from '$lib/components/ui/separator';
-	import { Slider } from '$lib/components/ui/slider';
-	import * as Tooltip from '$lib/components/ui/tooltip';
-	import { cn } from '$lib/utils.js';
-	import { formatShortDate } from '$lib/date-utils';
 	import ThermometerIcon from '@lucide/svelte/icons/thermometer';
-	import PaletteIcon from '@lucide/svelte/icons/palette';
-	import BarChart3Icon from '@lucide/svelte/icons/bar-chart-3';
-	import DownloadIcon from '@lucide/svelte/icons/download';
-	import SettingsIcon from '@lucide/svelte/icons/settings';
-	import FilterIcon from '@lucide/svelte/icons/filter';
-	import { BarChart } from 'layerchart';
-	import { scaleBand } from 'd3-scale';
 	import { page } from '$app/stores';
+
+	type FeatureStatsHistoryEntry = {
+		date: string;
+		source: string;
+		min_temp: number | null;
+		max_temp: number | null;
+		mean_temp: number | null;
+		median_temp: number | null;
+		std_dev: number | null;
+		data_points: number | null;
+		water_pixel_count: number | null;
+		land_pixel_count: number | null;
+		wtoff: boolean;
+	};
 
 	export let featureId: string;
 	export let featureName: string = '';
@@ -50,36 +54,19 @@
 	}>();
 	let dateEntries: Array<{ date: string; source: string }> = [];
 	let dates: string[] = [];
+	let temporalStatsEntries: FeatureStatsHistoryEntry[] = [];
 	let loading = false;
-	let filterRange: number[] = [0, 100]; // Percentage values (0-100)
-
-	const globalMin = 273.15;
-	const globalMax = 308.15;
-	const colorScaleLabels = { relative: 'Relative', fixed: 'Fixed', gray: 'Grayscale' } as const;
+	let overlayControlsRef: FeatureSidebarOverlayControls | null = null;
 
 	function resetState() {
 		dates = [];
 		dateEntries = [];
+		temporalStatsEntries = [];
 		selectedDate = '';
 		dataSource = '';
-		filterRange = [0, 100];
 		dispatch('tempFilterChange', { min: null, max: null });
+		overlayControlsRef?.resetControls();
 	}
-
-	$: unitSymbol = currentUnit === 'Kelvin' ? 'K' : currentUnit === 'Celsius' ? '°C' : '°F';
-
-	function convertTemp(kelvin: number, unit: 'Kelvin' | 'Celsius' | 'Fahrenheit'): number {
-		if (unit === 'Celsius') return kelvin - 273.15;
-		if (unit === 'Fahrenheit') return (kelvin - 273.15) * 9 / 5 + 32;
-		return kelvin;
-	}
-
-	// Use server-provided stats (already in Kelvin)
-	$: stats = relativeMin && relativeMax ? {
-		min: convertTemp(relativeMin, currentUnit),
-		max: convertTemp(relativeMax, currentUnit),
-		avg: convertTemp(avgTemp, currentUnit)
-	} : null;
 
 	function getSourceForDate(date: string): string {
 		const entry = dateEntries.find(e => e.date === date);
@@ -90,7 +77,8 @@
 		if (!featureId) return;
 		loading = true;
 		try {
-			const response = await fetch(`/api/feature/${featureId}/get_dates`);
+			const enc = encodeURIComponent(featureId);
+			const response = await fetch(`/api/feature/${enc}/get_dates`);
 			const fetched = await response.json();
 			// Handle both old format (string[]) and new format ({date, source}[])
 			if (Array.isArray(fetched) && fetched.length > 0 && typeof fetched[0] === 'object') {
@@ -114,11 +102,20 @@
 		}
 	}
 
-	// Convert server histogram ranges to current unit
-	$: convertedHistogram = histogramData.map(bin => ({
-		range: convertTemp(parseFloat(bin.range), currentUnit).toFixed(1),
-		count: bin.count
-	}));
+	async function loadTemporalStats() {
+		if (!featureId) return;
+		try {
+			const enc = encodeURIComponent(featureId);
+			const response = await fetch(`/api/feature/${enc}/stats`);
+			const payload = await response.json();
+			const entries = Array.isArray(payload?.entries) ? payload.entries : [];
+			// Cap chart history to avoid heavy multi-series rendering on very long records.
+			temporalStatsEntries = entries.slice(0, 365);
+		} catch (err) {
+			console.error('Error loading temporal stats:', err);
+			temporalStatsEntries = [];
+		}
+	}
 
 	function handleDateChange(value: string) {
 		selectedDate = value;
@@ -130,84 +127,13 @@
 	function handleColorScaleChange(value: 'relative' | 'fixed' | 'gray') {
 		selectedColorScale = value;
 		dispatch('colorScaleChange', selectedColorScale);
-		// Reset filter when color scale changes
-		filterRange = [0, 100];
-		dispatch('tempFilterChange', { min: null, max: null });
-	}
-
-	// Get the scale bounds based on selected color scale (in Kelvin)
-	$: scaleMin = selectedColorScale === 'relative' ? relativeMin : globalMin;
-	$: scaleMax = selectedColorScale === 'relative' ? relativeMax : globalMax;
-
-	// Convert slider percentage (0-100) to temperature (Kelvin)
-	// Inlined in reactive statements so Svelte tracks scaleMin/scaleMax as dependencies
-	$: filterMinTemp = scaleMin + (filterRange[0] / 100) * (scaleMax - scaleMin);
-	$: filterMaxTemp = scaleMin + (filterRange[1] / 100) * (scaleMax - scaleMin);
-	
-	// Check if filter is active (not at full range)
-	$: isFiltering = filterRange[0] > 0 || filterRange[1] < 100;
-	
-	// Helper for non-reactive contexts
-	function percentToTemp(percent: number): number {
-		return scaleMin + (percent / 100) * (scaleMax - scaleMin);
-	}
-	
-	function tempToPercent(temp: number): number {
-		if (scaleMax === scaleMin) return 0;
-		return ((temp - scaleMin) / (scaleMax - scaleMin)) * 100;
-	}
-
-	function handleFilterRangeChange(values: number[]) {
-		filterRange = values;
-		// Always dispatch - null means show all (when at full range)
-		if (values[0] === 0 && values[1] === 100) {
-			dispatch('tempFilterChange', { min: null, max: null });
-		} else {
-			dispatch('tempFilterChange', { min: percentToTemp(values[0]), max: percentToTemp(values[1]) });
-		}
-	}
-	
-	function handleMinInputChange(e: Event) {
-		const input = e.target as HTMLInputElement;
-		const displayValue = parseFloat(input.value);
-		if (isNaN(displayValue)) return;
-		
-		// Convert from display unit to Kelvin
-		let kelvin: number;
-		if (currentUnit === 'Celsius') kelvin = displayValue + 273.15;
-		else if (currentUnit === 'Fahrenheit') kelvin = (displayValue - 32) * 5/9 + 273.15;
-		else kelvin = displayValue;
-		
-		// Clamp to valid range and convert to percent
-		const percent = Math.max(0, Math.min(100, tempToPercent(kelvin)));
-		// Ensure min doesn't exceed max
-		filterRange = [Math.min(percent, filterRange[1]), filterRange[1]];
-		handleFilterRangeChange(filterRange);
-	}
-	
-	function handleMaxInputChange(e: Event) {
-		const input = e.target as HTMLInputElement;
-		const displayValue = parseFloat(input.value);
-		if (isNaN(displayValue)) return;
-		
-		// Convert from display unit to Kelvin
-		let kelvin: number;
-		if (currentUnit === 'Celsius') kelvin = displayValue + 273.15;
-		else if (currentUnit === 'Fahrenheit') kelvin = (displayValue - 32) * 5/9 + 273.15;
-		else kelvin = displayValue;
-		
-		// Clamp to valid range and convert to percent
-		const percent = Math.max(0, Math.min(100, tempToPercent(kelvin)));
-		// Ensure max doesn't go below min
-		filterRange = [filterRange[0], Math.max(percent, filterRange[0])];
-		handleFilterRangeChange(filterRange);
 	}
 
 	let prevFeatureId: string | undefined;
 	$: if (featureId && featureId !== prevFeatureId) {
 		prevFeatureId = featureId;
 		resetState();
-		loadDates();
+		void Promise.all([loadDates(), loadTemporalStats()]);
 	}
 
 	// Arrow key date navigation (same source only)
@@ -265,42 +191,13 @@
 	{:else}
 		<ScrollArea class="flex-1">
 			<div class="p-4 space-y-6">
-				<!-- Summary & actions -->
-				<div class="flex items-center justify-between gap-2">
-					<p class="text-sm text-muted-foreground flex items-center gap-1.5 flex-wrap">
-						<span>{dates.length} observation{dates.length === 1 ? '' : 's'}</span>
-						{#if selectedDate}
-							<span>· {formatShortDate(selectedDate)}</span>
-						{/if}
-						{#if dataSource}
-							<SourceBadge source={dataSource} />
-						{/if}
-					</p>
-					<Tooltip.Provider>
-						<div class="flex items-center gap-1 shrink-0">
-							{#if session?.user}
-								<Tooltip.Root>
-									<Tooltip.Trigger>
-										<Button variant="ghost" size="icon-sm" href={`/admin/features/${featureId}`}>
-											<SettingsIcon class="size-3.5" />
-											<span class="sr-only">Manage in admin</span>
-										</Button>
-									</Tooltip.Trigger>
-									<Tooltip.Content>Manage in admin</Tooltip.Content>
-								</Tooltip.Root>
-							{/if}
-							<Tooltip.Root>
-								<Tooltip.Trigger>
-									<Button variant="ghost" size="icon-sm" href={`/archive/${featureId}`}>
-										<DownloadIcon class="size-3.5" />
-										<span class="sr-only">Archive & download</span>
-									</Button>
-								</Tooltip.Trigger>
-								<Tooltip.Content>Archive & download</Tooltip.Content>
-							</Tooltip.Root>
-						</div>
-					</Tooltip.Provider>
-				</div>
+				<FeatureSidebarHeader
+					{featureId}
+					{selectedDate}
+					{dataSource}
+					observationCount={dates.length}
+					showAdminActions={Boolean(session?.user)}
+				/>
 
 			{#if waterOff}
 				<Alert variant="destructive" class="py-2">
@@ -308,90 +205,19 @@
 				</Alert>
 			{/if}
 
-				<!-- Map overlay -->
-				<div class="space-y-3">
-					<h3 class="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-						<PaletteIcon class="size-3.5" />
-						Map overlay
-					</h3>
-					<div class="grid gap-3">
-						<div>
-							<p id="observation-calendar-label" class="text-xs text-muted-foreground mb-1.5">Date</p>
-							<div aria-labelledby="observation-calendar-label">
-								<FeatureObservationCalendar
-									selectedDate={selectedDate}
-									dateEntries={dateEntries}
-									{featureId}
-									colorScale={selectedColorScale}
-									onSelect={handleDateChange}
-								/>
-							</div>
-						</div>
-						<div>
-							<label for="scale-select" class="text-xs text-muted-foreground mb-1.5 block">Color scale</label>
-							<Select.Root type="single" value={selectedColorScale} onValueChange={(v) => v != null && handleColorScaleChange(v as 'relative' | 'fixed' | 'gray')}>
-								<Select.Trigger id="scale-select" class="w-full h-9">
-									{colorScaleLabels[selectedColorScale]}
-								</Select.Trigger>
-								<Select.Content>
-									{#each Object.entries(colorScaleLabels) as [value, label]}
-										<Select.Item {value} {label}>{label}</Select.Item>
-									{/each}
-								</Select.Content>
-							</Select.Root>
-						</div>
-						<!-- Temperature Filter -->
-						<div class="space-y-2">
-							<label class="text-xs text-muted-foreground flex items-baseline gap-1.5">
-								<FilterIcon class="size-3 relative top-px" />
-								Temperature filter
-								{#if isFiltering}
-									<button
-										type="button"
-										class="text-[10px] text-primary font-medium hover:underline"
-										onclick={() => { filterRange = [0, 100]; handleFilterRangeChange([0, 100]); }}
-									>
-										Reset
-									</button>
-								{/if}
-							</label>
-							<Slider
-								type="multiple"
-								value={filterRange}
-								onValueChange={handleFilterRangeChange}
-								min={0}
-								max={100}
-								step={0.5}
-								class="w-full"
-								trackClass={selectedColorScale === 'gray' ? 'color-scale-gray' : 'color-scale-rainbow'}
-								showRange={false}
-							/>
-							<div class="flex items-center justify-between gap-2">
-								<div class="flex items-center gap-1">
-									<input
-										type="number"
-										step="0.1"
-										value={convertTemp(filterMinTemp, currentUnit).toFixed(1)}
-										onchange={handleMinInputChange}
-										class="w-16 h-7 px-2 text-xs tabular-nums bg-muted border border-border rounded text-center focus:outline-none focus:ring-1 focus:ring-ring"
-									/>
-									<span class="text-[10px] text-muted-foreground">{unitSymbol}</span>
-								</div>
-								<span class="text-[10px] text-muted-foreground">to</span>
-								<div class="flex items-center gap-1">
-									<input
-										type="number"
-										step="0.1"
-										value={convertTemp(filterMaxTemp, currentUnit).toFixed(1)}
-										onchange={handleMaxInputChange}
-										class="w-16 h-7 px-2 text-xs tabular-nums bg-muted border border-border rounded text-center focus:outline-none focus:ring-1 focus:ring-ring"
-									/>
-									<span class="text-[10px] text-muted-foreground">{unitSymbol}</span>
-								</div>
-							</div>
-						</div>
-					</div>
-				</div>
+				<FeatureSidebarOverlayControls
+					bind:this={overlayControlsRef}
+					{featureId}
+					bind:selectedDate
+					bind:selectedColorScale
+					{currentUnit}
+					{dateEntries}
+					{relativeMin}
+					{relativeMax}
+					on:dateChange={(event) => handleDateChange(event.detail)}
+					on:colorScaleChange={(event) => handleColorScaleChange(event.detail)}
+					on:tempFilterChange={(event) => dispatch('tempFilterChange', event.detail)}
+				/>
 
 				<Separator />
 
@@ -401,94 +227,25 @@
 						<p class="text-sm text-muted-foreground">Loading temperature data...</p>
 					</div>
 				{:else}
-					<!-- Temperature snapshot -->
-					<div class="space-y-3">
-						<h3 class="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-							<ThermometerIcon class="size-3.5" />
-							Temperature
-						</h3>
-						{#if stats}
-							<div class="grid grid-cols-3 gap-2">
-								<div class="rounded-lg border bg-muted/40 px-3 py-2 text-center">
-									<p class="text-[10px] text-muted-foreground uppercase tracking-wider">Min</p>
-									<p class="text-sm font-semibold tabular-nums">{stats.min.toFixed(1)}{unitSymbol}</p>
-								</div>
-								<div class="rounded-lg border bg-muted/40 px-3 py-2 text-center">
-									<p class="text-[10px] text-muted-foreground uppercase tracking-wider">Avg</p>
-									<p class="text-sm font-semibold tabular-nums">{stats.avg.toFixed(1)}{unitSymbol}</p>
-								</div>
-								<div class="rounded-lg border bg-muted/40 px-3 py-2 text-center">
-									<p class="text-[10px] text-muted-foreground uppercase tracking-wider">Max</p>
-									<p class="text-sm font-semibold tabular-nums">{stats.max.toFixed(1)}{unitSymbol}</p>
-								</div>
-							</div>
-						{/if}
-						<div class="flex items-center gap-1 p-1 rounded-md bg-muted/50 w-fit">
-							<button
-								type="button"
-								class={cn(
-									'px-2.5 py-1 text-xs font-medium rounded transition-colors',
-									currentUnit === 'Kelvin' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-								)}
-								onclick={() => (currentUnit = 'Kelvin')}
-							>
-								K
-							</button>
-							<button
-								type="button"
-								class={cn(
-									'px-2.5 py-1 text-xs font-medium rounded transition-colors',
-									currentUnit === 'Celsius' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-								)}
-								onclick={() => (currentUnit = 'Celsius')}
-							>
-								°C
-							</button>
-							<button
-								type="button"
-								class={cn(
-									'px-2.5 py-1 text-xs font-medium rounded transition-colors',
-									currentUnit === 'Fahrenheit' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-								)}
-								onclick={() => (currentUnit = 'Fahrenheit')}
-							>
-								°F
-							</button>
-						</div>
-					</div>
+					<FeatureSidebarSnapshot
+						bind:currentUnit
+						{relativeMin}
+						{relativeMax}
+						{avgTemp}
+					/>
 
-					<!-- Distribution -->
-					<div class="space-y-3">
-						<h3 class="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-							<BarChart3Icon class="size-3.5" />
-							Distribution
-						</h3>
-						<div class="overflow-hidden">
-							<div class="h-[200px] p-2">
-								{#if convertedHistogram.length > 0}
-									<BarChart
-										data={convertedHistogram}
-										x="range"
-										xScale={scaleBand().padding(0.2)}
-										y="count"
-										yNice
-										series={[{ key: 'count', color: 'var(--chart-1)' }]}
-										props={{
-											xAxis: { format: (d) => d },
-											yAxis: { ticks: 4 },
-											bars: {
-												stroke: "none",
-											}
-										}}
-									/>
-								{:else}
-									<div class="h-full flex items-center justify-center text-muted-foreground text-sm">
-										No data available
-									</div>
-								{/if}
-							</div>
-						</div>
-					</div>
+					<FeatureSidebarTemporalChart
+						entries={temporalStatsEntries}
+						{currentUnit}
+						{selectedDate}
+						{dataSource}
+						on:dateChange={(event) => handleDateChange(event.detail)}
+					/>
+
+					<FeatureSidebarDistribution
+						{histogramData}
+						{currentUnit}
+					/>
 				{/if}
 
 				</div>

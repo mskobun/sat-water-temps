@@ -77,6 +77,20 @@ export type ArchiveEntry = {
   data_points: number | null;
 };
 
+export type FeatureStatsHistoryEntry = {
+  date: string;
+  source: string;
+  min_temp: number | null;
+  max_temp: number | null;
+  mean_temp: number | null;
+  median_temp: number | null;
+  std_dev: number | null;
+  data_points: number | null;
+  water_pixel_count: number | null;
+  land_pixel_count: number | null;
+  wtoff: boolean;
+};
+
 export async function getFeatureArchive(
   db: D1Database,
   featureId: string
@@ -96,6 +110,54 @@ export async function getFeatureArchive(
       date: r.date,
       source: String(r.source || 'ecostress'),
       data_points: r.data_points != null ? Number(r.data_points) : null,
+    }));
+  } catch (err) {
+    console.error('D1 query error:', err);
+    return [];
+  }
+}
+
+export async function getFeatureStatsHistory(
+  db: D1Database,
+  featureId: string
+): Promise<FeatureStatsHistoryEntry[]> {
+  try {
+    const result = await db
+      .prepare(
+        `SELECT
+          date,
+          source,
+          min_temp,
+          max_temp,
+          mean_temp,
+          median_temp,
+          std_dev,
+          data_points,
+          water_pixel_count,
+          land_pixel_count,
+          wtoff
+         FROM temperature_metadata
+         WHERE feature_id = ?
+         ORDER BY date DESC`
+      )
+      .bind(featureId)
+      .all();
+
+    const num = (v: unknown) =>
+      v != null && v !== '' && !Number.isNaN(Number(v)) ? Number(v) : null;
+
+    return (result.results || []).map((r: any) => ({
+      date: String(r.date),
+      source: String(r.source || 'ecostress'),
+      min_temp: num(r.min_temp),
+      max_temp: num(r.max_temp),
+      mean_temp: num(r.mean_temp),
+      median_temp: num(r.median_temp),
+      std_dev: num(r.std_dev),
+      data_points: num(r.data_points),
+      water_pixel_count: num(r.water_pixel_count),
+      land_pixel_count: num(r.land_pixel_count),
+      wtoff: Boolean(r.wtoff)
     }));
   } catch (err) {
     console.error('D1 query error:', err);
