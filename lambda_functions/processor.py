@@ -370,6 +370,28 @@ def compute_filter_stats(filter_flags, total_pixels, padding_count=0):
     return stats
 
 
+def summarize_temperature_series(values) -> Dict[str, float | None]:
+    """Compute summary statistics for a temperature series, ignoring NaNs."""
+    arr = np.asarray(values, dtype=np.float64)
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        return {
+            "min_temp": None,
+            "max_temp": None,
+            "mean_temp": None,
+            "median_temp": None,
+            "std_dev": None,
+        }
+
+    return {
+        "min_temp": float(np.min(finite)),
+        "max_temp": float(np.max(finite)),
+        "mean_temp": float(np.mean(finite)),
+        "median_temp": float(np.median(finite)),
+        "std_dev": float(np.std(finite)),
+    }
+
+
 def apply_filters(df, water_mask_flag):
     """Apply all pixel filters and return (filter_flags, suffix, padding_count).
 
@@ -611,14 +633,10 @@ def process_rasters(
     pixel_size_deg_x = abs(tf.a)
     pixel_size_deg_y = abs(tf.e)
 
+    temperature_stats = summarize_temperature_series(df["LST_filter"])
     metadata = {
         "date": date,
-        "min_temp": float(df["LST_filter"].min())
-        if not df["LST_filter"].empty
-        else None,
-        "max_temp": float(df["LST_filter"].max())
-        if not df["LST_filter"].empty
-        else None,
+        **temperature_stats,
         "data_points": int(len(df)),
         "water_pixel_count": valid_pixels,
         "land_pixel_count": land_pixels,

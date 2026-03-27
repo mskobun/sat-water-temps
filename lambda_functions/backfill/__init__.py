@@ -7,6 +7,7 @@ _HANDLERS = {
     "backfill:parquet": "backfill.parquet",
     "backfill:raster_meta": "backfill.raster_meta",
     "backfill:regzip": "backfill.regzip",
+    "backfill:temp_stats": "backfill.temp_stats",
 }
 
 

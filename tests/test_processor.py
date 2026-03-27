@@ -8,7 +8,12 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lambda_functions"))
 
-from processor import compute_filter_stats, apply_filters, INVALID_QC_VALUES
+from processor import (
+    compute_filter_stats,
+    apply_filters,
+    INVALID_QC_VALUES,
+    summarize_temperature_series,
+)
 
 
 def make_df(n=10, **overrides):
@@ -221,3 +226,32 @@ class TestApplyFilters:
         assert stats["histogram"].get("2", 0) == 1   # pixel 4: cloud
         assert stats["histogram"].get("4", 0) == 1   # pixel 5: water
         assert stats["histogram"].get("10", 0) == 1  # pixel 6: nodata(8) + cloud(2)
+
+
+class TestSummarizeTemperatureSeries:
+    def test_computes_all_summary_stats(self):
+        stats = summarize_temperature_series(pd.Series([300.0, 302.0, 304.0]))
+        assert stats == {
+            "min_temp": 300.0,
+            "max_temp": 304.0,
+            "mean_temp": 302.0,
+            "median_temp": 302.0,
+            "std_dev": pytest.approx(np.std([300.0, 302.0, 304.0])),
+        }
+
+    def test_ignores_nan_values(self):
+        stats = summarize_temperature_series(pd.Series([300.0, np.nan, 306.0]))
+        assert stats["min_temp"] == 300.0
+        assert stats["max_temp"] == 306.0
+        assert stats["mean_temp"] == 303.0
+        assert stats["median_temp"] == 303.0
+
+    def test_returns_none_when_all_values_missing(self):
+        stats = summarize_temperature_series(pd.Series([np.nan, np.nan]))
+        assert stats == {
+            "min_temp": None,
+            "max_temp": None,
+            "mean_temp": None,
+            "median_temp": None,
+            "std_dev": None,
+        }

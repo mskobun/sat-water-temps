@@ -356,6 +356,9 @@ class TestLandsatProcessOneRecordFixture:
         assert row["metadata"]["data_points"] > 0
         assert row["metadata"]["min_temp"] is not None
         assert row["metadata"]["max_temp"] is not None
+        assert row["metadata"]["mean_temp"] is not None
+        assert row["metadata"]["median_temp"] is not None
+        assert row["metadata"]["std_dev"] is not None
         assert "LANDSAT/Magat/lake/" in row["csv_r2_key"]
         assert "filter_stats" in row["metadata"]
         assert row["metadata"].get("source_crs")

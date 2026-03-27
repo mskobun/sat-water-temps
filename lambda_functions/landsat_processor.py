@@ -33,6 +33,7 @@ from processor import (
     upload_parquet_to_r2,
     compute_filter_stats,
     insert_metadata_to_d1,
+    summarize_temperature_series,
     GLOBAL_MIN,
     GLOBAL_MAX,
 )
@@ -321,10 +322,10 @@ def process_one_record(body):
         pixel_deg_x = pixel_m / (111320 * math.cos(math.radians(mid_lat)))
         pixel_deg_y = pixel_m / 110540
 
+        temperature_stats = summarize_temperature_series(df_valid["LST_filter"])
         metadata = {
             "date": date_str,
-            "min_temp": float(np.nanmin(filtered_lst)) if not np.all(np.isnan(filtered_lst)) else None,
-            "max_temp": float(np.nanmax(filtered_lst)) if not np.all(np.isnan(filtered_lst)) else None,
+            **temperature_stats,
             "data_points": int(len(df_valid)),
             "water_pixel_count": valid_pixels,
             "land_pixel_count": land_pixels,
