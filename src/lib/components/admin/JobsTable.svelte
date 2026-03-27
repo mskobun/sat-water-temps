@@ -2,6 +2,7 @@
 	import * as Table from '$lib/components/ui/table';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Badge } from '$lib/components/ui/badge';
+	import ThumbnailPreview from '$lib/components/ThumbnailPreview.svelte';
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 	import { format } from 'date-fns';
 	import { formatShortDate as formatDateShort } from '$lib/date-utils';
@@ -100,31 +101,12 @@
 				>
 					<Table.Cell class="p-1">
 						{#if job.status === 'success' && job.feature_id && job.date}
-							<Tooltip.Root delayDuration={0}>
-								<Tooltip.Trigger
-									onclick={(e: MouseEvent) => { e.stopPropagation(); window.location.href = `/feature/${job.feature_id}?date=${job.date}`; }}
-								>
-									<img
-										src="/api/feature/{job.feature_id}/tif/{job.date}/relative"
-										alt="{job.date}"
-										loading="lazy"
-										class="w-12 h-12 rounded object-cover bg-muted"
-									/>
-								</Tooltip.Trigger>
-								<Tooltip.Content
-									side="right"
-									class="p-1 bg-card border shadow-lg cursor-pointer"
-									arrowClasses="hidden"
-									onclick={(e: MouseEvent) => { e.stopPropagation(); window.location.href = `/feature/${job.feature_id}?date=${job.date}`; }}
-								>
-									<img
-										src="/api/feature/{job.feature_id}/tif/{job.date}/relative"
-										alt="{job.date}"
-										class="w-64 h-64 rounded object-cover"
-									/>
-									<p class="text-xs text-muted-foreground text-center py-1">Click to view on map</p>
-								</Tooltip.Content>
-							</Tooltip.Root>
+							<ThumbnailPreview
+								src="/api/feature/{job.feature_id}/tif/{job.date}/relative"
+								alt="{job.date}"
+								href="/feature/{job.feature_id}?date={job.date}"
+								class="block w-12 h-12"
+							/>
 						{:else if job.status === 'failed'}
 							<Tooltip.Root delayDuration={0}>
 								<Tooltip.Trigger>

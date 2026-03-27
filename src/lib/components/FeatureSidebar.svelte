@@ -2,6 +2,7 @@
 	import { createEventDispatcher } from 'svelte';
 	import * as Select from '$lib/components/ui/select';
 	import FeatureObservationCalendar from '$lib/components/FeatureObservationCalendar.svelte';
+	import SourceBadge from '$lib/components/SourceBadge.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Spinner } from '$lib/components/ui/spinner';
@@ -10,7 +11,7 @@
 	import { Slider } from '$lib/components/ui/slider';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { cn } from '$lib/utils.js';
-	import { formatShortDate, sourceLabel } from '$lib/date-utils';
+	import { formatShortDate } from '$lib/date-utils';
 	import ThermometerIcon from '@lucide/svelte/icons/thermometer';
 	import PaletteIcon from '@lucide/svelte/icons/palette';
 	import BarChart3Icon from '@lucide/svelte/icons/bar-chart-3';
@@ -272,9 +273,7 @@
 							<span>· {formatShortDate(selectedDate)}</span>
 						{/if}
 						{#if dataSource}
-							<span class="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium {dataSource === 'landsat' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300' : 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300'}">
-								{sourceLabel(dataSource)}
-							</span>
+							<SourceBadge source={dataSource} />
 						{/if}
 					</p>
 					<Tooltip.Provider>

@@ -1,4 +1,5 @@
 import { json } from '@sveltejs/kit';
+import { getFeatureArchive } from '$lib/db';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async ({ params, platform }) => {
@@ -7,30 +8,11 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 		return json({ error: 'Database not available' }, { status: 500 });
 	}
 
-	// Join the array from rest parameter back into a string
 	const featureId = params.id;
-	
-	try {
-		// Query all dates with metadata for this feature
-		const result = await db
-			.prepare(
-				`SELECT date, min_temp, max_temp, data_points, wtoff, source
-         FROM temperature_metadata
-         WHERE feature_id = ?
-         ORDER BY date DESC`
-			)
-			.bind(featureId)
-			.all();
 
-		const entries = result.results?.map((r: any) => ({
-			date: r.date,
-			source: String(r.source || 'ecostress'),
-			min_temp: r.min_temp,
-			max_temp: r.max_temp,
-			data_points: r.data_points,
-			wtoff: r.wtoff,
-		})) || [];
-		const dates = entries.map((e: any) => e.date);
+	try {
+		const entries = await getFeatureArchive(db, featureId);
+		const dates = entries.map((e) => e.date);
 		const latestDate = dates.length > 0 ? dates[0] : null;
 
 		return json(
@@ -51,4 +33,3 @@ export const GET: RequestHandler = async ({ params, platform }) => {
 		return json({ error: 'Database error' }, { status: 500 });
 	}
 };
-

@@ -71,6 +71,38 @@ export async function getParquetPaths(db: D1Database, featureId: string): Promis
   return (result.results || []).map((r: any) => String(r.parquet_path));
 }
 
+export type ArchiveEntry = {
+  date: string;
+  source: string;
+  data_points: number | null;
+};
+
+export async function getFeatureArchive(
+  db: D1Database,
+  featureId: string
+): Promise<ArchiveEntry[]> {
+  try {
+    const result = await db
+      .prepare(
+        `SELECT date, source, data_points
+         FROM temperature_metadata
+         WHERE feature_id = ?
+         ORDER BY date DESC`
+      )
+      .bind(featureId)
+      .all();
+
+    return (result.results || []).map((r: any) => ({
+      date: r.date,
+      source: String(r.source || 'ecostress'),
+      data_points: r.data_points != null ? Number(r.data_points) : null,
+    }));
+  } catch (err) {
+    console.error('D1 query error:', err);
+    return [];
+  }
+}
+
 export async function getFeatureDates(db: D1Database, featureId: string) {
   try {
     const result = await db
