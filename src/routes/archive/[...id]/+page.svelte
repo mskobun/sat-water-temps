@@ -11,6 +11,7 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { formatDateTime } from '$lib/date-utils';
 	import DownloadIcon from '@lucide/svelte/icons/download';
+	import { toast } from 'svelte-sonner';
 	import type { ArchiveEntry } from '$lib/db';
 
 	const featureId = $page.params.id;
@@ -20,7 +21,6 @@
 	let selectedDates = $state(new Set<string>());
 	let sourceFilter = $state<'all' | 'ecostress' | 'landsat'>('all');
 	let zipDownloading = $state(false);
-	let zipProgress = $state('');
 	let parquetDownloading = $state(false);
 
 	const filteredEntries = $derived(
@@ -69,12 +69,12 @@
 	async function downloadSelectedZip() {
 		if (selectedDates.size === 0) return;
 		zipDownloading = true;
-		zipProgress = `Fetching 0/${selectedDates.size}…`;
+		const dates = [...selectedDates];
+		const toastId = toast.loading(`Fetching ${dates.length} CSVs…`);
 
 		try {
 			const JSZip = (await import('jszip')).default;
 			const zip = new JSZip();
-			const dates = [...selectedDates];
 			let fetched = 0;
 
 			const results = await Promise.all(
@@ -83,12 +83,12 @@
 					if (!res.ok) throw new Error(`Failed to fetch CSV for ${date}`);
 					const blob = await res.blob();
 					fetched++;
-					zipProgress = `Fetching ${fetched}/${dates.length}…`;
+					toast.loading(`Fetching ${fetched}/${dates.length} CSVs…`, { id: toastId });
 					return { date, blob };
 				})
 			);
 
-			zipProgress = 'Creating ZIP…';
+			toast.loading('Creating ZIP…', { id: toastId });
 			for (const { date, blob } of results) {
 				zip.file(`${featureId}_${date}.csv`, blob);
 			}
@@ -100,12 +100,12 @@
 			a.download = `${featureId}_archive.zip`;
 			a.click();
 			URL.revokeObjectURL(url);
+			toast.success(`Downloaded ${dates.length} CSVs as ZIP`, { id: toastId });
 		} catch (err) {
 			console.error('ZIP download error:', err);
-			zipProgress = 'Error creating ZIP';
+			toast.error('Failed to create ZIP download', { id: toastId });
 		} finally {
 			zipDownloading = false;
-			setTimeout(() => (zipProgress = ''), 3000);
 		}
 	}
 
@@ -115,7 +115,7 @@
 			const listRes = await fetch(`/api/feature/${featureId}/parquet`);
 			const files: Array<{ path: string; size: number }> = await listRes.json();
 			if (files.length === 0) {
-				console.error('No parquet files available');
+				toast.error('No parquet files available for this feature');
 				return;
 			}
 
@@ -130,6 +130,7 @@
 			URL.revokeObjectURL(url);
 		} catch (err) {
 			console.error('Parquet download error:', err);
+			toast.error('Failed to download parquet file');
 		} finally {
 			parquetDownloading = false;
 		}
@@ -142,6 +143,7 @@
 			entries = data.entries || [];
 		} catch (err) {
 			console.error('Error loading archive:', err);
+			toast.error('Failed to load archive data');
 		} finally {
 			loading = false;
 		}
@@ -203,7 +205,7 @@
 				>
 					{#if zipDownloading}
 						<Spinner class="size-4 mr-2" />
-						{zipProgress}
+						Downloading…
 					{:else}
 						<DownloadIcon class="size-4 mr-2" />
 						Download Selected (ZIP)
