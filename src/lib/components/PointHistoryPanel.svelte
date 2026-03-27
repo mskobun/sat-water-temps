@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { parseDate } from '$lib/date-utils';
+	import { resolveSourceDateFromChartDetails } from '$lib/chart-date-selection';
 	import * as Chart from '$lib/components/ui/chart';
 	import { LineChart } from 'layerchart';
 	import { scaleUtc } from 'd3-scale';
-	import { curveNatural } from 'd3-shape';
 	import { Button } from '$lib/components/ui/button';
 	import { Spinner } from '$lib/components/ui/spinner';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -163,8 +163,17 @@
 	let chartData = $derived(
 		[...rows]
 			.reverse()
-			.map((r) => ({ date: parseDate(r.date), temperature: r.displayTemperature }))
+			.map((r) => ({
+				sourceDate: r.date,
+				date: parseDate(r.date),
+				temperature: r.displayTemperature
+			}))
 	);
+
+	function handlePointClick(_event: MouseEvent, details: unknown) {
+		const date = resolveSourceDateFromChartDetails(details);
+		if (date) ondatechange?.(date);
+	}
 
 	const chartConfig = {
 		temperature: { label: 'Temperature', color: 'var(--chart-1)' }
@@ -210,57 +219,66 @@
 		<!-- Chart -->
 		{#if chartData.length > 1}
 			<div class="rounded-md border bg-muted/10 px-1 pb-1">
-				<Chart.Container config={chartConfig} class="h-44 w-full">
+				<Chart.Container
+					config={chartConfig}
+					class="h-44 w-full [&_.lc-axis-tick-label]:[font-size:10px]"
+				>
 					<LineChart
 						data={chartData}
 						x="date"
 						xScale={scaleUtc()}
-						axis="x"
-						padding={{ top: 12, left: 24, bottom: 20, right: 24 }}
-						points={{ r: 4 }}
-							series={[{ key: 'temperature', label: 'Temperature', color: chartConfig.temperature.color }]}
-							props={{
-								spline: { curve: curveNatural, strokeWidth: 2 },
-								highlight: { points: { r: 6 } },
-								xAxis: {
-									format: (d: Date) =>
-										d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
-								}
-							}}
-						>
-							{#snippet tooltip()}
+						axis={true}
+						padding={{ top: 12, left: 44, bottom: 20, right: 16 }}
+						points={{ r: 2.5 }}
+						series={[{ key: 'temperature', label: 'Temperature', color: chartConfig.temperature.color }]}
+						onPointClick={handlePointClick}
+						props={{
+							spline: { strokeWidth: 2 },
+							highlight: { points: { r: 6 } },
+							xAxis: {
+								ticks: 4,
+								format: (d: Date) =>
+									d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+							},
+							yAxis: {
+								ticks: 4,
+								format: (v: number) => `${v.toFixed(1)}${unitSymbol}`
+							}
+						}}
+					>
+						{#snippet tooltip()}
 							<Chart.Tooltip
 								indicator="dot"
-									labelFormatter={(v) => {
-										if (!(v instanceof Date)) return String(v);
-										const date = v.toLocaleDateString('en-GB', {
-											day: 'numeric',
-											month: 'short',
-											year: 'numeric'
+								labelFormatter={(v) => {
+									if (!(v instanceof Date)) return String(v);
+									const date = v.toLocaleDateString('en-GB', {
+										day: 'numeric',
+										month: 'short',
+										year: 'numeric'
+									});
+									// Show time for ECOSTRESS (non-midnight observations)
+									if (v.getHours() !== 0 || v.getMinutes() !== 0) {
+										const time = v.toLocaleTimeString('en-GB', {
+											hour: '2-digit',
+											minute: '2-digit'
 										});
-										// Show time for ECOSTRESS (non-midnight observations)
-										if (v.getHours() !== 0 || v.getMinutes() !== 0) {
-											const time = v.toLocaleTimeString('en-GB', {
-												hour: '2-digit',
-												minute: '2-digit'
-											});
-											return `${date}, ${time}`;
-										}
-										return date;
-									}}
-								>
-									{#snippet formatter({ value })}
-										<div class="flex flex-1 items-center justify-between gap-4">
-											<span class="text-muted-foreground">Temp</span>
-											<span class="font-mono font-medium tabular-nums">
-												{Number(value).toFixed(2)}{unitSymbol}
-											</span>
-										</div>
-									{/snippet}
-								</Chart.Tooltip>
-							{/snippet}
-						</LineChart>
-					</Chart.Container>
+										return `${date}, ${time}`;
+									}
+									return date;
+								}}
+							>
+								{#snippet formatter({ value })}
+									<div class="flex flex-1 items-center justify-between gap-4">
+										<span class="text-muted-foreground">Temp</span>
+										<span class="font-mono font-medium tabular-nums">
+											{Number(value).toFixed(2)}{unitSymbol}
+										</span>
+									</div>
+								{/snippet}
+							</Chart.Tooltip>
+						{/snippet}
+					</LineChart>
+				</Chart.Container>
 			</div>
 
 		{:else if chartData.length === 0}

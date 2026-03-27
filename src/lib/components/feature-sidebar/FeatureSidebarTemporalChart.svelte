@@ -2,6 +2,7 @@
 	import { createEventDispatcher } from 'svelte';
 	import * as Chart from '$lib/components/ui/chart';
 	import { parseDate } from '$lib/date-utils';
+	import { resolveSourceDateFromChartDetails } from '$lib/chart-date-selection';
 	import { LineChart } from 'layerchart';
 	import { scaleUtc } from 'd3-scale';
 	import Clock3Icon from '@lucide/svelte/icons/clock-3';
@@ -56,24 +57,11 @@
 		);
 
 	function resolveDateFromDetails(details: unknown): string | null {
-		if (!details || typeof details !== 'object') return null;
-		const detailObj = details as Record<string, unknown>;
-		const data = detailObj.data as Record<string, unknown> | undefined;
-		if (!data) return null;
-
-		if (typeof data.sourceDate === 'string') return data.sourceDate;
-
-		const x = data.x;
-		const xDate =
-			x instanceof Date
-				? x
-				: typeof x === 'string' || typeof x === 'number'
-					? new Date(x)
-					: null;
-		if (!xDate || Number.isNaN(xDate.getTime())) return null;
-
-		const match = filteredEntries.find((entry) => parseDate(entry.date).getTime() === xDate.getTime());
-		return match?.date ?? null;
+		return resolveSourceDateFromChartDetails(
+			details,
+			(xDate) =>
+				filteredEntries.find((entry) => parseDate(entry.date).getTime() === xDate.getTime())?.date
+		);
 	}
 
 	function handlePointClick(_e: MouseEvent, details: unknown) {
