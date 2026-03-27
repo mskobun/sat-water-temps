@@ -214,9 +214,9 @@
 					{dateEntries}
 					{relativeMin}
 					{relativeMax}
-					on:dateChange={(event) => handleDateChange(event.detail)}
-					on:colorScaleChange={(event) => handleColorScaleChange(event.detail)}
-					on:tempFilterChange={(event) => dispatch('tempFilterChange', event.detail)}
+					onDateChange={handleDateChange}
+					onColorScaleChange={handleColorScaleChange}
+					onTempFilterChange={(value) => dispatch('tempFilterChange', value)}
 				/>
 
 				<Separator />

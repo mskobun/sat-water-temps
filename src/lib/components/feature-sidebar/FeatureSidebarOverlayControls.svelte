@@ -1,37 +1,53 @@
 <script lang="ts">
-	import { createEventDispatcher } from 'svelte';
+	import { onDestroy } from 'svelte';
 	import * as Select from '$lib/components/ui/select';
 	import FeatureObservationCalendar from '$lib/components/FeatureObservationCalendar.svelte';
 	import { Slider } from '$lib/components/ui/slider';
 	import FilterIcon from '@lucide/svelte/icons/filter';
 	import PaletteIcon from '@lucide/svelte/icons/palette';
 
-	export let featureId: string;
-	export let selectedDate: string = '';
-	export let selectedColorScale: 'relative' | 'fixed' | 'gray' = 'relative';
-	export let currentUnit: 'Kelvin' | 'Celsius' | 'Fahrenheit' = 'Celsius';
-	export let dateEntries: Array<{ date: string; source: string }> = [];
-	export let relativeMin: number = 0;
-	export let relativeMax: number = 0;
+	type Props = {
+		featureId: string;
+		selectedDate?: string;
+		selectedColorScale?: 'relative' | 'fixed' | 'gray';
+		currentUnit?: 'Kelvin' | 'Celsius' | 'Fahrenheit';
+		dateEntries?: Array<{ date: string; source: string }>;
+		relativeMin?: number;
+		relativeMax?: number;
+		onDateChange?: (value: string) => void;
+		onColorScaleChange?: (value: 'relative' | 'fixed' | 'gray') => void;
+		onTempFilterChange?: (value: { min: number | null; max: number | null }) => void;
+	};
 
-	const dispatch = createEventDispatcher<{
-		dateChange: string;
-		colorScaleChange: 'relative' | 'fixed' | 'gray';
-		tempFilterChange: { min: number | null; max: number | null };
-	}>();
+	let {
+		featureId,
+		selectedDate = $bindable(''),
+		selectedColorScale = $bindable('relative'),
+		currentUnit = 'Celsius',
+		dateEntries = [],
+		relativeMin = 0,
+		relativeMax = 0,
+		onDateChange,
+		onColorScaleChange,
+		onTempFilterChange
+	}: Props = $props();
 
 	const globalMin = 273.15;
 	const globalMax = 308.15;
 	const colorScaleLabels = { relative: 'Relative', fixed: 'Fixed', gray: 'Grayscale' } as const;
+	const FILTER_CHANGE_DEBOUNCE_MS = 100;
 
-	let filterRange: number[] = [0, 100];
+	let filterRange = $state([0, 100]);
+	let filterChangeTimeout: ReturnType<typeof setTimeout> | null = null;
 
-	$: unitSymbol = currentUnit === 'Kelvin' ? 'K' : currentUnit === 'Celsius' ? '°C' : '°F';
-	$: scaleMin = selectedColorScale === 'relative' ? relativeMin : globalMin;
-	$: scaleMax = selectedColorScale === 'relative' ? relativeMax : globalMax;
-	$: filterMinTemp = scaleMin + (filterRange[0] / 100) * (scaleMax - scaleMin);
-	$: filterMaxTemp = scaleMin + (filterRange[1] / 100) * (scaleMax - scaleMin);
-	$: isFiltering = filterRange[0] > 0 || filterRange[1] < 100;
+	let unitSymbol = $derived(
+		currentUnit === 'Kelvin' ? 'K' : currentUnit === 'Celsius' ? '°C' : '°F'
+	);
+	let scaleMin = $derived(selectedColorScale === 'relative' ? relativeMin : globalMin);
+	let scaleMax = $derived(selectedColorScale === 'relative' ? relativeMax : globalMax);
+	let filterMinTemp = $derived(scaleMin + (filterRange[0] / 100) * (scaleMax - scaleMin));
+	let filterMaxTemp = $derived(scaleMin + (filterRange[1] / 100) * (scaleMax - scaleMin));
+	let isFiltering = $derived(filterRange[0] > 0 || filterRange[1] < 100);
 
 	function convertTemp(kelvin: number, unit: 'Kelvin' | 'Celsius' | 'Fahrenheit'): number {
 		if (unit === 'Celsius') return kelvin - 273.15;
@@ -48,9 +64,32 @@
 		return ((temp - scaleMin) / (scaleMax - scaleMin)) * 100;
 	}
 
+	function clearFilterChangeTimeout() {
+		if (filterChangeTimeout !== null) {
+			clearTimeout(filterChangeTimeout);
+			filterChangeTimeout = null;
+		}
+	}
+
+	function dispatchTempFilterChange(min: number | null, max: number | null, debounce = true) {
+		clearFilterChangeTimeout();
+		if (!debounce) {
+			onTempFilterChange?.({ min, max });
+			return;
+		}
+		filterChangeTimeout = setTimeout(() => {
+			filterChangeTimeout = null;
+			onTempFilterChange?.({ min, max });
+		}, FILTER_CHANGE_DEBOUNCE_MS);
+	}
+
+	onDestroy(() => {
+		clearFilterChangeTimeout();
+	});
+
 	function resetFilter() {
 		filterRange = [0, 100];
-		dispatch('tempFilterChange', { min: null, max: null });
+		dispatchTempFilterChange(null, null, false);
 	}
 
 	export function resetControls() {
@@ -59,21 +98,21 @@
 
 	function handleDateChange(value: string) {
 		selectedDate = value;
-		dispatch('dateChange', selectedDate);
+		onDateChange?.(selectedDate);
 	}
 
 	function handleColorScaleChange(value: 'relative' | 'fixed' | 'gray') {
 		selectedColorScale = value;
-		dispatch('colorScaleChange', selectedColorScale);
+		onColorScaleChange?.(selectedColorScale);
 		resetFilter();
 	}
 
 	function handleFilterRangeChange(values: number[]) {
 		filterRange = values;
 		if (values[0] === 0 && values[1] === 100) {
-			dispatch('tempFilterChange', { min: null, max: null });
+			dispatchTempFilterChange(null, null);
 		} else {
-			dispatch('tempFilterChange', { min: percentToTemp(values[0]), max: percentToTemp(values[1]) });
+			dispatchTempFilterChange(percentToTemp(values[0]), percentToTemp(values[1]));
 		}
 	}
 
@@ -133,7 +172,7 @@
 					{colorScaleLabels[selectedColorScale]}
 				</Select.Trigger>
 				<Select.Content>
-					{#each Object.entries(colorScaleLabels) as [value, label]}
+					{#each Object.entries(colorScaleLabels) as [value, label] (value)}
 						<Select.Item {value} {label}>{label}</Select.Item>
 					{/each}
 				</Select.Content>
