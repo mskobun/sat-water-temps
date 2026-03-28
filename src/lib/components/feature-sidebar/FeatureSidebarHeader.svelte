@@ -3,7 +3,9 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { formatShortDate } from '$lib/date-utils';
+	import { toast } from 'svelte-sonner';
 	import DownloadIcon from '@lucide/svelte/icons/download';
+	import LinkIcon from '@lucide/svelte/icons/link';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 
 	export let featureId: string;
@@ -11,6 +13,15 @@
 	export let dataSource: string = '';
 	export let observationCount: number = 0;
 	export let showAdminActions: boolean = false;
+
+	async function copyLink() {
+		try {
+			await navigator.clipboard.writeText(window.location.href);
+			toast.success('Link copied to clipboard');
+		} catch {
+			toast.error('Failed to copy link');
+		}
+	}
 </script>
 
 <div class="flex items-center justify-between gap-2">
@@ -36,6 +47,15 @@
 					<Tooltip.Content>Manage in admin</Tooltip.Content>
 				</Tooltip.Root>
 			{/if}
+			<Tooltip.Root>
+				<Tooltip.Trigger>
+					<Button variant="ghost" size="icon-sm" onclick={copyLink}>
+						<LinkIcon class="size-3.5" />
+						<span class="sr-only">Copy link</span>
+					</Button>
+				</Tooltip.Trigger>
+				<Tooltip.Content>Copy link</Tooltip.Content>
+			</Tooltip.Root>
 			<Tooltip.Root>
 				<Tooltip.Trigger>
 					<Button variant="ghost" size="icon-sm" href={`/archive/${featureId}`}>

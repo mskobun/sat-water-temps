@@ -14,6 +14,8 @@
 		dateEntries?: Array<{ date: string; source: string }>;
 		relativeMin?: number;
 		relativeMax?: number;
+		initialFilterMin?: number | null;
+		initialFilterMax?: number | null;
 		onDateChange?: (value: string) => void;
 		onColorScaleChange?: (value: 'relative' | 'fixed' | 'gray') => void;
 		onTempFilterChange?: (value: { min: number | null; max: number | null }) => void;
@@ -27,10 +29,28 @@
 		dateEntries = [],
 		relativeMin = 0,
 		relativeMax = 0,
+		initialFilterMin = null,
+		initialFilterMax = null,
 		onDateChange,
 		onColorScaleChange,
 		onTempFilterChange
 	}: Props = $props();
+
+	// Apply initial filter values from URL once scale range is known
+	let initialFilterApplied = false;
+	$effect(() => {
+		if (initialFilterApplied) return;
+		if (initialFilterMin == null && initialFilterMax == null) return;
+		if (scaleMin === 0 && scaleMax === 0) return; // data not loaded yet
+		initialFilterApplied = true;
+		const lo = initialFilterMin != null ? Math.max(0, Math.min(100, tempToPercent(initialFilterMin))) : 0;
+		const hi = initialFilterMax != null ? Math.max(0, Math.min(100, tempToPercent(initialFilterMax))) : 100;
+		filterRange = [lo, hi];
+		// Dispatch immediately so parent applies the filter
+		if (lo > 0 || hi < 100) {
+			onTempFilterChange?.({ min: initialFilterMin, max: initialFilterMax });
+		}
+	});
 
 	const globalMin = 273.15;
 	const globalMax = 308.15;

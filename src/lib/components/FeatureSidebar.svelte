@@ -41,6 +41,8 @@
 	export let waterOff: boolean = false;
 	export let temperatureLoading: boolean = false;
 	export let initialDate: string = '';
+	export let initialFilterMin: number | null = null;
+	export let initialFilterMax: number | null = null;
 
 	$: session = $page.data.session;
 
@@ -214,6 +216,8 @@
 					{dateEntries}
 					{relativeMin}
 					{relativeMax}
+					{initialFilterMin}
+					{initialFilterMax}
 					onDateChange={handleDateChange}
 					onColorScaleChange={handleColorScaleChange}
 					onTempFilterChange={(value) => dispatch('tempFilterChange', value)}

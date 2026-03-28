@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
 	import { browser } from '$app/environment';
-	import { goto, replaceState } from '$app/navigation';
+	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
+	import { useSearchParams, createSearchParamsSchema } from 'runed/kit';
 	import { MapLibre, GeoJSONSource, ImageSource, FillLayer, LineLayer, CircleLayer, RasterLayer } from 'svelte-maplibre-gl';
 	import type {
 		Map,
@@ -133,7 +134,30 @@
 
 	// URL is the single source of truth
 	let urlFeatureId = $derived($page.params.id ?? null);
-	let urlDate = $derived($page.url.searchParams.get('date') ?? '');
+
+	// URL search params — schema defines all shareable view state
+	const urlSchema = createSearchParamsSchema({
+		date:  { type: 'string', default: '' },
+		scale: { type: 'string', default: 'relative' },
+		unit:  { type: 'string', default: 'C' },
+		tmin:  { type: 'string', default: '' },
+		tmax:  { type: 'string', default: '' },
+		lng:   { type: 'string', default: '' },
+		lat:   { type: 'string', default: '' },
+		zoom:  { type: 'string', default: '' },
+		plng:  { type: 'string', default: '' },
+		plat:  { type: 'string', default: '' },
+	});
+	const params = useSearchParams(urlSchema, {
+		pushHistory: false,
+		showDefaults: false,
+		noScroll: true,
+		debounce: 100,
+	});
+
+	// Initial filter values derived from URL (passed to sidebar once)
+	let initialFilterMin = $derived(params.tmin ? parseFloat(params.tmin) : null);
+	let initialFilterMax = $derived(params.tmax ? parseFloat(params.tmax) : null);
 
 	// Derive selected feature FROM the URL
 	let selectedFeature = $derived.by(() => {
@@ -213,11 +237,37 @@
 				center: [center.lng, center.lat],
 				zoom: currentMap.getZoom()
 			};
-			if (bounds) {
-				// Skip animation on initial page load (just jump to the feature)
+
+			// Apply URL params for initial state
+			const uScale = untrack(() => params.scale);
+			const uUnit = untrack(() => params.unit);
+			const uLng = untrack(() => params.lng);
+			const uLat = untrack(() => params.lat);
+			const uZoom = untrack(() => params.zoom);
+			const uPlng = untrack(() => params.plng);
+			const uPlat = untrack(() => params.plat);
+
+			if (uScale === 'fixed' || uScale === 'gray') selectedColorScale = uScale;
+			if (uUnit === 'K') currentUnit = 'Kelvin';
+			else if (uUnit === 'F') currentUnit = 'Fahrenheit';
+
+			// Map viewport from URL takes precedence over fitBounds
+			if (uLng && uLat && uZoom) {
+				currentMap.jumpTo({
+					center: [parseFloat(uLng), parseFloat(uLat)],
+					zoom: parseFloat(uZoom)
+				});
+			} else if (bounds) {
 				const animate = !isInitialNavigation;
 				currentMap.fitBounds(bounds, { padding: 20, animate });
 			}
+
+			// Restore selected pixel from URL
+			if (uPlng && uPlat) {
+				selectedPoint = { longitude: parseFloat(uPlng), latitude: parseFloat(uPlat) };
+				pointHistoryOpen = true;
+			}
+
 			isInitialNavigation = false;
 			// Don't clear selectedDate/selectedColorScale here — sidebar sets them when it
 			// runs loadDates(). Clearing here would overwrite the date on direct navigation
@@ -414,23 +464,12 @@
 		}
 	}
 
-	function syncDateInUrl(date: string) {
-		if (!selectedFeature || !date) return;
-
-		const currentUrlDate = $page.url.searchParams.get('date') ?? '';
-		if (date === currentUrlDate) return;
-
-		const url = new URL($page.url);
-		url.searchParams.set('date', date);
-		replaceState(url, $page.state);
-	}
-
 	function switchToDate(date: string) {
 		selectedDate = date;
 		if (selectedFeature) {
 			loadTemperatureData(selectedFeature.id, date);
 		}
-		syncDateInUrl(date);
+		params.date = date;
 	}
 
 	function handleDateChange(event: CustomEvent<string>) {
@@ -446,6 +485,7 @@
 		}
 		// Update deck.gl layer colors
 		if (desktopTriplets) updateDeckLayer();
+		params.scale = event.detail;
 	}
 
 	function handleTempFilterChange(event: CustomEvent<{ min: number | null; max: number | null }>) {
@@ -453,6 +493,8 @@
 		tempFilterMax = event.detail.max;
 		// Update deck.gl layer filtering
 		if (desktopTriplets) updateDeckLayer();
+		params.tmin = tempFilterMin != null ? tempFilterMin.toFixed(2) : '';
+		params.tmax = tempFilterMax != null ? tempFilterMax.toFixed(2) : '';
 	}
 
 	function updateDeckLayer() {
@@ -637,6 +679,36 @@
 			deckOverlay = null;
 		};
 	});
+
+	// Sync map viewport to URL on move (debounced by useSearchParams)
+	$effect(() => {
+		if (!map || !mapReady) return;
+		const m = map;
+		const handler = () => {
+			if (!selectedFeature) return;
+			const c = m.getCenter();
+			params.update({
+				lng: c.lng.toFixed(4),
+				lat: c.lat.toFixed(4),
+				zoom: m.getZoom().toFixed(2),
+			});
+		};
+		m.on('moveend', handler);
+		return () => { m.off('moveend', handler); };
+	});
+
+	// Sync unit to URL (untrack selectedFeature to avoid loop: params write → $page update → selectedFeature re-derive)
+	$effect(() => {
+		if (!untrack(() => selectedFeature)) return;
+		params.unit = currentUnit === 'Kelvin' ? 'K' : currentUnit === 'Fahrenheit' ? 'F' : 'C';
+	});
+
+	// Sync selected pixel to URL
+	$effect(() => {
+		if (!untrack(() => selectedFeature)) return;
+		params.plng = selectedPoint ? selectedPoint.longitude.toFixed(5) : '';
+		params.plat = selectedPoint ? selectedPoint.latitude.toFixed(5) : '';
+	});
 </script>
 
 <svelte:head>
@@ -675,7 +747,9 @@
 						bind:this={featureSidebarRef}
 						featureId={selectedFeature.id}
 						featureName={selectedFeature.name ?? ''}
-						initialDate={urlDate}
+						initialDate={params.date}
+						{initialFilterMin}
+						{initialFilterMax}
 						bind:selectedDate
 						bind:selectedColorScale
 						bind:currentUnit
@@ -885,7 +959,9 @@
 						bind:this={featureSidebarRef}
 						featureId={selectedFeature.id}
 						featureName={selectedFeature.name ?? ''}
-						initialDate={urlDate}
+						initialDate={params.date}
+						{initialFilterMin}
+						{initialFilterMax}
 						bind:selectedDate
 						bind:selectedColorScale
 						bind:currentUnit
