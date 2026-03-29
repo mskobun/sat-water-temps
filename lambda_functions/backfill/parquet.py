@@ -29,7 +29,8 @@ from backfill.base import (
     get_csv_date_tif_rows,
     update_parquet_path_in_d1,
 )
-from processor import parquet_feature_schema
+from processor import parquet_date_type, parquet_feature_schema
+from shared import to_parquet_date_utc
 
 
 def _csv_rowcol_complete(df_clean: pd.DataFrame, row_col: str | None, col_col: str | None) -> bool:
@@ -183,12 +184,14 @@ def handle(body: dict):
                                 f"TIF derivation failed for {csv_path}"
                             )
 
+                date_utc = to_parquet_date_utc(date)
+                ts_type = parquet_date_type()
                 table = pa.table(
                     {
                         "longitude": pa.array(df_clean[lng_col].values, type=pa.float64()),
                         "latitude": pa.array(df_clean[lat_col].values, type=pa.float64()),
                         "temperature": pa.array(df_clean[temp_col].values, type=pa.float32()),
-                        "date": pa.array([date] * n, type=pa.string()),
+                        "date": pa.array([date_utc] * n, type=ts_type),
                         "row": row_arr,
                         "col": col_arr,
                     },

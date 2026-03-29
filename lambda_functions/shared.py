@@ -1,5 +1,5 @@
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -76,3 +76,13 @@ def to_iso_datetime(date_str):
     ss = date_str[11:13] if len(date_str) >= 13 else "00"
     d = datetime(year, 1, 1) + timedelta(days=doy - 1)
     return f"{d.strftime('%Y-%m-%d')}T{hh}:{mm}:{ss}"
+
+
+def to_parquet_date_utc(date_str: str) -> datetime:
+    """Parse project date strings to timezone-aware UTC datetime for Parquet timestamps.
+
+    Accepts the same forms as `to_iso_datetime` (ECOSTRESS DOY, Landsat ISO date/datetime).
+    """
+    iso = to_iso_datetime(str(date_str).strip())
+    # Satellite times are stored as naive ISO wall-clock; treat as UTC for interchange.
+    return datetime.fromisoformat(iso).replace(tzinfo=timezone.utc)

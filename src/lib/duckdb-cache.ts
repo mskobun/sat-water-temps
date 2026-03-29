@@ -56,6 +56,37 @@ function quoteSqlLiteral(value: string): string {
 	return `'${value.replaceAll("'", "''")}'`;
 }
 
+/** Match Parquet `date` (TIMESTAMP UTC) to the UI/D1 ISO string. */
+function sqlDateEqualsUiDate(date: string): string {
+	return `date = CAST(${quoteSqlLiteral(date)} AS TIMESTAMP)`;
+}
+
+/** Format DuckDB/Arrow timestamp values as D1-style `YYYY-MM-DDTHH:MM:SS` for API URLs. */
+function arrowDateCellToApiIso(value: unknown): string {
+	if (value == null) return '';
+	const pad = (n: number) => String(n).padStart(2, '0');
+	if (value instanceof Date) {
+		return `${value.getUTCFullYear()}-${pad(value.getUTCMonth() + 1)}-${pad(value.getUTCDate())}T${pad(value.getUTCHours())}:${pad(value.getUTCMinutes())}:${pad(value.getUTCSeconds())}`;
+	}
+	if (typeof value === 'number' && Number.isFinite(value)) {
+		// Arrow timestamps are often microseconds since epoch; JS Date wants ms.
+		const ms = value > 1e14 ? value / 1000 : value;
+		const d = new Date(ms);
+		return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+	}
+	if (typeof value === 'bigint') {
+		const n = Number(value);
+		const ms = n > 1e14 ? n / 1000 : n;
+		const d = new Date(ms);
+		return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
+	}
+	if (typeof value === 'string') {
+		if (value.length === 10 && value[4] === '-') return `${value}T00:00:00`;
+		return value;
+	}
+	return String(value);
+}
+
 function formatFiniteNumber(value: number): string {
 	if (!Number.isFinite(value)) {
 		throw new Error(`Expected a finite number, received ${value}`);
@@ -275,7 +306,7 @@ export async function getPointsForDate(
 					connection.query(`
 				SELECT longitude, latitude, temperature, "row", "col"
 				FROM ${quoteSqlLiteral(file.name)}
-				WHERE date = ${quoteSqlLiteral(date)}
+				WHERE ${sqlDateEqualsUiDate(date)}
 			`)
 				);
 				landsatHasRowCol = true;
@@ -284,7 +315,7 @@ export async function getPointsForDate(
 					connection.query(`
 				SELECT longitude, latitude, temperature
 				FROM ${quoteSqlLiteral(file.name)}
-				WHERE date = ${quoteSqlLiteral(date)}
+				WHERE ${sqlDateEqualsUiDate(date)}
 			`)
 				);
 				landsatHasRowCol = false;
@@ -294,7 +325,7 @@ export async function getPointsForDate(
 				connection.query(`
 				SELECT longitude, latitude, temperature
 				FROM ${quoteSqlLiteral(file.name)}
-				WHERE date = ${quoteSqlLiteral(date)}
+				WHERE ${sqlDateEqualsUiDate(date)}
 			`)
 			);
 		}
@@ -444,7 +475,7 @@ export async function getPointHistory(
 
 		for (let i = 0; i < table.numRows; i++) {
 			const entry: PointHistoryEntry = {
-				date: String(dateVector.get(i)),
+				date: arrowDateCellToApiIso(dateVector.get(i)),
 				longitude: Number(longitudeVector.get(i)),
 				latitude: Number(latitudeVector.get(i)),
 				temperature: Number(temperatureVector.get(i)),

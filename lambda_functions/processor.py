@@ -1,5 +1,7 @@
 import json
 import os
+from datetime import datetime, timezone
+
 import numpy as np
 import pandas as pd
 import io
@@ -9,7 +11,13 @@ from typing import Dict
 from aws_xray_sdk.core import xray_recorder
 from aws_xray_sdk.core import patch_all
 from d1 import query_d1, log_job_to_d1
-from shared import get_token, create_http_session, extract_metadata, to_iso_datetime
+from shared import (
+    get_token,
+    create_http_session,
+    extract_metadata,
+    to_iso_datetime,
+    to_parquet_date_utc,
+)
 
 import boto3
 import pyarrow as pa
@@ -30,6 +38,11 @@ GLOBAL_MIN = 273.15  # Kelvin
 GLOBAL_MAX = 308.15  # Kelvin
 
 
+def parquet_date_type() -> pa.DataType:
+    """Arrow type for canonical feature Parquet `date` column (microsecond UTC)."""
+    return pa.timestamp("us", tz="UTC")
+
+
 def parquet_feature_schema() -> pa.Schema:
     """Canonical schema for per-feature Parquet (ECOSTRESS + Landsat)."""
     return pa.schema(
@@ -37,15 +50,35 @@ def parquet_feature_schema() -> pa.Schema:
             pa.field("longitude", pa.float64()),
             pa.field("latitude", pa.float64()),
             pa.field("temperature", pa.float32()),
-            pa.field("date", pa.string()),
+            pa.field("date", parquet_date_type()),
             pa.field("row", pa.int32(), nullable=True),
             pa.field("col", pa.int32(), nullable=True),
         ]
     )
 
 
+def _row_group_first_date_key(tbl: pa.Table):
+    """First row `date` instant for deduplication (UTC). Expects timestamp column after migration."""
+    col = tbl.column("date")
+    if tbl.num_rows == 0:
+        return None
+    scalar = col[0]
+    if not scalar.is_valid:
+        return None
+    py = scalar.as_py()
+    if py is None:
+        return None
+    if not isinstance(py, datetime):
+        raise ValueError(
+            "Parquet row group has non-timestamp `date`; re-run parquet backfill to migrate."
+        )
+    if py.tzinfo is None:
+        return py.replace(tzinfo=timezone.utc)
+    return py.astimezone(timezone.utc)
+
+
 def align_parquet_table_to_feature_schema(tbl: pa.Table) -> pa.Table:
-    """Cast legacy row groups (float32 lon/lat, no row/col) to the current schema."""
+    """Cast older physical types (e.g. float32 lon/lat, missing row/col) to the current schema."""
     target = parquet_feature_schema()
     n = tbl.num_rows
     out: Dict[str, pa.Array] = {}
@@ -297,19 +330,21 @@ def upload_csv_to_r2(s3_client, bucket_name, key, csv_file_path):
 def upload_parquet_to_r2(s3_client, bucket_name, parquet_key, df, date):
     """Append a row group to a per-feature Parquet file in R2.
 
-    Schema: longitude/latitude (float64), temperature (float32), date (string),
+    Schema: longitude/latitude (float64), temperature (float32), date (timestamp UTC),
     row/col (int32, nullable in legacy row groups).
     Each date becomes one row group. If the file already exists, existing row groups are
     preserved and the new date is appended (or replaced if already present).
     """
     schema = parquet_feature_schema()
+    ts_type = parquet_date_type()
+    date_utc = to_parquet_date_utc(date)
 
     new_table = pa.table(
         {
             "longitude": pa.array(df["longitude"].values, type=pa.float64()),
             "latitude": pa.array(df["latitude"].values, type=pa.float64()),
             "temperature": pa.array(df["LST_filter"].values, type=pa.float32()),
-            "date": pa.array([date] * len(df), type=pa.string()),
+            "date": pa.array([date_utc] * len(df), type=ts_type),
             "row": pa.array(df["row"].astype("int32").values, type=pa.int32()),
             "col": pa.array(df["col"].astype("int32").values, type=pa.int32()),
         },
@@ -325,9 +360,10 @@ def upload_parquet_to_r2(s3_client, bucket_name, parquet_key, df, date):
         for i in range(existing_pf.metadata.num_row_groups):
             rg_table = existing_pf.read_row_group(i)
             # Skip row groups for the same date (we're replacing)
-            rg_dates = rg_table.column("date").to_pylist()
-            if rg_dates and rg_dates[0] != date:
-                existing_tables.append(rg_table)
+            rg_key = _row_group_first_date_key(rg_table)
+            if rg_key == date_utc:
+                continue  # replace this row group with the new upload
+            existing_tables.append(rg_table)
     except Exception as e:
         err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
         if err_code not in ("NoSuchKey", "404"):
