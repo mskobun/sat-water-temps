@@ -150,7 +150,9 @@ function createTemperatureLayer(
 				onHover({ temperature: null, x: info.x, y: info.y });
 			}
 		},
-		onClick: (info: PickingInfo) => {
+		onClick: (info: PickingInfo, event: any) => {
+			// Ignore right-clicks (handled by context menu)
+			if (event?.rightButton) return;
 			if (info.index >= 0) {
 				const o = info.index * 3;
 				const temp = triplets[o + 2];

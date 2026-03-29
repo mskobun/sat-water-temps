@@ -24,9 +24,12 @@
 	import { fetchTemperatureMetadata } from '$lib/api';
 	import { Kbd } from '$lib/components/ui/kbd';
 	import * as Tooltip from '$lib/components/ui/tooltip';
+	import { toast } from 'svelte-sonner';
 	import type { Snippet } from 'svelte';
 	import XIcon from '@lucide/svelte/icons/x';
 	import ChevronUpIcon from '@lucide/svelte/icons/chevron-up';
+	import HistoryIcon from '@lucide/svelte/icons/history';
+	import CopyIcon from '@lucide/svelte/icons/copy';
 
 	const isMobile = new IsMobile();
 	const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
@@ -546,6 +549,67 @@
 		}
 	}
 
+	// Right-click context menu state
+	let contextMenuOpen = $state(false);
+	let contextMenuX = $state(0);
+	let contextMenuY = $state(0);
+	let contextMenuLngLat: { lng: number; lat: number } | null = $state(null);
+	let mapContainerEl: HTMLDivElement | undefined = $state();
+
+	function handleMapContextMenu(e: MouseEvent) {
+		if (!map) return;
+		e.preventDefault();
+		const rect = map.getCanvas().getBoundingClientRect();
+		const point = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+		const lngLat = map.unproject(point as any);
+		contextMenuLngLat = { lng: lngLat.lng, lat: lngLat.lat };
+		// Position menu, clamping to viewport so it doesn't overflow
+		const menuW = 180;
+		const menuH = 80;
+		contextMenuX = Math.min(e.clientX, window.innerWidth - menuW);
+		contextMenuY = Math.min(e.clientY, window.innerHeight - menuH);
+		contextMenuOpen = true;
+	}
+
+	function closeContextMenu() {
+		contextMenuOpen = false;
+	}
+
+	function handleViewHistoryHere() {
+		if (!contextMenuLngLat || !selectedFeature) return;
+		selectedPoint = { longitude: contextMenuLngLat.lng, latitude: contextMenuLngLat.lat };
+		pointHistoryOpen = true;
+		closeContextMenu();
+	}
+
+	function handleCopyCoordinates() {
+		if (!contextMenuLngLat) return;
+		const text = `${contextMenuLngLat.lat.toFixed(6)}, ${contextMenuLngLat.lng.toFixed(6)}`;
+		navigator.clipboard.writeText(text);
+		toast.success('Coordinates copied', { description: text });
+		closeContextMenu();
+	}
+
+	// Close context menu on click outside, scroll, or Escape
+	function handleWindowClick() {
+		if (contextMenuOpen) closeContextMenu();
+	}
+	function handleWindowKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape' && contextMenuOpen) {
+			e.preventDefault();
+			e.stopPropagation();
+			closeContextMenu();
+		}
+	}
+
+	// Attach contextmenu listener to map container (captures events from deck.gl overlay too)
+	$effect(() => {
+		const el = mapContainerEl;
+		if (!el) return;
+		el.addEventListener('contextmenu', handleMapContextMenu);
+		return () => el.removeEventListener('contextmenu', handleMapContextMenu);
+	});
+
 	function handleMapLoad() {
 		mapReady = true;
 	}
@@ -715,7 +779,7 @@
 	<title>{selectedFeature ? `${selectedFeature.name} — Satellite Water Temps` : 'Satellite Water Temperature Monitoring'}</title>
 </svelte:head>
 
-<svelte:window onkeydown={handleLayoutKeydown} />
+<svelte:window onkeydown={(e) => { handleWindowKeydown(e); handleLayoutKeydown(e); }} onclick={handleWindowClick} />
 
 <Sidebar.Provider open={sidebarOpen} onOpenChange={(open) => { if (!open) handleSidebarClose(); }}>
 	<div class="flex h-screen w-full">
@@ -772,7 +836,7 @@
 		<!-- Main content (map + footer) -->
 		<main class="flex-1 flex flex-col min-w-0">
 			<!-- Map Container -->
-			<div class="flex-1 relative w-full">
+			<div class="flex-1 relative w-full" bind:this={mapContainerEl}>
 				<MapLibre
 					bind:map
 					class="h-full w-full"
@@ -784,7 +848,7 @@
 				onclick={handleMapClick}
 				onmousemove={handleMouseMove}
 				onmouseout={() => { hoveredTemp = null; }}
-				onmovestart={() => { hoveredTemp = null; }}
+				onmovestart={() => { hoveredTemp = null; closeContextMenu(); }}
 				onload={handleMapLoad}
 				>
 					{#if geojsonData}
@@ -1001,6 +1065,38 @@
 				/>
 			</Dialog.Content>
 		</Dialog.Root>
+	{/if}
+
+	<!-- Right-click context menu (custom, to work over deck.gl overlay) -->
+	{#if contextMenuOpen && contextMenuLngLat}
+		<div
+			class="fixed z-50 min-w-36 rounded-lg p-1 shadow-md bg-popover text-popover-foreground ring-1 ring-foreground/10 animate-in fade-in-0 zoom-in-95"
+			style="left: {contextMenuX}px; top: {contextMenuY}px;"
+			role="menu"
+		>
+			<div class="px-2 py-1.5 text-xs text-muted-foreground tabular-nums">
+				{contextMenuLngLat.lat.toFixed(6)}, {contextMenuLngLat.lng.toFixed(6)}
+			</div>
+			<div class="bg-border -mx-1 my-1 h-px"></div>
+			<button
+				role="menuitem"
+				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+				disabled={!selectedFeature}
+				onclick={handleViewHistoryHere}
+			>
+				<HistoryIcon class="size-4 shrink-0" />
+				<span class="flex-1">View history here</span>
+				<Kbd class="text-[10px]">Click</Kbd>
+			</button>
+			<button
+				role="menuitem"
+				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+				onclick={handleCopyCoordinates}
+			>
+				<CopyIcon class="size-4 shrink-0" />
+				Copy coordinates
+			</button>
+		</div>
 	{/if}
 
 	<!-- Hidden slot for child pages (they don't render anything) -->
