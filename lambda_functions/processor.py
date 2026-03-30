@@ -335,16 +335,25 @@ def upload_csv_to_r2(s3_client, bucket_name, key, csv_file_path):
 
 
 def upload_parquet_to_r2(s3_client, bucket_name, parquet_key, df, date):
-    """Append a row group to a per-feature Parquet file in R2.
+    """Append data to a per-year, sorted Parquet file in R2.
 
-    Schema: longitude/latitude (float64), temperature (float32), date (timestamp UTC),
-    row/col (int32, nullable in legacy row groups).
-    Each date becomes one row group. If the file already exists, existing row groups are
-    preserved and the new date is appended (or replaced if already present).
+    The caller passes a base key (without year suffix). This function derives
+    the year from `date` and writes to `{base}_YYYY.parquet`.
+
+    All rows for a year file are concatenated into one table sorted by
+    (longitude, latitude) for optimal compression and fast full-file fetches.
+    If the file already exists, existing data is merged (replacing any rows
+    for the same date) before sorting and writing.
+
+    Returns the actual year-suffixed key used.
     """
     schema = parquet_feature_schema()
     ts_type = parquet_date_type()
     date_utc = to_parquet_date_utc(date)
+
+    # Derive year-suffixed key
+    year = date_utc.year
+    year_key = parquet_key.replace(".parquet", f"_{year}.parquet")
 
     new_table = pa.table(
         {
@@ -358,40 +367,40 @@ def upload_parquet_to_r2(s3_client, bucket_name, parquet_key, df, date):
         schema=schema,
     )
 
-    # Download existing Parquet if it exists, to append
+    # Download existing year Parquet if it exists, to merge
     existing_tables = []
     try:
-        resp = s3_client.get_object(Bucket=bucket_name, Key=parquet_key)
+        resp = s3_client.get_object(Bucket=bucket_name, Key=year_key)
         existing_buf = resp["Body"].read()
         existing_pf = pq.ParquetFile(pa.BufferReader(existing_buf))
         for i in range(existing_pf.metadata.num_row_groups):
             rg_table = existing_pf.read_row_group(i)
-            # Skip row groups for the same date (we're replacing)
+            # Skip rows for the same date (we're replacing)
             rg_key = _row_group_first_date_key(rg_table)
             if rg_key == date_utc:
-                continue  # replace this row group with the new upload
-            existing_tables.append(rg_table)
+                continue
+            existing_tables.append(align_parquet_table_to_feature_schema(rg_table))
     except Exception as e:
         err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
         if err_code not in ("NoSuchKey", "404"):
-            # If we can't read existing, just write new (first write or corruption)
-            print(f"Warning: could not read existing Parquet {parquet_key}: {e}")
+            print(f"Warning: could not read existing Parquet {year_key}: {e}")
 
-    # Write all row groups (existing + new) to a buffer
+    # Concatenate all tables, sort by (longitude, latitude), write as one sorted file
+    all_tables = existing_tables + [new_table]
+    combined = pa.concat_tables(all_tables)
+    sort_indices = pc.sort_indices(combined, sort_keys=[("longitude", "ascending"), ("latitude", "ascending")])
+    combined = combined.take(sort_indices)
+
     buf = io.BytesIO()
-    writer = pq.ParquetWriter(buf, schema, compression="zstd")
-    for t in existing_tables:
-        writer.write_table(align_parquet_table_to_feature_schema(t))
-    writer.write_table(new_table)
-    writer.close()
+    pq.write_table(combined, buf, compression="zstd")
 
     buf.seek(0)
     s3_client.put_object(
-        Bucket=bucket_name, Key=parquet_key, Body=buf.getvalue(),
+        Bucket=bucket_name, Key=year_key, Body=buf.getvalue(),
         ContentType="application/octet-stream",
     )
-    print(f"Uploaded Parquet to {parquet_key} ({len(existing_tables) + 1} row groups, {len(buf.getvalue()):,} bytes)")
-    return parquet_key
+    print(f"Uploaded Parquet to {year_key} ({combined.num_rows:,} rows, {len(buf.getvalue()):,} bytes)")
+    return year_key
 
 
 def compute_filter_stats(filter_flags, total_pixels, padding_count=0):
@@ -646,9 +655,9 @@ def process_rasters(
     csv_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.csv.gz"
     upload_csv_to_r2(s3_client, bucket_name, csv_key, filter_csv_path)
 
-    # Parquet (one file per feature, one row group per date)
-    parquet_key = f"{R2_PREFIX}/{name}/{location}/{name}_{location}.parquet"
-    upload_parquet_to_r2(s3_client, bucket_name, parquet_key, df, date)
+    # Parquet (per-year sorted file)
+    parquet_base_key = f"{R2_PREFIX}/{name}/{location}/{name}_{location}.parquet"
+    parquet_key = upload_parquet_to_r2(s3_client, bucket_name, parquet_base_key, df, date)
 
     # PNGs for all scales
     png_r2_keys = {}

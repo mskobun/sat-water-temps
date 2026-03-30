@@ -14,10 +14,12 @@ affine) so Landsat legacy CSVs still get stable quad geometry.
 import io
 import os
 import tempfile
+from collections import defaultdict
 
 import numpy as np
 import pandas as pd
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import rasterio
 from rasterio.transform import rowcol
@@ -121,10 +123,9 @@ def handle(body: dict):
         keys_by_prefix.setdefault(prefix, []).append((csv_path, date, tif_path))
 
     for prefix, entries in keys_by_prefix.items():
-        parquet_key = f"{prefix}/{name}/{location}/{name}_{location}.parquet"
-        buf = io.BytesIO()
-        writer = pq.ParquetWriter(buf, schema, compression="zstd")
-        dates_written = []
+        # Group tables by year for per-year Parquet files
+        tables_by_year: dict[int, list[pa.Table]] = defaultdict(list)
+        dates_by_year: dict[int, list[str]] = defaultdict(list)
 
         for csv_path, date, tif_path in sorted(entries, key=lambda e: e[1]):
             try:
@@ -198,30 +199,44 @@ def handle(body: dict):
                     schema=schema,
                 )
 
-                writer.write_table(table)
-                dates_written.append(date)
+                year = date_utc.year
+                tables_by_year[year].append(table)
+                dates_by_year[year].append(date)
             except Exception as e:
                 print(f"[backfill:parquet][{feature_id}] Error processing {csv_path}: {e}")
                 continue
 
-        writer.close()
-
-        if not dates_written:
+        if not tables_by_year:
             print(f"[backfill:parquet][{feature_id}] No valid dates for {prefix}, skipping")
             continue
 
-        buf.seek(0)
-        s3.put_object(
-            Bucket=bucket, Key=parquet_key, Body=buf.getvalue(),
-            ContentType="application/octet-stream",
-        )
-        print(
-            f"[backfill:parquet][{feature_id}] Uploaded {parquet_key} "
-            f"({len(dates_written)} row groups, {len(buf.getvalue()):,} bytes)"
-        )
+        # Write one sorted Parquet file per year
+        for year in sorted(tables_by_year.keys()):
+            year_tables = tables_by_year[year]
+            year_dates = dates_by_year[year]
+            parquet_key = f"{prefix}/{name}/{location}/{name}_{location}_{year}.parquet"
 
-        # Update D1 parquet_path for each date
-        for date in dates_written:
-            update_parquet_path_in_d1(feature_id, date, parquet_key)
+            # Concatenate all tables for this year, sort by (longitude, latitude)
+            combined = pa.concat_tables(year_tables)
+            sort_indices = pc.sort_indices(combined, sort_keys=[("longitude", "ascending"), ("latitude", "ascending")])
+            combined = combined.take(sort_indices)
 
-        print(f"[backfill:parquet][{feature_id}] Updated {len(dates_written)} D1 records")
+            buf = io.BytesIO()
+            pq.write_table(combined, buf, compression="zstd")
+
+            buf.seek(0)
+            s3.put_object(
+                Bucket=bucket, Key=parquet_key, Body=buf.getvalue(),
+                ContentType="application/octet-stream",
+            )
+            print(
+                f"[backfill:parquet][{feature_id}] Uploaded {parquet_key} "
+                f"({combined.num_rows:,} rows, {len(buf.getvalue()):,} bytes)"
+            )
+
+            # Update D1 parquet_path for each date in this year
+            for date in year_dates:
+                update_parquet_path_in_d1(feature_id, date, parquet_key)
+
+        total_dates = sum(len(d) for d in dates_by_year.values())
+        print(f"[backfill:parquet][{feature_id}] Updated {total_dates} D1 records across {len(tables_by_year)} year file(s)")

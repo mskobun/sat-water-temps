@@ -111,26 +111,62 @@
 
 	async function downloadParquet() {
 		parquetDownloading = true;
+		const toastId = toast.loading('Fetching parquet files…');
 		try {
 			const listRes = await fetch(`/api/feature/${featureId}/parquet`);
 			const files: Array<{ path: string; size: number }> = await listRes.json();
 			if (files.length === 0) {
-				toast.error('No parquet files available for this feature');
+				toast.error('No parquet files available for this feature', { id: toastId });
 				return;
 			}
 
-			const res = await fetch(`/api/feature/${featureId}/parquet?path=${encodeURIComponent(files[0].path)}`);
-			if (!res.ok) throw new Error('Failed to fetch parquet file');
-			const blob = await res.blob();
-			const url = URL.createObjectURL(blob);
-			const a = document.createElement('a');
-			a.href = url;
-			a.download = `${featureId}.parquet`;
-			a.click();
-			URL.revokeObjectURL(url);
+			if (files.length === 1) {
+				// Single file — download directly without ZIP
+				const res = await fetch(`/api/feature/${featureId}/parquet?path=${encodeURIComponent(files[0].path)}`);
+				if (!res.ok) throw new Error('Failed to fetch parquet file');
+				const blob = await res.blob();
+				const url = URL.createObjectURL(blob);
+				const a = document.createElement('a');
+				a.href = url;
+				const filename = files[0].path.split('/').pop() || `${featureId}.parquet`;
+				a.download = filename;
+				a.click();
+				URL.revokeObjectURL(url);
+				toast.success('Downloaded parquet file', { id: toastId });
+			} else {
+				// Multiple files — bundle into ZIP
+				let fetched = 0;
+				const results = await Promise.all(
+					files.map(async ({ path }) => {
+						const res = await fetch(`/api/feature/${featureId}/parquet?path=${encodeURIComponent(path)}`);
+						if (!res.ok) throw new Error(`Failed to fetch ${path}`);
+						const blob = await res.blob();
+						fetched++;
+						toast.loading(`Fetching ${fetched}/${files.length} parquet files…`, { id: toastId });
+						return { path, blob };
+					})
+				);
+
+				toast.loading('Creating ZIP…', { id: toastId });
+				const JSZip = (await import('jszip')).default;
+				const zip = new JSZip();
+				for (const { path, blob } of results) {
+					const filename = path.split('/').pop() || 'file.parquet';
+					zip.file(filename, blob);
+				}
+
+				const zipBlob = await zip.generateAsync({ type: 'blob' });
+				const url = URL.createObjectURL(zipBlob);
+				const a = document.createElement('a');
+				a.href = url;
+				a.download = `${featureId}_parquet.zip`;
+				a.click();
+				URL.revokeObjectURL(url);
+				toast.success(`Downloaded ${files.length} parquet files as ZIP`, { id: toastId });
+			}
 		} catch (err) {
 			console.error('Parquet download error:', err);
-			toast.error('Failed to download parquet file');
+			toast.error('Failed to download parquet file', { id: toastId });
 		} finally {
 			parquetDownloading = false;
 		}

@@ -294,9 +294,9 @@ def process_one_record(body):
         csv_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.csv.gz"
         upload_csv_to_r2(s3_client, bucket_name, csv_key, filter_csv_path)
 
-        # Parquet (one file per feature, one row group per date)
-        parquet_key = f"{R2_PREFIX}/{name}/{location}/{name}_{location}.parquet"
-        upload_parquet_to_r2(s3_client, bucket_name, parquet_key, df_valid, date_str)
+        # Parquet (per-year sorted file)
+        parquet_base_key = f"{R2_PREFIX}/{name}/{location}/{name}_{location}.parquet"
+        parquet_key = upload_parquet_to_r2(s3_client, bucket_name, parquet_base_key, df_valid, date_str)
 
         # PNGs
         png_r2_keys = {}

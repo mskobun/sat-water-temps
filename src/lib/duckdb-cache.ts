@@ -173,11 +173,8 @@ async function getDb(source: SourceType): Promise<duckdb.AsyncDuckDB> {
 		await db.open({
 			filesystem: {
 				reliableHeadRequests: true,
-				allowFullHTTPReads: false,
-				// Must be explicit — omitting this defaults to true in the WASM runtime,
-				// which skips both the HEAD probe and the full-read fallback, causing
-				// "Failed to open file" with zero network requests made.
-				forceFullHTTPReads: false
+				allowFullHTTPReads: true,
+				forceFullHTTPReads: true
 			}
 		});
 		return db;
