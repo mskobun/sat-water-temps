@@ -615,6 +615,10 @@
 	}
 
 	onMount(async () => {
+		// Start downloading the DuckDB WASM bundle immediately so the first
+		// query doesn't pay the cold-start cost.
+		getDuckDBCacheModule().then((m) => m?.preload());
+
 		try {
 			const response = await fetch('/api/polygons');
 			geojsonData = await response.json();

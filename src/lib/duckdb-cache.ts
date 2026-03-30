@@ -498,6 +498,17 @@ export async function getPointHistory(
 	return Array.from(bestByDate.values()).sort((a, b) => a.date.localeCompare(b.date));
 }
 
+/**
+ * Prefetch the DuckDB WASM binary into the browser cache so that the first
+ * real `getDb()` call doesn't pay the network cost. Does NOT spin up a
+ * worker or instantiate a database.
+ */
+export async function preload(): Promise<void> {
+	const bundle = await duckdb.selectBundle(CDN_BUNDLES);
+	const urls = [bundle.mainModule, bundle.mainWorker, bundle.pthreadWorker].filter(Boolean) as string[];
+	await Promise.all(urls.map((url) => fetch(url, { priority: 'low' } as RequestInit)));
+}
+
 export async function clearCache() {
 	for (const source of ['ecostress', 'landsat'] as const) {
 		const cached = cachedBySource[source];
