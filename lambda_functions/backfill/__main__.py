@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from backfill.base import list_features, send_sqs_message
+from backfill.nodata import handle as handle_nodata
 from backfill.parquet import handle as handle_parquet
 from backfill.raster_meta import handle as handle_raster_meta
 from backfill.regzip import handle as handle_regzip
@@ -48,6 +49,10 @@ def _run_backfill(args, msg_type, handler):
                 handler({"feature_id": fid})
             except Exception as e:
                 print(f"  ERROR processing {fid}: {e}")
+
+
+def cmd_nodata(args):
+    _run_backfill(args, "backfill:nodata", handle_nodata)
 
 
 def cmd_parquet(args):
@@ -139,6 +144,14 @@ def main():
         help="Overwrite existing mean/median/std values",
     )
     p_temp_stats.set_defaults(func=cmd_temp_stats)
+
+    p_nodata = subparsers.add_parser(
+        "nodata",
+        help="Reclassify zero-data observations and clean up stale R2/D1 data",
+    )
+    p_nodata.add_argument("features", nargs="*", help="Feature IDs (default: all)")
+    p_nodata.add_argument("--via-sqs", action="store_true", help="Fan out via SQS instead of running locally")
+    p_nodata.set_defaults(func=cmd_nodata)
 
     args = parser.parse_args()
     args.func(args)

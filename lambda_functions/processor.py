@@ -31,6 +31,13 @@ patch_all()
 # Constants
 R2_PREFIX = "ECO"
 INVALID_QC_VALUES = {15, 2501, 3525, 65535}
+
+
+class NoDataError(Exception):
+    """Raised when filtering leaves zero valid pixels."""
+    def __init__(self, filter_stats):
+        self.filter_stats = filter_stats
+        super().__init__("No valid pixels after filtering")
 HTTP_CONNECT_TIMEOUT = 10
 HTTP_READ_TIMEOUT = 120
 DOWNLOAD_CHUNK_SIZE = 64 * 1024
@@ -631,6 +638,10 @@ def process_rasters(
 
     # CSV (keep for archive downloads)
     df.dropna(subset=["LST_filter"], inplace=True)
+
+    if len(df) == 0:
+        raise NoDataError(filter_stats)
+
     df.to_csv(filter_csv_path, index=False)
     csv_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.csv.gz"
     upload_csv_to_r2(s3_client, bucket_name, csv_key, filter_csv_path)
@@ -801,21 +812,41 @@ def _process_record(record, token, session, aid_folder_mapping, s3_client, bucke
                     )
                     print(f"[{task_id}][{feature_id}] ✓ Processed successfully in {duration_ms}ms")
 
-                except ValueError as e:
-                    # Permanent failure (missing layers, no files) - don't retry
+                except NoDataError as e:
+                    # Zero valid pixels after filtering — not an error, just no usable data
                     duration_ms = int((time.time() - start_time) * 1000)
-                    error_msg = str(e)
                     log_job_to_d1(
                         job_type="process",
                         task_id=task_id,
                         feature_id=feature_id,
                         date=date,
-                        status="failed",
+                        status="nodata",
+                        duration_ms=duration_ms,
+                        metadata_json=json.dumps({"filter_stats": e.filter_stats}),
+                    )
+                    print(f"[{task_id}][{feature_id}] ○ No valid pixels (nodata) in {duration_ms}ms")
+
+                except ValueError as e:
+                    # Permanent failure - don't retry
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    error_msg = str(e)
+                    # Missing layers = data availability issue, not a real error
+                    is_missing_layers = error_msg.startswith("Missing required layers")
+                    status = "nodata" if is_missing_layers else "failed"
+                    log_job_to_d1(
+                        job_type="process",
+                        task_id=task_id,
+                        feature_id=feature_id,
+                        date=date,
+                        status=status,
                         duration_ms=duration_ms,
                         error_message=error_msg,
                     )
-                    print(f"[{task_id}][{feature_id}] ✗ Permanent failure (skipping): {error_msg}")
-                    subsegment.put_annotation("error", True)
+                    if is_missing_layers:
+                        print(f"[{task_id}][{feature_id}] ○ {error_msg} (nodata)")
+                    else:
+                        print(f"[{task_id}][{feature_id}] ✗ Permanent failure (skipping): {error_msg}")
+                    subsegment.put_annotation("error", not is_missing_layers)
                     subsegment.put_annotation("permanent_failure", True)
                     subsegment.put_metadata("error_message", error_msg)
 
@@ -892,6 +923,9 @@ def handler(event, context):
             try:
                 from landsat_processor import process_one_record as process_landsat
                 process_landsat(body)
+                continue
+            except NoDataError:
+                # Zero valid pixels — already logged as nodata by Landsat processor
                 continue
             except Exception as e:
                 import traceback

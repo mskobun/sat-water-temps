@@ -34,6 +34,7 @@ from processor import (
     compute_filter_stats,
     insert_metadata_to_d1,
     summarize_temperature_series,
+    NoDataError,
     GLOBAL_MIN,
     GLOBAL_MAX,
 )
@@ -277,6 +278,9 @@ def process_one_record(body):
         # Drop NaN LST rows (filtered or nodata)
         df_valid = df.dropna(subset=["LST_filter"])
 
+        if len(df_valid) == 0:
+            raise NoDataError(filter_stats)
+
         filter_csv_path = os.path.join(work_dir, f"{base_name}.csv")
         df_valid.to_csv(filter_csv_path, index=False)
 
@@ -357,6 +361,19 @@ def process_one_record(body):
             duration_ms=duration_ms,
         )
         print(f"[Landsat][{feature_id}] ✓ Processed successfully in {duration_ms}ms")
+
+    except NoDataError as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        log_job_to_d1(
+            job_type="landsat_process",
+            feature_id=feature_id,
+            date=date_str,
+            status="nodata",
+            duration_ms=duration_ms,
+            metadata_json=json.dumps({"filter_stats": e.filter_stats}),
+        )
+        print(f"[Landsat][{feature_id}] ○ No valid pixels (nodata) in {duration_ms}ms")
+        raise
 
     except Exception as e:
         import traceback

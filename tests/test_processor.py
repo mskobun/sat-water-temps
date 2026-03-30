@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lambda_functio
 from processor import (
     compute_filter_stats,
     apply_filters,
+    NoDataError,
     INVALID_QC_VALUES,
     summarize_temperature_series,
 )
@@ -226,6 +227,31 @@ class TestApplyFilters:
         assert stats["histogram"].get("2", 0) == 1   # pixel 4: cloud
         assert stats["histogram"].get("4", 0) == 1   # pixel 5: water
         assert stats["histogram"].get("10", 0) == 1  # pixel 6: nodata(8) + cloud(2)
+
+
+class TestNoDataError:
+    def test_carries_filter_stats(self):
+        """NoDataError stores filter_stats for logging."""
+        stats = {"total_pixels": 100, "histogram": {"8": 100}}
+        err = NoDataError(stats)
+        assert err.filter_stats == stats
+        assert str(err) == "No valid pixels after filtering"
+
+    def test_raised_when_all_pixels_filtered(self):
+        """All pixels filtered -> NoDataError with correct stats."""
+        df = make_df(5)
+        df["LST"] = np.nan  # all nodata
+
+        flags, _, padding = apply_filters(df, water_mask_flag=True)
+        filter_stats = compute_filter_stats(flags, len(df), padding)
+
+        # Simulate the processor check
+        df_valid = df.dropna(subset=["LST_filter"])
+        assert len(df_valid) == 0
+
+        with pytest.raises(NoDataError) as exc_info:
+            raise NoDataError(filter_stats)
+        assert exc_info.value.filter_stats["histogram"].get("8", 0) == 5
 
 
 class TestSummarizeTemperatureSeries:

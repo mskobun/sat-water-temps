@@ -8,6 +8,7 @@ _HANDLERS = {
     "backfill:raster_meta": "backfill.raster_meta",
     "backfill:regzip": "backfill.regzip",
     "backfill:temp_stats": "backfill.temp_stats",
+    "backfill:nodata": "backfill.nodata",
 }
 
 

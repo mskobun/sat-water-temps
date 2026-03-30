@@ -74,6 +74,8 @@
 				return 'destructive';
 			case 'started':
 				return 'default';
+			case 'nodata':
+				return 'outline';
 			default:
 				return 'outline';
 		}
@@ -172,10 +174,18 @@
 					</div>
 				</div>
 
+				{#if job.status === 'nodata'}
+					<div>
+						<Alert>
+							<AlertDescription>No valid pixels remained after filtering. This observation had data but all pixels were removed by quality, cloud, water mask, or swath coverage filters.</AlertDescription>
+						</Alert>
+					</div>
+				{/if}
+
 				{#if job.error_message}
 					<div>
-						<p class="text-sm text-muted-foreground mb-2">Error Message</p>
-						<Alert variant="destructive">
+						<p class="text-sm text-muted-foreground mb-2">{job.status === 'nodata' ? 'Details' : 'Error Message'}</p>
+						<Alert variant={job.status === 'nodata' ? 'default' : 'destructive'}>
 							<AlertDescription class="font-mono text-xs">{job.error_message}</AlertDescription>
 						</Alert>
 					</div>

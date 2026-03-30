@@ -17,6 +17,7 @@
 		{ value: 'all', label: 'All Jobs' },
 		{ value: 'success', label: 'Success' },
 		{ value: 'failed', label: 'Failed' },
+		{ value: 'nodata', label: 'No Data' },
 		{ value: 'started', label: 'In Progress' }
 	];
 
@@ -27,7 +28,7 @@
 	let filterLabel = $derived(filterOptions.find((o) => o.value === filter)?.label ?? 'All Jobs');
 	let page = $state(1);
 	let total = $state(0);
-	let statusCounts = $state({ total: 0, success: 0, failed: 0, started: 0 });
+	let statusCounts = $state({ total: 0, success: 0, failed: 0, started: 0, nodata: 0 });
 	let updatedAt = $state('');
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -125,6 +126,7 @@
 				{ label: 'Total', count: statusCounts.total },
 				{ label: 'Success', count: statusCounts.success },
 				{ label: 'Failed', count: statusCounts.failed },
+				{ label: 'No Data', count: statusCounts.nodata },
 				{ label: 'In Progress', count: statusCounts.started }
 			]} />
 		</div>

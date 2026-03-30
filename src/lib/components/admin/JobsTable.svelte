@@ -4,6 +4,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import ThumbnailPreview from '$lib/components/ThumbnailPreview.svelte';
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
+	import CircleOffIcon from '@lucide/svelte/icons/circle-off';
 	import { format } from 'date-fns';
 	import { formatShortDate as formatDateShort } from '$lib/date-utils';
 	import { parseFilterStats, type FilterStats } from '$lib/filter-stats';
@@ -71,6 +72,7 @@
 			case 'success': return 'secondary';
 			case 'failed': return 'destructive';
 			case 'started': return 'default';
+			case 'nodata': return 'outline';
 			default: return 'outline';
 		}
 	}
@@ -107,6 +109,17 @@
 								href="/feature/{job.feature_id}?date={job.date}"
 								class="block w-12 h-12"
 							/>
+						{:else if job.status === 'nodata'}
+							<Tooltip.Root delayDuration={0}>
+								<Tooltip.Trigger>
+									<div class="w-12 h-12 rounded bg-muted flex items-center justify-center">
+										<CircleOffIcon class="size-5 text-muted-foreground" />
+									</div>
+								</Tooltip.Trigger>
+								<Tooltip.Content side="right" class="max-w-sm">
+									<p class="text-sm">No valid pixels after filtering</p>
+								</Tooltip.Content>
+							</Tooltip.Root>
 						{:else if job.status === 'failed'}
 							<Tooltip.Root delayDuration={0}>
 								<Tooltip.Trigger>
