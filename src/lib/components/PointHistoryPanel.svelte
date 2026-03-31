@@ -108,7 +108,7 @@
 			return;
 		}
 
-		// Landsat: fetch that date's transform for exact quad
+		// Projected CRS (Landsat / ECOSTRESS STAC): fetch transform for exact quad
 		if (entry.row != null && entry.col != null && featureId) {
 			const { row, col, date } = entry;
 			fetchTemperatureMetadata(featureId, date).then((meta) => {
@@ -120,7 +120,7 @@
 			return;
 		}
 
-		// ECOSTRESS or fallback: rectangle from pixel center
+		// Fallback (no row/col or no CRS): rectangle from pixel center
 		const { longitude: lng, latitude: lat } = entry;
 		deckOverlay.setHighlight([
 			[lng - halfPixelX, lat - halfPixelY],
