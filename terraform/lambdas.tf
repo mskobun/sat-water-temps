@@ -40,7 +40,7 @@ resource "aws_lambda_function" "initiator_lambda" {
     }
   }
 
-  timeout = 300
+  timeout = 900  # 15 minutes — CMR search across 132 polygons is slow for large date ranges
 }
 
 # Processor Lambda (SQS router: Landsat + ECOSTRESS + backfill)
