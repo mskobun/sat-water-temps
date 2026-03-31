@@ -18,16 +18,15 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lambda_functio
 # Real ST_B10 + QA_PIXEL window crops from USGS Landsat C2 L2 ST (see fixture README).
 LANDSAT_FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "landsat_lc09_116048_20241227"
 
-from landsat_processor import (
+from landsat.filters import (
     apply_landsat_filters,
-    SCALE_FACTOR,
-    ADD_OFFSET,
     QA_BIT_FILL,
     QA_BIT_DILATED_CLOUD,
     QA_BIT_CLOUD,
     QA_BIT_CLOUD_SHADOW,
     QA_BIT_WATER,
 )
+from landsat.processor import SCALE_FACTOR, ADD_OFFSET
 
 
 # Magat reservoir polygon bbox (from plan fixture)
@@ -246,7 +245,7 @@ class TestSTACMocking:
 
     def test_required_assets_present(self):
         """Verify fixture has all required STAC assets."""
-        from landsat_initiator import REQUIRED_ASSETS
+        from landsat.initiator import REQUIRED_ASSETS
         for key in REQUIRED_ASSETS:
             assert key in self.FIXTURE_SCENE["assets"]
 
@@ -256,7 +255,7 @@ class TestFilterStatsIntegration:
 
     def test_stats_from_landsat_filters(self):
         """compute_filter_stats should work with Landsat filter output."""
-        from processor import compute_filter_stats
+        from common.statistics import compute_filter_stats
 
         lst = make_lst_kelvin()
         qa = make_qa_pixel(water=True)
@@ -334,16 +333,16 @@ class TestLandsatProcessOneRecordFixture:
 
         mock_s3 = MagicMock()
 
-        with patch("landsat_processor.upload_to_r2", side_effect=capture_upload) as _upload, patch(
-            "landsat_processor.upload_csv_to_r2", side_effect=capture_csv_upload
+        with patch("landsat.processor.upload_to_r2", side_effect=capture_upload) as _upload, patch(
+            "landsat.processor.upload_csv_to_r2", side_effect=capture_csv_upload
         ), patch(
-            "landsat_processor.upload_parquet_to_r2"
+            "landsat.processor.upload_parquet_to_r2"
         ), patch(
-            "landsat_processor.insert_metadata_to_d1", side_effect=capture_insert
-        ), patch("landsat_processor.log_job_to_d1"), patch(
-            "landsat_processor._get_s3_client", return_value=mock_s3
-        ), patch("landsat_processor.tif_to_png", return_value=__import__('io').BytesIO(b'\x89PNG')):
-            from landsat_processor import process_one_record
+            "landsat.processor.insert_metadata_to_d1", side_effect=capture_insert
+        ), patch("landsat.processor.log_job_to_d1"), patch(
+            "landsat.processor.get_s3_client", return_value=mock_s3
+        ), patch("landsat.processor.tif_to_png", return_value=__import__('io').BytesIO(b'\x89PNG')):
+            from landsat.processor import process_one_record
 
             # Read CSV before cleanup by capturing it in upload
             process_one_record(magat_landsat_body)
@@ -383,16 +382,16 @@ class TestLandsatProcessOneRecordFixture:
         def capture_csv_upload(s3_client, bucket, key, csv_file_path):
             capture_upload(s3_client, bucket, key, csv_file_path)
 
-        with patch("landsat_processor.upload_to_r2", side_effect=capture_upload), patch(
-            "landsat_processor.upload_csv_to_r2", side_effect=capture_csv_upload
+        with patch("landsat.processor.upload_to_r2", side_effect=capture_upload), patch(
+            "landsat.processor.upload_csv_to_r2", side_effect=capture_csv_upload
         ), patch(
-            "landsat_processor.upload_parquet_to_r2"
+            "landsat.processor.upload_parquet_to_r2"
         ), patch(
-            "landsat_processor.insert_metadata_to_d1"
-        ), patch("landsat_processor.log_job_to_d1"), patch(
-            "landsat_processor._get_s3_client", return_value=MagicMock()
-        ), patch("landsat_processor.tif_to_png", return_value=__import__('io').BytesIO(b'\x89PNG')):
-            from landsat_processor import process_one_record
+            "landsat.processor.insert_metadata_to_d1"
+        ), patch("landsat.processor.log_job_to_d1"), patch(
+            "landsat.processor.get_s3_client", return_value=MagicMock()
+        ), patch("landsat.processor.tif_to_png", return_value=__import__('io').BytesIO(b'\x89PNG')):
+            from landsat.processor import process_one_record
             process_one_record(magat_landsat_body)
 
         assert saved_csv[0] is not None, "No CSV was uploaded"

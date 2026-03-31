@@ -31,8 +31,8 @@ from backfill.base import (
     get_csv_date_tif_rows,
     update_parquet_path_in_d1,
 )
-from processor import parquet_date_type, parquet_feature_schema
-from shared import to_parquet_date_utc
+from common.parquet import parquet_date_type, parquet_feature_schema
+from common.dates import to_parquet_date_utc
 
 
 def _csv_rowcol_complete(df_clean: pd.DataFrame, row_col: str | None, col_col: str | None) -> bool:

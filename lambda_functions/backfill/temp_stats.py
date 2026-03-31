@@ -11,7 +11,7 @@ import pandas as pd
 
 from backfill.base import get_bucket_name, get_s3_client
 from d1 import query_d1
-from processor import summarize_temperature_series
+from common.statistics import summarize_temperature_series
 
 
 def _read_csv_from_r2(s3_client, bucket: str, key: str) -> pd.DataFrame:

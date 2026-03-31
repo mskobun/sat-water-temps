@@ -8,14 +8,14 @@ variable "project_name" {
   default     = "eco-water-temps"
 }
 
-variable "appeears_user" {
-  description = "AppEEARS Username"
+variable "earthdata_username" {
+  description = "NASA Earthdata Login username (for earthaccess)"
   type        = string
   sensitive   = true
 }
 
-variable "appeears_pass" {
-  description = "AppEEARS Password"
+variable "earthdata_password" {
+  description = "NASA Earthdata Login password (for earthaccess)"
   type        = string
   sensitive   = true
 }

@@ -1,5 +1,5 @@
-appeears_user = "your_username"
-appeears_pass = "your_password"
+earthdata_username = "your_earthdata_username"
+earthdata_password = "your_earthdata_password"
 cloudflare_api_token = "your_cloudflare_api_token"
 cloudflare_account_id = "your_cloudflare_account_id"
 r2_bucket_name = "multitifs"

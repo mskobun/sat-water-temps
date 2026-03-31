@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
     "aws-xray-sdk>=2.14.0",
     "boto3>=1.35.0",
+    "earthaccess>=0.12.0",
     "cmap>=0.4.0",
     "numpy>=2.0.2",
     "pillow>=11.0.0",

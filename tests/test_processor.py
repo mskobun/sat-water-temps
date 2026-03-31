@@ -1,4 +1,4 @@
-"""Tests for filter_flags and compute_filter_stats in processor.py"""
+"""Tests for ECOSTRESS filter_flags and compute_filter_stats."""
 import os
 import sys
 
@@ -8,31 +8,24 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lambda_functions"))
 
-from processor import (
-    compute_filter_stats,
-    apply_filters,
-    NoDataError,
-    INVALID_QC_VALUES,
-    summarize_temperature_series,
-)
+from common.statistics import compute_filter_stats, summarize_temperature_series
+from common.exceptions import NoDataError
+from ecostress.filters import apply_ecostress_filters, INVALID_QC_VALUES
 
 
-def make_df(n=10, **overrides):
-    """Create a DataFrame mimicking raster pixel data.
+def make_arrays(n=10, **overrides):
+    """Create 1D numpy arrays mimicking clipped raster pixel data.
 
-    By default all pixels are inside the polygon (valid QC, valid LST).
+    By default all pixels are valid water pixels with good LST/QC.
     """
     defaults = {
-        "LST": np.full(n, 300.0),
-        "LST_err": np.full(n, 0.5),
-        "QC": np.zeros(n, dtype=np.float64),
-        "cloud": np.zeros(n, dtype=np.float64),
-        "wt": np.ones(n, dtype=np.float64),  # all water
-        "EmisWB": np.full(n, 0.98),
-        "height": np.full(n, 100.0),
+        "lst": np.full(n, 300.0, dtype=np.float32),
+        "qc": np.zeros(n, dtype=np.float32),
+        "cloud": np.zeros(n, dtype=np.float32),
+        "water": np.ones(n, dtype=np.float32),  # all water
     }
     defaults.update(overrides)
-    return pd.DataFrame(defaults)
+    return defaults
 
 
 class TestComputeFilterStats:
@@ -66,167 +59,152 @@ class TestComputeFilterStats:
         assert "padding_count" not in stats
 
 
-class TestApplyFilters:
+class TestApplyEcostressFilters:
     def test_all_valid_pixels(self):
         """All good pixels -> all in bucket 0."""
-        df = make_df(5)
-        flags, suffix, padding = apply_filters(df, water_mask_flag=True)
-        stats = compute_filter_stats(flags, len(df), padding)
+        a = make_arrays(5)
+        filtered_lst, flags, has_water = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+        stats = compute_filter_stats(flags.ravel(), len(flags.ravel()))
         assert stats["histogram"] == {"0": 5}
-        assert padding == 0
-        assert suffix == ""
-
-    def test_padding_dropped(self):
-        """Pixels with QC=-99999 or QC=NaN are padding and get dropped."""
-        df = make_df(6)
-        df.loc[0, "QC"] = -99999  # padding
-        df.loc[1, "QC"] = np.nan  # padding
-        # pixels 2-5 are inside polygon
-
-        flags, _, padding = apply_filters(df, water_mask_flag=True)
-        assert padding == 2
-        assert len(df) == 4  # only polygon pixels remain
-        stats = compute_filter_stats(flags, len(df), padding)
-        assert stats["total_pixels"] == 4
-        assert stats["histogram"] == {"0": 4}
+        assert has_water is True
+        assert np.all(~np.isnan(filtered_lst))
 
     def test_nodata_swath_gap(self):
-        """LST NaN with valid QC -> bit 3 (swath gap inside polygon)."""
-        df = make_df(5)
-        df.loc[0, "LST"] = np.nan  # swath gap (QC is valid 0)
-        df.loc[1, "LST"] = 0.0     # swath gap
-        df.loc[2, "LST"] = -5.0    # swath gap
+        """LST NaN with valid QC -> bit 3 (swath gap)."""
+        a = make_arrays(5)
+        a["lst"][0] = np.nan  # swath gap
+        a["lst"][1] = 0.0  # swath gap (LST <= 0)
+        a["lst"][2] = -5.0  # swath gap
 
-        flags, _, padding = apply_filters(df, water_mask_flag=True)
-        assert padding == 0
-        stats = compute_filter_stats(flags, len(df))
-
+        filtered_lst, flags, _ = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+        flat = flags.ravel()
+        stats = compute_filter_stats(flat, len(flat))
         assert stats["histogram"].get("8", 0) == 3  # nodata only
         assert stats["histogram"].get("0", 0) == 2  # valid
 
-    def test_padding_vs_swath_gap(self):
-        """Padding (QC fill) is excluded; swath gap (QC real, LST NaN) is bit 3."""
-        df = make_df(6)
-        df.loc[0, "QC"] = -99999       # padding
-        df.loc[1, "QC"] = -99999       # padding
-        df.loc[2, "LST"] = np.nan      # swath gap (QC=0, real value)
-        df.loc[3, "LST"] = np.nan      # swath gap
-        # pixels 4-5 are fully valid
-
-        flags, _, padding = apply_filters(df, water_mask_flag=True)
-        assert padding == 2
-        assert len(df) == 4
-        stats = compute_filter_stats(flags, len(df), padding)
-        assert stats["total_pixels"] == 4
-        assert stats["histogram"].get("0", 0) == 2   # valid
-        assert stats["histogram"].get("8", 0) == 2   # swath gap
-
-    def test_nodata_nans_filter_columns(self):
-        """Swath gap pixels must have NaN in _filter columns."""
-        df = make_df(3)
-        df.loc[0, "LST"] = np.nan
-
-        apply_filters(df, water_mask_flag=True)
-
-        assert pd.isna(df.iloc[0]["LST_filter"])
-        assert df.iloc[1]["LST_filter"] == 300.0
-
     def test_qc_bad_values(self):
         """Bad QC -> bit 0."""
-        df = make_df(4)
-        df.loc[0, "QC"] = 15
-        df.loc[1, "QC"] = 65535
+        a = make_arrays(4)
+        a["qc"][0] = 15
+        a["qc"][1] = 65535
 
-        flags, _, _ = apply_filters(df, water_mask_flag=True)
-        stats = compute_filter_stats(flags, len(df))
-
+        _, flags, _ = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+        flat = flags.ravel()
+        stats = compute_filter_stats(flat, len(flat))
         assert stats["histogram"].get("1", 0) == 2
 
     def test_cloud_filtering(self):
         """cloud=1 -> bit 1 (value 2)."""
-        df = make_df(4)
-        df.loc[0, "cloud"] = 1
+        a = make_arrays(4)
+        a["cloud"][0] = 1
 
-        flags, _, _ = apply_filters(df, water_mask_flag=True)
-        stats = compute_filter_stats(flags, len(df))
-
+        _, flags, _ = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+        flat = flags.ravel()
+        stats = compute_filter_stats(flat, len(flat))
         assert stats["histogram"].get("2", 0) == 1
 
     def test_water_mask(self):
-        """wt=0 (non-water) -> bit 2 (value 4)."""
-        df = make_df(4)
-        df.loc[0, "wt"] = 0
-        df.loc[1, "wt"] = 0
+        """water=0 (non-water) -> bit 2 (value 4)."""
+        a = make_arrays(4)
+        a["water"][0] = 0
+        a["water"][1] = 0
 
-        flags, _, _ = apply_filters(df, water_mask_flag=True)
-        stats = compute_filter_stats(flags, len(df))
-
+        _, flags, _ = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+        flat = flags.ravel()
+        stats = compute_filter_stats(flat, len(flat))
         assert stats["histogram"].get("4", 0) == 2
 
-    def test_no_water_flag_skips_bit2(self):
-        """When water_mask_flag=False, bit 2 is never set and suffix is _wtoff."""
-        df = make_df(3)
-        df.loc[0, "wt"] = 0
+    def test_no_water_pixels_skips_water_mask(self):
+        """When no water pixels exist, has_water is False and bit 2 is never set."""
+        a = make_arrays(3)
+        a["water"][:] = 0  # no water at all
 
-        flags, suffix, _ = apply_filters(df, water_mask_flag=False)
-        stats = compute_filter_stats(flags, len(df))
-
-        for k in stats["histogram"]:
-            assert not (int(k) & 4)
-        assert suffix == "_wtoff"
+        _, flags, has_water = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+        assert has_water is False
+        flat = flags.ravel()
+        stats = compute_filter_stats(flat, len(flat))
+        # All pixels valid since water mask not applied
+        assert stats["histogram"] == {"0": 3}
 
     def test_overlapping_nodata_qc_cloud(self):
         """Pixel with NaN LST + bad QC + cloud -> bits 0,1,3 = 11."""
-        df = make_df(3)
-        df.loc[0, "LST"] = np.nan
-        df.loc[0, "QC"] = 65535
-        df.loc[0, "cloud"] = 1
+        a = make_arrays(3)
+        a["lst"][0] = np.nan
+        a["qc"][0] = 65535
+        a["cloud"][0] = 1
 
-        flags, _, _ = apply_filters(df, water_mask_flag=True)
-        stats = compute_filter_stats(flags, len(df))
-
+        _, flags, _ = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+        flat = flags.ravel()
+        stats = compute_filter_stats(flat, len(flat))
         assert stats["histogram"].get("11", 0) == 1  # 8|1|2 = 11
         assert stats["histogram"].get("0", 0) == 2
 
     def test_total_equals_histogram_sum(self):
         """total_pixels must always equal sum of histogram values."""
-        df = make_df(20)
-        df.loc[0:2, "LST"] = np.nan
-        df.loc[3:5, "QC"] = 65535
-        df.loc[6:8, "cloud"] = 1
-        df.loc[9:11, "wt"] = 0
-        df.loc[12, "LST"] = 0.0
+        a = make_arrays(20)
+        a["lst"][0:3] = np.nan
+        a["qc"][3:6] = 65535
+        a["cloud"][6:9] = 1
+        a["water"][9:12] = 0
+        a["lst"][12] = 0.0
 
-        flags, _, _ = apply_filters(df, water_mask_flag=True)
-        stats = compute_filter_stats(flags, len(df))
-
+        _, flags, _ = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+        flat = flags.ravel()
+        stats = compute_filter_stats(flat, len(flat))
         assert sum(stats["histogram"].values()) == stats["total_pixels"]
 
     def test_all_pixels_accounted_for(self):
-        """Every non-padding pixel lands in exactly one histogram bucket."""
-        df = make_df(8)
-        df.loc[0, "QC"] = -99999       # padding (dropped)
-        df.loc[1, "QC"] = np.nan        # padding (dropped)
-        df.loc[2, "LST"] = np.nan       # swath gap
-        df.loc[3, "QC"] = 2501          # bad QC
-        df.loc[4, "cloud"] = 1          # cloud
-        df.loc[5, "wt"] = 0             # non-water
-        df.loc[6, "LST"] = np.nan       # swath gap + cloud
-        df.loc[6, "cloud"] = 1
-        # pixel 7: valid
+        """Every pixel lands in exactly one histogram bucket."""
+        a = make_arrays(6)
+        a["lst"][0] = np.nan  # swath gap
+        a["qc"][1] = 2501  # bad QC
+        a["cloud"][2] = 1  # cloud
+        a["water"][3] = 0  # non-water
+        a["lst"][4] = np.nan  # swath gap + cloud
+        a["cloud"][4] = 1
+        # pixel 5: valid
 
-        flags, _, padding = apply_filters(df, water_mask_flag=True)
-        stats = compute_filter_stats(flags, len(df), padding)
-
-        assert padding == 2
+        _, flags, _ = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+        flat = flags.ravel()
+        stats = compute_filter_stats(flat, len(flat))
         assert stats["total_pixels"] == 6
         assert sum(stats["histogram"].values()) == 6
-        assert stats["histogram"].get("0", 0) == 1   # pixel 7
-        assert stats["histogram"].get("8", 0) == 1   # pixel 2: nodata
-        assert stats["histogram"].get("1", 0) == 1   # pixel 3: QC
-        assert stats["histogram"].get("2", 0) == 1   # pixel 4: cloud
-        assert stats["histogram"].get("4", 0) == 1   # pixel 5: water
-        assert stats["histogram"].get("10", 0) == 1  # pixel 6: nodata(8) + cloud(2)
+        assert stats["histogram"].get("0", 0) == 1  # pixel 5
+        assert stats["histogram"].get("8", 0) == 1  # pixel 0: nodata
+        assert stats["histogram"].get("1", 0) == 1  # pixel 1: QC
+        assert stats["histogram"].get("2", 0) == 1  # pixel 2: cloud
+        assert stats["histogram"].get("4", 0) == 1  # pixel 3: water
+        assert stats["histogram"].get("10", 0) == 1  # pixel 4: nodata(8) + cloud(2)
+
+    def test_filtered_lst_nans_rejected(self):
+        """Rejected pixels have NaN in filtered_lst."""
+        a = make_arrays(3)
+        a["qc"][0] = 15  # bad QC
+
+        filtered_lst, _, _ = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+        assert np.isnan(filtered_lst.ravel()[0])
+        assert not np.isnan(filtered_lst.ravel()[1])
+        assert not np.isnan(filtered_lst.ravel()[2])
 
 
 class TestNoDataError:
@@ -239,15 +217,14 @@ class TestNoDataError:
 
     def test_raised_when_all_pixels_filtered(self):
         """All pixels filtered -> NoDataError with correct stats."""
-        df = make_df(5)
-        df["LST"] = np.nan  # all nodata
+        a = make_arrays(5)
+        a["lst"][:] = np.nan  # all nodata
 
-        flags, _, padding = apply_filters(df, water_mask_flag=True)
-        filter_stats = compute_filter_stats(flags, len(df), padding)
-
-        # Simulate the processor check
-        df_valid = df.dropna(subset=["LST_filter"])
-        assert len(df_valid) == 0
+        _, flags, _ = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+        flat = flags.ravel()
+        filter_stats = compute_filter_stats(flat, len(flat))
 
         with pytest.raises(NoDataError) as exc_info:
             raise NoDataError(filter_stats)

@@ -13,6 +13,7 @@ import boto3
 from pystac_client import Client as STACClient
 from shapely.geometry import shape, mapping
 
+from common.polygons import load_polygons
 from d1 import log_job_to_d1, get_setting, log_data_request
 
 
@@ -24,33 +25,6 @@ COLLECTION = "landsat-c2l2-st"
 #   qa       -> *_ST_QA.TIF  (temperature uncertainty)
 #   qa_pixel -> *_QA_PIXEL.TIF (CFMask bit flags)
 REQUIRED_ASSETS = ["lwir11", "qa", "qa_pixel"]
-
-# Module-level cache
-_polygon_data = None
-
-
-def _load_polygons():
-    """Load and cache polygon data with bounding boxes."""
-    global _polygon_data
-    if _polygon_data is not None:
-        return _polygon_data
-
-    with open("static/polygons_new.geojson") as f:
-        roi = json.load(f)
-
-    _polygon_data = []
-    for idx, feature in enumerate(roi["features"]):
-        props = feature["properties"]
-        geom = shape(feature["geometry"])
-        bounds = geom.bounds  # (minx, miny, maxx, maxy)
-        _polygon_data.append({
-            "aid": idx + 1,
-            "name": props["name"],
-            "location": props.get("location", "lake"),
-            "geometry": geom,
-            "bbox": list(bounds),
-        })
-    return _polygon_data
 
 
 def _search_stac(start_date: str, end_date: str, bbox: list) -> list:
@@ -119,7 +93,7 @@ def handler(event, context):
 
     print(f"Landsat initiator: searching {sd} to {ed}")
 
-    polygons = _load_polygons()
+    polygons = load_polygons()
     sqs = boto3.client("sqs")
     start_time = time.time()
 

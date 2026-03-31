@@ -53,13 +53,6 @@ resource "aws_iam_role_policy" "lambda_policy" {
       {
         Effect = "Allow"
         Action = [
-          "lambda:InvokeFunction"
-        ]
-        Resource = aws_lambda_function.manifest_processor_lambda.arn
-      },
-      {
-        Effect = "Allow"
-        Action = [
           "xray:PutTraceSegments",
           "xray:PutTelemetryRecords"
         ]

@@ -15,14 +15,14 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lambda_functions"))
 
-from processor import (  # noqa: E402
+from common.parquet import (  # noqa: E402
     _row_group_first_date_key,
     align_parquet_table_to_feature_schema,
     parquet_date_type,
     parquet_feature_schema,
     upload_parquet_to_r2,
 )
-from shared import to_parquet_date_utc  # noqa: E402
+from common.dates import to_parquet_date_utc  # noqa: E402
 
 
 @pytest.fixture

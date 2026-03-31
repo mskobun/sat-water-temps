@@ -9,16 +9,12 @@ resource "aws_cloudwatch_log_group" "initiator_logs" {
   retention_in_days = 30
 }
 
-resource "aws_cloudwatch_log_group" "task_poller_logs" {
-  name              = "/aws/lambda/${var.project_name}-task-poller"
-  retention_in_days = 30
-}
-
 resource "aws_cloudwatch_log_group" "processor_logs" {
   name              = "/aws/lambda/${var.project_name}-processor"
   retention_in_days = 30
 }
 
+# ECOSTRESS initiator Lambda (CMR-STAC via earthaccess)
 resource "aws_lambda_function" "initiator_lambda" {
   function_name = "${var.project_name}-initiator"
   role          = aws_iam_role.lambda_role.arn
@@ -26,7 +22,7 @@ resource "aws_lambda_function" "initiator_lambda" {
   image_uri     = "${aws_ecr_repository.lambda_repo.repository_url}@${data.aws_ecr_image.lambda_image.image_digest}"
 
   image_config {
-    command = ["initiator.handler"]
+    command = ["ecostress.initiator.handler"]
   }
 
   tracing_config {
@@ -35,8 +31,9 @@ resource "aws_lambda_function" "initiator_lambda" {
 
   environment {
     variables = {
-      APPEEARS_USER         = var.appeears_user
-      APPEEARS_PASS         = var.appeears_pass
+      EARTHDATA_USERNAME    = var.earthdata_username
+      EARTHDATA_PASSWORD    = var.earthdata_password
+      SQS_QUEUE_URL         = aws_sqs_queue.eco_processing_queue.url
       D1_DATABASE_ID        = cloudflare_d1_database.main.id
       CLOUDFLARE_ACCOUNT_ID = var.cloudflare_account_id
       CLOUDFLARE_API_TOKEN  = var.cloudflare_api_token
@@ -46,34 +43,7 @@ resource "aws_lambda_function" "initiator_lambda" {
   timeout = 300
 }
 
-resource "aws_lambda_function" "task_poller_lambda" {
-  function_name = "${var.project_name}-task-poller"
-  role          = aws_iam_role.lambda_role.arn
-  package_type  = "Image"
-  image_uri     = "${aws_ecr_repository.lambda_repo.repository_url}@${data.aws_ecr_image.lambda_image.image_digest}"
-
-  image_config {
-    command = ["task_poller.handler"]
-  }
-
-  tracing_config {
-    mode = "Active"
-  }
-
-  environment {
-    variables = {
-      APPEEARS_USER         = var.appeears_user
-      APPEEARS_PASS         = var.appeears_pass
-      D1_DATABASE_ID        = cloudflare_d1_database.main.id
-      CLOUDFLARE_ACCOUNT_ID = var.cloudflare_account_id
-      CLOUDFLARE_API_TOKEN  = var.cloudflare_api_token
-      MANIFEST_PROCESSOR_ARN = aws_lambda_function.manifest_processor_lambda.arn
-    }
-  }
-
-  timeout = 60
-}
-
+# Processor Lambda (SQS router: Landsat + ECOSTRESS + backfill)
 resource "aws_lambda_function" "processor_lambda" {
   function_name = "${var.project_name}-processor"
   role          = aws_iam_role.lambda_role.arn
@@ -90,8 +60,8 @@ resource "aws_lambda_function" "processor_lambda" {
 
   environment {
     variables = {
-      APPEEARS_USER         = var.appeears_user
-      APPEEARS_PASS         = var.appeears_pass
+      EARTHDATA_USERNAME    = var.earthdata_username
+      EARTHDATA_PASSWORD    = var.earthdata_password
       R2_ENDPOINT           = var.r2_endpoint
       R2_BUCKET_NAME        = var.r2_bucket_name
       R2_ACCESS_KEY_ID      = var.r2_access_key_id
@@ -178,7 +148,6 @@ resource "aws_lambda_permission" "allow_cf_invoker_landsat_function" {
   principal     = aws_iam_user.cloudflare_invoker.arn
 }
 
-# SQS Trigger for Processor Lambda
 # Landsat initiator Lambda
 resource "aws_cloudwatch_log_group" "landsat_initiator_logs" {
   name              = "/aws/lambda/${var.project_name}-landsat-initiator"
@@ -192,7 +161,7 @@ resource "aws_lambda_function" "landsat_initiator_lambda" {
   image_uri     = "${aws_ecr_repository.lambda_repo.repository_url}@${data.aws_ecr_image.lambda_image.image_digest}"
 
   image_config {
-    command = ["landsat_initiator.handler"]
+    command = ["landsat.initiator.handler"]
   }
 
   tracing_config {

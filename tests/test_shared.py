@@ -1,10 +1,10 @@
-"""Tests for lambda_functions/shared.py"""
+"""Tests for date conversion and metadata extraction functions."""
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lambda_functions"))
 
-from shared import extract_metadata, to_sort_date
+from common.dates import extract_metadata, to_sort_date
 
 
 class TestToSortDate:

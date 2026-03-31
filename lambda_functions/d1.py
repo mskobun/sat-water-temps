@@ -3,7 +3,7 @@ import time
 import requests
 from typing import Dict, List
 
-from shared import to_iso_datetime
+from common.dates import to_iso_datetime
 
 
 class D1Error(Exception):
