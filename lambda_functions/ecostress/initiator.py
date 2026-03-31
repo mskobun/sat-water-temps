@@ -86,8 +86,8 @@ def handler(event, context):
     description = event.get("description")
     request_id = event.get("request_id")
 
-    # Generate synthetic task_id so existing query infrastructure works
-    task_id = f"eco-{request_id or int(time.time() * 1000)}"
+    # Use task_id from trigger endpoint if provided, otherwise generate one
+    task_id = event.get("task_id") or f"eco-{request_id or int(time.time() * 1000)}"
 
     # Date range — default: look back 2 days for ECOSTRESS latency
     delay_days = int(get_setting("data_delay_days", default=2))

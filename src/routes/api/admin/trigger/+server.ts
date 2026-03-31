@@ -17,6 +17,7 @@ async function triggerProcessing(
 ) {
 	if (source === 'ecostress') {
 		const desc = description || `Manual ECOSTRESS scan for ${startDate}${startDate !== endDate ? ` to ${endDate}` : ''}`;
+		const now = Date.now();
 
 		const result = await db
 			.prepare(`
@@ -24,14 +25,22 @@ async function triggerProcessing(
 				(source, trigger_type, triggered_by, description, start_date, end_date, created_at)
 				VALUES (?, ?, ?, ?, ?, ?, ?)
 			`)
-			.bind('ecostress', 'manual', userEmail, desc, startDate, endDate, Date.now())
+			.bind('ecostress', 'manual', userEmail, desc, startDate, endDate, now)
 			.run();
 
 		const requestId = result.meta.last_row_id;
+		const taskId = `eco-${requestId}`;
+
+		// Set task_id immediately so the frontend can link jobs
+		await db
+			.prepare(`UPDATE data_requests SET task_id = ? WHERE id = ?`)
+			.bind(taskId, requestId)
+			.run();
 
 		return {
 			ids: [requestId],
 			requestId,
+			taskId,
 			source,
 			description: desc,
 			startDate,
@@ -179,7 +188,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 			trigger_type: 'manual',
 			triggered_by: userEmail,
 			description: result.description,
-			request_id: requestId
+			request_id: requestId,
+			task_id: result.taskId
 		};
 
 		platform?.context?.waitUntil((async () => {
