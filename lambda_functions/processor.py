@@ -15,8 +15,11 @@ from aws_xray_sdk.core import patch_all
 
 from common.exceptions import NoDataError
 
-# Patch all supported libraries for automatic X-Ray tracing
-patch_all()
+# Patch supported libraries for X-Ray tracing.
+# Exclude aiobotocore — s3fs uses it for async S3 ops via earthaccess.open(),
+# and patch_all() causes AlreadyEndedException when X-Ray tries to record
+# subsegments after the parent segment has closed.
+patch_all(ignore_module_patterns=["aiobotocore"])
 
 
 def handler(event, context):
