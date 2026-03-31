@@ -59,10 +59,7 @@ def _granule_hrefs(granule) -> dict:
     Returns dict keyed by logical band name (LST, QC, water, cloud, EmisWB, etc.).
     """
     hrefs = {}
-    # Use https:// links — earthaccess.open() in the processor handles cookie auth
-    # for these regardless of region. Direct s3:// access via earthaccess.open()
-    # fails in Lambda due to unreliable in-region detection.
-    links = granule.data_links()
+    links = granule.data_links(access="direct")  # s3:// URIs for direct access from Lambda
     all_suffixes = {**BAND_FILE_SUFFIX, **OPTIONAL_BANDS_SUFFIX}
     for link in links:
         for band, suffix in all_suffixes.items():

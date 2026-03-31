@@ -89,9 +89,11 @@ def process_one_record(body):
         polygon_geom = shape(roi["features"][aid - 1]["geometry"])
         clip_shapes = [mapping(polygon_geom)]
 
-        # Authenticate with Earthdata — earthaccess.open() handles S3 auth internally,
-        # which is required for lp-prod-protected (manual AWSSession creds are denied).
+        # earthaccess detects region by querying EC2 IMDS at 169.254.169.254,
+        # which doesn't exist in Lambda (Firecracker microVMs). The request
+        # times out and in_region defaults to False. Override it.
         earthaccess.login()
+        earthaccess.__store__.in_region = True
 
         # Try each granule until one overlaps the polygon.
         # L2T v002 COGs are small UTM tiles; a CMR bbox search can return
@@ -106,10 +108,15 @@ def process_one_record(body):
         for gi, granule in enumerate(granules):
             hrefs = granule["hrefs"]
             try:
-                # earthaccess.open() returns authenticated file-like objects for s3:// URIs
+                # earthaccess.open() with URL strings needs credentials_endpoint
+                # explicitly — it can't derive it from granule metadata like it
+                # can when given DataGranule objects.
                 band_keys = ["LST", "QC", "water", "cloud"]
                 band_uris = {k: hrefs[k] for k in band_keys}
-                file_objects = earthaccess.open(list(band_uris.values()))
+                file_objects = earthaccess.open(
+                    list(band_uris.values()),
+                    credentials_endpoint="https://data.lpdaac.earthdatacloud.nasa.gov/s3credentials",
+                )
                 file_map = dict(zip(band_keys, file_objects))
 
                 with rasterio.open(file_map["LST"]) as src:
