@@ -26,6 +26,12 @@
 			{/snippet}
 		</Popover.Trigger>
 		<Popover.Content class="w-52 p-2" align="end">
+			<a
+				href="/dashboard"
+				class="block w-full text-left text-sm py-1.5 px-2 rounded hover:bg-muted"
+			>
+				Dashboard
+			</a>
 			{#if session?.user}
 				<div class="px-2 py-1.5 text-xs text-muted-foreground truncate">
 					{session.user.email}
