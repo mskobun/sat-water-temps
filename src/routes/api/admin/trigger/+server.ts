@@ -3,8 +3,6 @@ import { AwsClient } from 'aws4fetch';
 import type { D1Database } from '@cloudflare/workers-types';
 import type { RequestHandler } from './$types';
 
-const MAX_RANGE_DAYS = 60;
-
 function parseDate(str: string): RegExpMatchArray | null {
 	return str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
 }
@@ -13,95 +11,41 @@ function toAppearsDate(match: RegExpMatchArray): string {
 	return `${match[2]}-${match[3]}-${match[1]}`;
 }
 
-function enumerateDays(start: string, end: string): string[] {
-	const days: string[] = [];
-	const d = new Date(start + 'T00:00:00');
-	const last = new Date(end + 'T00:00:00');
-	while (d <= last) {
-		days.push(d.toISOString().slice(0, 10));
-		d.setDate(d.getDate() + 1);
-	}
-	return days;
-}
-
 async function triggerProcessing(
 	db: D1Database,
-	aws: AwsClient | undefined,
-	lambdaUrl: string | undefined,
 	source: 'ecostress' | 'landsat',
 	startDate: string,
 	endDate: string,
 	description: string | undefined,
 	userEmail: string
 ) {
-	const days = enumerateDays(startDate, endDate);
-	if (days.length > MAX_RANGE_DAYS) {
-		return json({ error: `Date range too large. Maximum ${MAX_RANGE_DAYS} days.` }, { status: 400 });
-	}
-
 	if (source === 'ecostress') {
-		// One request per day (ECOSTRESS behavior)
-		const ids: number[] = [];
-		const errors: string[] = [];
-		let successful = 0;
+		const startMatch = parseDate(startDate)!;
+		const endMatch = parseDate(endDate)!;
+		const appearsStart = toAppearsDate(startMatch);
+		const appearsEnd = toAppearsDate(endMatch);
+		const desc = description || `Manual ECOSTRESS scan for ${appearsStart}${appearsStart !== appearsEnd ? ` to ${appearsEnd}` : ''}`;
 
-		for (const day of days) {
-			const dayMatch = parseDate(day)!;
-			const appearsDate = toAppearsDate(dayMatch);
-			const dayDesc = description ? `${description} (${appearsDate})` : `Manual trigger for ${appearsDate}`;
+		const result = await db
+			.prepare(`
+				INSERT INTO data_requests
+				(source, trigger_type, triggered_by, description, start_date, end_date, created_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?)
+			`)
+			.bind('ecostress', 'manual', userEmail, desc, appearsStart, appearsEnd, Date.now())
+			.run();
 
-			const result = await db
-				.prepare(`
-					INSERT INTO data_requests
-					(source, trigger_type, triggered_by, description, start_date, end_date, created_at)
-					VALUES (?, ?, ?, ?, ?, ?, ?)
-				`)
-				.bind('ecostress', 'manual', userEmail, dayDesc, appearsDate, appearsDate, Date.now())
-				.run();
+		const requestId = result.meta.last_row_id;
 
-			const requestId = result.meta.last_row_id;
-			ids.push(requestId);
-
-			if (!aws || !lambdaUrl) continue;
-
-			try {
-				const response = await aws.fetch(lambdaUrl, {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({
-						start_date: appearsDate,
-						end_date: appearsDate,
-						trigger_type: 'manual',
-						triggered_by: userEmail,
-						description: dayDesc,
-						request_id: requestId
-					})
-				});
-
-				if (!response.ok) {
-					const errorText = await response.text();
-					const msg = `Lambda failed for ${day}: ${response.status} ${errorText}`;
-					errors.push(msg);
-					await db
-						.prepare(`UPDATE data_requests SET error_message = ?, updated_at = ? WHERE id = ?`)
-						.bind(msg, Date.now(), requestId)
-						.run();
-				} else {
-					successful++;
-				}
-			} catch (err) {
-				const msg = `Lambda error for ${day}: ${err instanceof Error ? err.message : String(err)}`;
-				errors.push(msg);
-				await db
-					.prepare(`UPDATE data_requests SET error_message = ?, updated_at = ? WHERE id = ?`)
-					.bind(msg, Date.now(), requestId)
-					.run();
-			}
-		}
-
-		return { ids, errors, successful, count: days.length };
+		return {
+			ids: [requestId],
+			requestId,
+			source,
+			description: desc,
+			startDate,
+			endDate
+		};
 	} else {
-		// One request for entire range (Landsat behavior)
 		const desc = description || `Manual Landsat trigger for ${startDate} to ${endDate}`;
 
 		const result = await db
@@ -114,45 +58,48 @@ async function triggerProcessing(
 			.run();
 
 		const runId = result.meta.last_row_id;
-
-		if (!aws || !lambdaUrl) {
-			return { ids: [runId], errors: [], successful: 0, count: 1, noLambda: true };
-		}
-
-		try {
-			const response = await aws.fetch(lambdaUrl, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					start_date: startDate,
-					end_date: endDate,
-					trigger_type: 'manual',
-					triggered_by: userEmail,
-					description: desc,
-					run_id: runId
-				})
-			});
-
-			if (!response.ok) {
-				const errorText = await response.text();
-				const msg = `Lambda failed: ${response.status} ${errorText}`;
-				await db
-					.prepare(`UPDATE data_requests SET error_message = ?, updated_at = ? WHERE id = ?`)
-					.bind(msg, Date.now(), runId)
-					.run();
-				return { ids: [runId], errors: [msg], successful: 0, count: 1 };
-			}
-
-			return { ids: [runId], errors: [], successful: 1, count: 1 };
-		} catch (err) {
-			const msg = `Lambda error: ${err instanceof Error ? err.message : String(err)}`;
-			await db
-				.prepare(`UPDATE data_requests SET error_message = ?, updated_at = ? WHERE id = ?`)
-				.bind(msg, Date.now(), runId)
-				.run();
-			return { ids: [runId], errors: [msg], successful: 0, count: 1 };
-		}
+		return {
+			ids: [runId],
+			runId,
+			source,
+			description: desc,
+			startDate,
+			endDate
+		};
 	}
+}
+
+async function markRequestError(db: D1Database, requestId: number, message: string) {
+	await db
+		.prepare(`UPDATE data_requests SET error_message = ?, updated_at = ? WHERE id = ?`)
+		.bind(message, Date.now(), requestId)
+		.run();
+}
+
+async function invokeInitiator(
+	aws: AwsClient,
+	lambdaUrl: string,
+	payload: Record<string, unknown>
+): Promise<{ ok: true } | { ok: false; error: string }> {
+	try {
+		const response = await aws.fetch(lambdaUrl, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(payload)
+		});
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			return { ok: false, error: `Lambda failed: ${response.status} ${errorText}` };
+		}
+		return { ok: true };
+	} catch (err) {
+		return { ok: false, error: `Lambda error: ${err instanceof Error ? err.message : String(err)}` };
+	}
+}
+
+function getInvokeError(result: { ok: true } | { ok: false; error: string }): string | null {
+	return 'error' in result ? result.error : null;
 }
 
 export const POST: RequestHandler = async ({ request, locals, platform }) => {
@@ -209,36 +156,85 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		});
 	}
 
-	const result = await triggerProcessing(db, aws, lambdaUrl, source || 'ecostress', startDate, endDate, description, userEmail);
+	const selectedSource = source || 'ecostress';
+	const result = await triggerProcessing(db, selectedSource, startDate, endDate, description, userEmail);
 
 	// If triggerProcessing returned a Response (validation error), pass through
 	if (result instanceof Response) return result;
 
-	const { ids, errors, successful, count } = result;
-	const noLambda = 'noLambda' in result && result.noLambda;
+	const { ids } = result;
+	const count = ids.length;
 
-	if (!hasLambdaCreds || noLambda) {
+	if (!hasLambdaCreds || !aws || !lambdaUrl) {
+		const warning = selectedSource === 'ecostress'
+			? 'Lambda invocation credentials not configured. ECOSTRESS scan request recorded but Lambda not invoked.'
+			: 'Lambda invocation credentials not configured. Landsat scan request recorded but Lambda not invoked.';
 		return json({
 			count,
 			successful: 0,
 			failed: 0,
 			ids,
 			errors: [],
-			warning: 'Lambda invocation credentials not configured. Requests recorded but Lambda not invoked.'
+			warning
 		}, { status: 202 });
 	}
 
-	const failed = errors.length;
-	const message = failed > 0
-		? `Created ${count} request(s): ${successful} succeeded, ${failed} failed`
-		: `Created ${count} request(s) successfully`;
+	if (selectedSource === 'ecostress') {
+		const requestId = result.requestId;
+		const payload = {
+			start_date: result.startDate,
+			end_date: result.endDate,
+			trigger_type: 'manual',
+			triggered_by: userEmail,
+			description: result.description,
+			request_id: requestId
+		};
+
+		platform?.context?.waitUntil((async () => {
+			const invokeResult = await invokeInitiator(aws, lambdaUrl, payload);
+			const invokeError = getInvokeError(invokeResult);
+			if (invokeError) {
+				await markRequestError(db, requestId, invokeError);
+			}
+		})());
+
+		return json({
+			count,
+			successful: 0,
+			failed: 0,
+			ids,
+			message: 'ECOSTRESS scan accepted and queued. It will continue in the background.'
+		}, { status: 202 });
+	}
+
+	const payload = {
+		start_date: result.startDate,
+		end_date: result.endDate,
+		trigger_type: 'manual',
+		triggered_by: userEmail,
+		description: result.description,
+		run_id: result.runId
+	};
+	const invokeResult = await invokeInitiator(aws, lambdaUrl, payload);
+	const invokeError = getInvokeError(invokeResult);
+
+	if (invokeError) {
+		await markRequestError(db, result.runId, invokeError);
+		return json({
+			count,
+			successful: 0,
+			failed: 1,
+			ids,
+			errors: [invokeError],
+			message: 'Created Landsat scan request, but Lambda invocation failed'
+		});
+	}
 
 	return json({
 		count,
-		successful,
-		failed,
+		successful: 1,
+		failed: 0,
 		ids,
-		errors: errors.length > 0 ? errors : undefined,
-		message
+		message: 'Created Landsat scan request successfully'
 	});
 };

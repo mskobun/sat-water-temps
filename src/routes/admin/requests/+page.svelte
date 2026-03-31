@@ -207,7 +207,7 @@
 				<h1 class="text-3xl font-bold mb-2">Processing Requests</h1>
 				<p class="text-muted-foreground">
 					{#if source === 'ecostress'}
-						Track AppEEARS task submissions and their processing results
+						Track ECOSTRESS scan requests and their processing results
 					{:else}
 						Track Landsat scene scanning and processing runs
 					{/if}
@@ -226,7 +226,7 @@
 						<Dialog.Title>Manual Processing Trigger</Dialog.Title>
 						<Dialog.Description>
 							{#if triggerSource === 'ecostress'}
-								Submit AppEEARS task(s) for the selected date range. One request per day will be created.
+								Run one ECOSTRESS scan for the selected date range and queue matching granules for processing.
 							{:else}
 								Scan for Landsat scenes in the selected date range and queue them for processing.
 							{/if}
@@ -279,7 +279,7 @@
 						{#if triggerDateRange.start && triggerDateRange.end}
 							<p class="text-sm text-muted-foreground">
 								{#if triggerSource === 'ecostress'}
-									{dayCount()} request(s) will be created
+									1 ECOSTRESS scan will be created for {dayCount()} day(s)
 								{:else}
 									1 Landsat scan will be created for {dayCount()} day(s)
 								{/if}
