@@ -112,10 +112,9 @@ def handler(event, context):
 
     print(f"ECOSTRESS initiator: searching {sd} to {ed}")
 
-    # Authenticate with Earthdata and pre-fetch S3 credentials so that
-    # data_links(access="direct") returns s3:// URIs rather than https:// fallbacks.
-    auth = earthaccess.login()
-    auth.get_s3_credentials(daac="LPDAAC")
+    # Authenticate with Earthdata — data_links(access="direct") returns
+    # s3:// URIs from CMR metadata regardless of credentials.
+    earthaccess.login()
 
     polygons = load_polygons()
     sqs = boto3.client("sqs")
