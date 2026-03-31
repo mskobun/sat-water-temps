@@ -56,7 +56,8 @@ def _granule_hrefs(granule) -> dict:
     We match band names by checking if the URL contains the band name.
     """
     hrefs = {}
-    links = granule.data_links()
+    # Use direct S3 access — Lambda runs in us-west-2, same region as LPDAAC archive
+    links = granule.data_links(access="direct")
     all_bands = REQUIRED_BANDS + OPTIONAL_BANDS
     for link in links:
         for band in all_bands:

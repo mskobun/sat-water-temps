@@ -33,11 +33,6 @@ from d1 import log_job_to_d1
 R2_PREFIX = "ECO"
 
 
-def _open_ecostress_cog(href, session_env):
-    """Open an ECOSTRESS COG from Earthdata Cloud."""
-    return rasterio.open(href)
-
-
 def process_one_record(body):
     """Process a single ECOSTRESS SQS message body.
 
@@ -49,7 +44,7 @@ def process_one_record(body):
         "location": "lake",
         "granules": [{
             "granule_id": "...",
-            "hrefs": {"SurfaceTemperature": "https://...", "QC": "https://...", ...}
+            "hrefs": {"SurfaceTemperature": "s3://...", "QC": "s3://...", ...}
         }]
     }
     """
@@ -86,12 +81,13 @@ def process_one_record(body):
         # Authenticate with Earthdata for S3 access
         auth = earthaccess.login()
 
-        # Get S3 credentials for LPDAAC (ECOSTRESS COGs)
+        # Get temporary S3 credentials for LPDAAC (ECOSTRESS COGs in us-west-2)
         s3_creds = auth.get_s3_credentials(daac="LPDAAC")
         env_kwargs = {
             "aws_access_key_id": s3_creds["accessKeyId"],
             "aws_secret_access_key": s3_creds["secretAccessKey"],
             "aws_session_token": s3_creds["sessionToken"],
+            "aws_region_name": "us-west-2",
         }
 
         # Use first granule (or mosaic if multiple — rare for ECOSTRESS)
