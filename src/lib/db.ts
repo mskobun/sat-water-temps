@@ -437,21 +437,24 @@ export async function getDataRequests(
 ) {
   try {
     const jobType = source === 'ecostress' ? 'ecostress_process' : 'landsat_process';
+    // Match jobs by task_id when available, otherwise fall back to date range + created_at
+    const jobMatch = source === 'ecostress'
+      ? `pj.job_type = '${jobType}' AND pj.started_at >= dr.created_at AND (
+           (dr.task_id IS NOT NULL AND pj.task_id = dr.task_id)
+           OR (dr.task_id IS NULL AND pj.date >= dr.start_date || 'T00:00:00' AND pj.date <= dr.end_date || 'T23:59:59')
+         )`
+      : `pj.task_id = dr.task_id AND pj.job_type = '${jobType}' AND pj.started_at >= dr.created_at`;
     let query = `
       SELECT
         dr.*,
         (SELECT COUNT(*) FROM processing_jobs pj
-         WHERE pj.task_id = dr.task_id AND pj.job_type = '${jobType}'
-         AND pj.started_at >= dr.created_at) as total_jobs,
+         WHERE ${jobMatch}) as total_jobs,
         (SELECT COUNT(*) FROM processing_jobs pj
-         WHERE pj.task_id = dr.task_id AND pj.job_type = '${jobType}'
-         AND pj.status = 'success' AND pj.started_at >= dr.created_at) as success_jobs,
+         WHERE ${jobMatch} AND pj.status = 'success') as success_jobs,
         (SELECT COUNT(*) FROM processing_jobs pj
-         WHERE pj.task_id = dr.task_id AND pj.job_type = '${jobType}'
-         AND pj.status = 'failed' AND pj.started_at >= dr.created_at) as failed_jobs,
+         WHERE ${jobMatch} AND pj.status = 'failed') as failed_jobs,
         (SELECT COUNT(*) FROM processing_jobs pj
-         WHERE pj.task_id = dr.task_id AND pj.job_type = '${jobType}'
-         AND pj.status = 'started' AND pj.started_at >= dr.created_at) as running_jobs
+         WHERE ${jobMatch} AND pj.status = 'started') as running_jobs
       FROM data_requests_with_status dr
       WHERE dr.source = ?
     `;
@@ -505,6 +508,24 @@ export async function getDataRequestDetail(
           ORDER BY j.started_at DESC
         `)
         .bind(request.task_id, request.created_at)
+        .all();
+    } else if (source === 'ecostress') {
+      // Fallback: match ecostress_process jobs by date range when task_id is NULL
+      jobsResult = await db
+        .prepare(`
+          SELECT j.id, j.job_type, j.task_id, j.feature_id, j.date, j.status,
+                 j.started_at, j.completed_at, j.duration_ms, j.error_message, j.metadata,
+                 tm.filter_stats
+          FROM processing_jobs j
+          LEFT JOIN temperature_metadata tm
+            ON j.feature_id = tm.feature_id AND j.date = tm.date
+          WHERE j.job_type = 'ecostress_process'
+            AND j.date >= ? || 'T00:00:00'
+            AND j.date <= ? || 'T23:59:59'
+            AND j.started_at >= ?
+          ORDER BY j.started_at DESC
+        `)
+        .bind(request.start_date, request.end_date, request.created_at)
         .all();
     } else if (source === 'landsat') {
       jobsResult = await db
