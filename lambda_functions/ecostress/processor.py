@@ -88,6 +88,7 @@ def process_one_record(body):
     date_day = date_str[:10]
     name = body["name"]
     location = body.get("location", "lake")
+    task_id = body.get("task_id")
     granules = body["granules"]
     feature_id = f"{name}/{location}" if location != "lake" else name
 
@@ -97,6 +98,7 @@ def process_one_record(body):
 
     log_job_to_d1(
         job_type="ecostress_process",
+        task_id=task_id,
         feature_id=feature_id,
         date=date_str,
         status="started",
@@ -344,6 +346,7 @@ def process_one_record(body):
         duration_ms = int((time.time() - start_time) * 1000)
         log_job_to_d1(
             job_type="ecostress_process",
+            task_id=task_id,
             feature_id=feature_id,
             date=date_str,
             status="success",
@@ -355,6 +358,7 @@ def process_one_record(body):
         duration_ms = int((time.time() - start_time) * 1000)
         log_job_to_d1(
             job_type="ecostress_process",
+            task_id=task_id,
             feature_id=feature_id,
             date=date_str,
             status="nodata",
@@ -369,6 +373,7 @@ def process_one_record(body):
         duration_ms = int((time.time() - start_time) * 1000)
         log_job_to_d1(
             job_type="ecostress_process",
+            task_id=task_id,
             feature_id=feature_id,
             date=date_str,
             status="failed",

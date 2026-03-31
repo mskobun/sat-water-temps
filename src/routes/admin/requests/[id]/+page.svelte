@@ -37,11 +37,6 @@
 	let updatedAt = $state('');
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
-	// Reprocess state (ECOSTRESS only)
-	let reprocessLoading = $state(false);
-	let reprocessError = $state('');
-	let reprocessSuccess = $state('');
-
 	async function fetchDetail() {
 		try {
 			const sourceParam = source !== 'ecostress' ? `?source=${source}` : '';
@@ -92,42 +87,6 @@
 			default: return 'secondary';
 		}
 	}
-
-	async function handleReprocess() {
-		if (!request?.task_id) return;
-
-		reprocessLoading = true;
-		reprocessError = '';
-		reprocessSuccess = '';
-
-		try {
-			const response = await fetch('/api/admin/reprocess', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ request_id: request.id })
-			});
-
-			const result = await response.json();
-
-			if (!response.ok) {
-				reprocessError = result.error || 'Failed to start reprocessing';
-				return;
-			}
-
-			reprocessSuccess = `Reprocessing started! New request ID: ${result.id}`;
-			await fetchDetail();
-		} catch (e) {
-			reprocessError = 'Failed to start reprocessing';
-			console.error(e);
-		} finally {
-			reprocessLoading = false;
-		}
-	}
-
-	const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-	let reprocessExpired = $derived(
-		request ? Date.now() - request.created_at > THIRTY_DAYS_MS : false
-	);
 
 	let scenesLabel = $derived(request?.scenes_count ?? '-');
 	let successCount = $derived(jobs.filter((j) => j.status === 'success').length);
@@ -182,7 +141,6 @@
 								<dd class="mt-0.5">
 									<Badge variant={
 										request.trigger_type === 'manual' ? 'secondary' :
-										request.trigger_type === 'reprocess' ? 'outline' :
 										'default'
 									}>
 										{request.trigger_type}
@@ -214,7 +172,7 @@
 							</div>
 							{#if request.task_id}
 								<div class="col-span-2">
-									<dt class="text-muted-foreground">AppEEARS Task ID</dt>
+									<dt class="text-muted-foreground">Task ID</dt>
 									<dd class="mt-0.5 font-mono text-xs">{request.task_id}</dd>
 								</div>
 							{/if}
@@ -270,54 +228,6 @@
 					</Card.Content>
 				</Card.Card>
 			</div>
-
-			{#if !isLandsat && request.task_id}
-				<div class="mb-6">
-					<Card.Card>
-						<Card.Header>
-							<Card.Title>Reprocess Data</Card.Title>
-							<Card.Description>
-								Re-run the processing pipeline for this task without resubmitting to AppEEARS.
-							</Card.Description>
-						</Card.Header>
-						<Card.Content>
-							{#if reprocessExpired}
-								<Alert variant="destructive" class="mb-4">
-									<AlertDescription>
-										Reprocessing is unavailable — this request is older than 30 days.
-										<a
-											href="https://appeears.earthdatacloud.nasa.gov/help?section=sample-retention"
-											target="_blank"
-											rel="noopener noreferrer"
-											class="underline font-medium"
-										>Sample requests are available to download for 30 days after completion.</a>
-										To re-acquire this data, submit a new processing request via the
-										<a href="/admin/trigger" class="underline font-medium">Trigger</a> page.
-									</AlertDescription>
-								</Alert>
-							{:else}
-								{#if reprocessSuccess}
-									<Alert variant="default" class="mb-4">
-										<AlertDescription>{reprocessSuccess}</AlertDescription>
-									</Alert>
-								{/if}
-								{#if reprocessError}
-									<Alert variant="destructive" class="mb-4">
-										<AlertDescription>{reprocessError}</AlertDescription>
-									</Alert>
-								{/if}
-								<Button
-									onclick={handleReprocess}
-									disabled={reprocessLoading}
-									variant="outline"
-								>
-									{reprocessLoading ? 'Starting...' : 'Reprocess Task'}
-								</Button>
-							{/if}
-						</Card.Content>
-					</Card.Card>
-				</div>
-			{/if}
 
 			<div class="flex items-center justify-between mb-4">
 				<h2 class="text-xl font-semibold">Processing Jobs</h2>

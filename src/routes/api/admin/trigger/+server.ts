@@ -7,10 +7,6 @@ function parseDate(str: string): RegExpMatchArray | null {
 	return str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
 }
 
-function toAppearsDate(match: RegExpMatchArray): string {
-	return `${match[2]}-${match[3]}-${match[1]}`;
-}
-
 async function triggerProcessing(
 	db: D1Database,
 	source: 'ecostress' | 'landsat',
@@ -20,11 +16,7 @@ async function triggerProcessing(
 	userEmail: string
 ) {
 	if (source === 'ecostress') {
-		const startMatch = parseDate(startDate)!;
-		const endMatch = parseDate(endDate)!;
-		const appearsStart = toAppearsDate(startMatch);
-		const appearsEnd = toAppearsDate(endMatch);
-		const desc = description || `Manual ECOSTRESS scan for ${appearsStart}${appearsStart !== appearsEnd ? ` to ${appearsEnd}` : ''}`;
+		const desc = description || `Manual ECOSTRESS scan for ${startDate}${startDate !== endDate ? ` to ${endDate}` : ''}`;
 
 		const result = await db
 			.prepare(`
@@ -32,7 +24,7 @@ async function triggerProcessing(
 				(source, trigger_type, triggered_by, description, start_date, end_date, created_at)
 				VALUES (?, ?, ?, ?, ?, ?, ?)
 			`)
-			.bind('ecostress', 'manual', userEmail, desc, appearsStart, appearsEnd, Date.now())
+			.bind('ecostress', 'manual', userEmail, desc, startDate, endDate, Date.now())
 			.run();
 
 		const requestId = result.meta.last_row_id;

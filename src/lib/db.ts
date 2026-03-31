@@ -436,7 +436,7 @@ export async function getDataRequests(
   status?: string
 ) {
   try {
-    const jobType = source === 'ecostress' ? 'process' : 'landsat_process';
+    const jobType = source === 'ecostress' ? 'ecostress_process' : 'landsat_process';
     let query = `
       SELECT
         dr.*,

@@ -86,6 +86,9 @@ def handler(event, context):
     description = event.get("description")
     request_id = event.get("request_id")
 
+    # Generate synthetic task_id so existing query infrastructure works
+    task_id = f"eco-{request_id or int(time.time() * 1000)}"
+
     # Date range — default: look back 2 days for ECOSTRESS latency
     delay_days = int(get_setting("data_delay_days", default=2))
     end_date = datetime.utcnow() - timedelta(days=delay_days)
@@ -128,6 +131,7 @@ def handler(event, context):
     # Log job start
     log_job_to_d1(
         job_type="ecostress_submit",
+        task_id=task_id,
         status="started",
         metadata_json=json.dumps({"start_date": sd, "end_date": ed}),
         fatal=False,
@@ -182,6 +186,7 @@ def handler(event, context):
                     "date": granule_datetime,
                     "name": poly["name"],
                     "location": poly["location"],
+                    "task_id": task_id,
                     "granules": granules,
                 }
                 sqs.send_message(
@@ -195,10 +200,11 @@ def handler(event, context):
 
         log_job_to_d1(
             job_type="ecostress_submit",
+            task_id=task_id,
             status="success",
             duration_ms=duration_ms,
         )
-        log_data_request('ecostress', None, trigger_type, triggered_by, description, sd, ed,
+        log_data_request('ecostress', task_id, trigger_type, triggered_by, description, sd, ed,
                          request_id=request_id, scenes_count=total_messages)
 
         print(f"✓ ECOSTRESS initiator complete: {total_messages} messages sent in {duration_ms}ms")
@@ -215,11 +221,12 @@ def handler(event, context):
         duration_ms = int((time.time() - start_time) * 1000)
         log_job_to_d1(
             job_type="ecostress_submit",
+            task_id=task_id,
             status="failed",
             duration_ms=duration_ms,
             error_message=str(e),
         )
-        log_data_request('ecostress', None, trigger_type, triggered_by, description, sd, ed,
+        log_data_request('ecostress', task_id, trigger_type, triggered_by, description, sd, ed,
                          request_id=request_id, error_message=str(e))
         print(f"✗ ECOSTRESS initiator error: {e}")
         return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
