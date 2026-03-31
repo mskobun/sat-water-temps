@@ -279,7 +279,7 @@ export async function fetchDuckDBFeature(
 /**
  * Extract points for a specific date. Returns packed Float64 triplets
  * (lng, lat, temperature) and summary stats for the selected date.
- * Landsat: also returns rowCol (interleaved row, col per point) when present in Parquet.
+ * Also returns rowCol (interleaved row, col per point) when present in Parquet.
  */
 export async function getPointsForDate(
 	feature: CachedDuckDBFeature,
@@ -293,11 +293,11 @@ export async function getPointsForDate(
 	const chunks: Float64Array[] = [];
 	const rowColChunks: Int32Array[] = [];
 	let totalRows = 0;
-	let landsatHasRowCol: boolean | null = source === 'landsat' ? null : false;
+	let hasRowCol: boolean | null = null;
 
 	for (const file of feature.files) {
 		let table;
-		if (source === 'landsat' && landsatHasRowCol !== false) {
+		if (hasRowCol !== false) {
 			try {
 				table = await withConnection(source, (connection) =>
 					connection.query(`
@@ -306,7 +306,7 @@ export async function getPointsForDate(
 				WHERE ${sqlDateEqualsUiDate(date)}
 			`)
 				);
-				landsatHasRowCol = true;
+				hasRowCol = true;
 			} catch {
 				table = await withConnection(source, (connection) =>
 					connection.query(`
@@ -315,7 +315,7 @@ export async function getPointsForDate(
 				WHERE ${sqlDateEqualsUiDate(date)}
 			`)
 				);
-				landsatHasRowCol = false;
+				hasRowCol = false;
 			}
 		} else {
 			table = await withConnection(source, (connection) =>
@@ -343,19 +343,30 @@ export async function getPointsForDate(
 		totalRows += table.numRows;
 		chunks.push(chunk);
 
-		if (landsatHasRowCol === true) {
+		if (hasRowCol === true) {
 			const rowChild = table.getChild('row');
 			const colChild = table.getChild('col');
 			if (!rowChild || !colChild) {
-				landsatHasRowCol = false;
+				hasRowCol = false;
 			} else {
 				const rc = new Int32Array(table.numRows * 2);
 				let ro = 0;
+				let allValid = true;
 				for (let i = 0; i < table.numRows; i++) {
-					rc[ro++] = Number(rowChild.get(i));
-					rc[ro++] = Number(colChild.get(i));
+					const r = rowChild.get(i);
+					const c = colChild.get(i);
+					if (r == null || c == null) {
+						allValid = false;
+						break;
+					}
+					rc[ro++] = Number(r);
+					rc[ro++] = Number(c);
 				}
-				rowColChunks.push(rc);
+				if (allValid) {
+					rowColChunks.push(rc);
+				} else {
+					hasRowCol = false;
+				}
 			}
 		}
 	}
@@ -370,7 +381,7 @@ export async function getPointsForDate(
 
 	let rowColOut: Int32Array | undefined;
 	if (
-		landsatHasRowCol === true &&
+		hasRowCol === true &&
 		rowColChunks.length === chunks.length &&
 		rowColChunks.length > 0
 	) {
@@ -381,8 +392,7 @@ export async function getPointsForDate(
 			rcCursor += rc.length;
 		}
 		rowColOut = merged;
-	} else if (source === 'landsat') {
-		// Sentinel so deck overlay falls back to lon/lat rectangles
+	} else {
 		rowColOut = new Int32Array(totalRows * 2).fill(-1);
 	}
 
