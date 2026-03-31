@@ -18,8 +18,9 @@ import numpy as np
 import pandas as pd
 import rasterio
 from rasterio.mask import mask
+from rasterio.merge import merge
 from rasterio.warp import transform_geom
-from shapely.geometry import shape, mapping
+from shapely.geometry import shape, mapping, box
 
 from common.storage import get_s3_client, upload_to_r2, upload_csv_to_r2
 from common.metadata import affine_transform_to_dict, insert_metadata_to_d1
@@ -42,6 +43,29 @@ def _clip_band(src, clip_shapes, **kwargs):
     else:
         projected = clip_shapes
     return mask(src, projected, crop=True, **kwargs)
+
+
+def _merge_and_clip(datasets, clip_shapes, work_dir, band_name):
+    """Merge multiple raster datasets into a mosaic, then clip to polygon."""
+    mosaic, mosaic_transform = merge(datasets)
+    meta = datasets[0].meta.copy()
+    meta.update(
+        height=mosaic.shape[1],
+        width=mosaic.shape[2],
+        transform=mosaic_transform,
+    )
+    merge_path = os.path.join(work_dir, f"{band_name}_merged.tif")
+    with rasterio.open(merge_path, "w", **meta) as dst:
+        dst.write(mosaic)
+    with rasterio.open(merge_path) as src:
+        clipped, clip_transform = _clip_band(src, clip_shapes)
+        clip_meta = src.meta.copy()
+        clip_meta.update(
+            height=clipped.shape[1],
+            width=clipped.shape[2],
+            transform=clip_transform,
+        )
+    return clipped, clip_transform, clip_meta
 
 
 def process_one_record(body):
@@ -95,22 +119,17 @@ def process_one_record(body):
         earthaccess.login()
         earthaccess.__store__.in_region = True
 
-        # Try each granule until one overlaps the polygon.
-        # L2T v002 COGs are small UTM tiles; a CMR bbox search can return
-        # tiles that don't actually cover this specific polygon.
-        lst_data = None
-        qc_data = None
-        water_data = None
-        cloud_data = None
-        lst_meta = None
-        lst_transform = None
+        # L2T v002 COGs are small UTM tiles — a CMR bbox search can
+        # return multiple tiles needed to cover the polygon.  Open all
+        # overlapping tiles and merge them (like Landsat scenes).
+        lst_datasets = []
+        qc_datasets = []
+        water_datasets = []
+        cloud_datasets = []
 
         for gi, granule in enumerate(granules):
             hrefs = granule["hrefs"]
             try:
-                # earthaccess.open() with URL strings needs credentials_endpoint
-                # explicitly — it can't derive it from granule metadata like it
-                # can when given DataGranule objects.
                 band_keys = ["LST", "QC", "water", "cloud"]
                 band_uris = {k: hrefs[k] for k in band_keys}
                 file_objects = earthaccess.open(
@@ -119,38 +138,86 @@ def process_one_record(body):
                 )
                 file_map = dict(zip(band_keys, file_objects))
 
-                with rasterio.open(file_map["LST"]) as src:
-                    lst_clipped, lst_transform = _clip_band(src, clip_shapes)
-                    lst_meta = src.meta.copy()
-                    lst_meta.update(
-                        height=lst_clipped.shape[1],
-                        width=lst_clipped.shape[2],
-                        transform=lst_transform,
-                    )
-                lst_data = lst_clipped[0].astype(np.float32)
+                lst_src = rasterio.open(file_map["LST"])
+                raster_crs = lst_src.crs
+                if raster_crs and raster_crs.to_epsg() != 4326:
+                    poly_proj = shape(transform_geom("EPSG:4326", raster_crs, mapping(polygon_geom)))
+                else:
+                    poly_proj = polygon_geom
 
-                with rasterio.open(file_map["QC"]) as src:
-                    qc_clipped, _ = _clip_band(src, clip_shapes)
-                qc_data = qc_clipped[0]
-
-                with rasterio.open(file_map["water"]) as src:
-                    water_clipped, _ = _clip_band(src, clip_shapes)
-                water_data = water_clipped[0]
-
-                with rasterio.open(file_map["cloud"]) as src:
-                    cloud_clipped, _ = _clip_band(src, clip_shapes)
-                cloud_data = cloud_clipped[0]
-
-                break  # successfully clipped
-
-            except ValueError as e:
-                if "do not overlap" in str(e):
+                if not box(*lst_src.bounds).intersects(poly_proj):
+                    lst_src.close()
                     print(f"[ECOSTRESS][{feature_id}] Granule {gi+1}/{len(granules)} does not overlap, skipping")
                     continue
-                raise
 
-        if lst_data is None:
+                lst_datasets.append(lst_src)
+                qc_datasets.append(rasterio.open(file_map["QC"]))
+                water_datasets.append(rasterio.open(file_map["water"]))
+                cloud_datasets.append(rasterio.open(file_map["cloud"]))
+                print(f"[ECOSTRESS][{feature_id}] Granule {gi+1}/{len(granules)} overlaps polygon")
+
+            except Exception as e:
+                print(f"[ECOSTRESS][{feature_id}] Error opening granule {gi+1}/{len(granules)}: {e}")
+                continue
+
+        if not lst_datasets:
             raise NoDataError({"reason": "no_overlap", "granules_tried": len(granules)})
+
+        print(f"[ECOSTRESS][{feature_id}] Using {len(lst_datasets)}/{len(granules)} overlapping granule(s)")
+
+        all_datasets = list(lst_datasets) + list(qc_datasets) + list(water_datasets) + list(cloud_datasets)
+        try:
+            # Filter to a single CRS before merging (tiles at UTM zone
+            # boundaries can straddle two EPSG codes).
+            if len(lst_datasets) > 1:
+                crs_groups = {}
+                for i, ds in enumerate(lst_datasets):
+                    epsg = ds.crs.to_epsg()
+                    crs_groups.setdefault(epsg, []).append(i)
+                if len(crs_groups) > 1:
+                    best_epsg = max(crs_groups, key=lambda k: len(crs_groups[k]))
+                    keep = crs_groups[best_epsg]
+                    print(f"[ECOSTRESS][{feature_id}] Mixed CRS {set(crs_groups)}, keeping {len(keep)} in EPSG:{best_epsg}")
+                    lst_datasets = [lst_datasets[i] for i in keep]
+                    qc_datasets = [qc_datasets[i] for i in keep]
+                    water_datasets = [water_datasets[i] for i in keep]
+                    cloud_datasets = [cloud_datasets[i] for i in keep]
+
+            if len(lst_datasets) == 1:
+                lst_clipped, lst_transform = _clip_band(lst_datasets[0], clip_shapes)
+                lst_meta = lst_datasets[0].meta.copy()
+                lst_meta.update(
+                    height=lst_clipped.shape[1],
+                    width=lst_clipped.shape[2],
+                    transform=lst_transform,
+                )
+                qc_clipped, _ = _clip_band(qc_datasets[0], clip_shapes)
+                water_clipped, _ = _clip_band(water_datasets[0], clip_shapes)
+                cloud_clipped, _ = _clip_band(cloud_datasets[0], clip_shapes)
+            else:
+                lst_clipped, lst_transform, lst_meta = _merge_and_clip(
+                    lst_datasets, clip_shapes, work_dir, "lst"
+                )
+                qc_clipped, _, _ = _merge_and_clip(
+                    qc_datasets, clip_shapes, work_dir, "qc"
+                )
+                water_clipped, _, _ = _merge_and_clip(
+                    water_datasets, clip_shapes, work_dir, "water"
+                )
+                cloud_clipped, _, _ = _merge_and_clip(
+                    cloud_datasets, clip_shapes, work_dir, "cloud"
+                )
+        finally:
+            for ds in all_datasets:
+                try:
+                    ds.close()
+                except Exception:
+                    pass
+
+        lst_data = lst_clipped[0].astype(np.float32)
+        qc_data = qc_clipped[0]
+        water_data = water_clipped[0]
+        cloud_data = cloud_clipped[0]
 
         # Apply ECOSTRESS-specific filters
         filtered_lst, filter_flags, has_water = apply_ecostress_filters(
