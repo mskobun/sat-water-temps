@@ -214,23 +214,37 @@ export class DeckTemperatureOverlay {
 			return;
 		}
 
-		const useLandsatQuads =
-			hasLandsatQuadInputs(landsatSourceCrs ?? null, landsatTransform ?? null, rowCol ?? null) &&
+		const hasQuadInputs = hasLandsatQuadInputs(landsatSourceCrs ?? null, landsatTransform ?? null, rowCol ?? null);
+		const useProjQuads =
+			hasQuadInputs &&
 			rowCol!.length === count * 2 &&
 			rowCol![0] !== -1;
 
-		if (!useLandsatQuads) {
+		console.log('[deck] update:', {
+			count,
+			sourceCrs: landsatSourceCrs ?? null,
+			transform: landsatTransform ?? null,
+			hasRowCol: rowCol != null && rowCol.length > 0,
+			firstRowCol: rowCol ? [rowCol[0], rowCol[1]] : null,
+			hasQuadInputs,
+			useProjQuads
+		});
+
+		if (!useProjQuads) {
+			console.log('[deck] Using axis-aligned rect mode (halfPixelX=%f, halfPixelY=%f)', opts.halfPixelX, opts.halfPixelY);
 			this.mainLayer = createTemperatureLayer(opts, 'rect', null);
 		} else {
 			const crs = landsatSourceCrs!;
 			const tf = landsatTransform!;
+			console.log('[deck] Using projected quad mode: CRS=%s, transform=%o', crs, tf);
 
 			try {
 				const flat = computeLandsatQuadsFlat(crs, tf, rowCol!, count);
 				const polygons = flatQuadsToPolygons(flat, count);
+				console.log('[deck] Computed %d projected quads successfully', count);
 				this.mainLayer = createTemperatureLayer(opts, 'landsat-precomputed', polygons);
 			} catch (err) {
-				console.error('[deck] Landsat quad compute failed:', err);
+				console.error('[deck] Projected quad compute failed, falling back to rect:', err);
 				this.mainLayer = createTemperatureLayer(opts, 'rect', null);
 			}
 		}
