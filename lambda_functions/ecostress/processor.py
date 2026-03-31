@@ -9,17 +9,20 @@ For each (AID, date) message:
 """
 
 import json
+import math
 import os
 import time
 
+import boto3
 import earthaccess
 import numpy as np
 import pandas as pd
 import rasterio
 from rasterio.mask import mask
+from rasterio.session import AWSSession
+from rasterio.warp import transform_geom
 from shapely.geometry import shape, mapping
 
-from common.polygons import get_aid_folder_mapping
 from common.storage import get_s3_client, upload_to_r2, upload_csv_to_r2
 from common.metadata import affine_transform_to_dict, insert_metadata_to_d1
 from common.visualization import tif_to_png
@@ -31,6 +34,16 @@ from d1 import log_job_to_d1
 
 
 R2_PREFIX = "ECO"
+
+
+def _clip_band(src, clip_shapes, **kwargs):
+    """Clip a raster band, reprojecting the polygon to the raster's CRS."""
+    raster_crs = src.crs
+    if raster_crs and not raster_crs.to_epsg() == 4326:
+        projected = [transform_geom("EPSG:4326", raster_crs, s) for s in clip_shapes]
+    else:
+        projected = clip_shapes
+    return mask(src, projected, crop=True, **kwargs)
 
 
 def process_one_record(body):
@@ -83,40 +96,63 @@ def process_one_record(body):
 
         # Get temporary S3 credentials for LPDAAC (ECOSTRESS COGs in us-west-2)
         s3_creds = auth.get_s3_credentials(daac="LPDAAC")
-        env_kwargs = {
-            "aws_access_key_id": s3_creds["accessKeyId"],
-            "aws_secret_access_key": s3_creds["secretAccessKey"],
-            "aws_session_token": s3_creds["sessionToken"],
-            "aws_region_name": "us-west-2",
-        }
+        aws_session = AWSSession(
+            boto3.Session(
+                aws_access_key_id=s3_creds["accessKeyId"],
+                aws_secret_access_key=s3_creds["secretAccessKey"],
+                aws_session_token=s3_creds["sessionToken"],
+                region_name="us-west-2",
+            )
+        )
 
-        # Use first granule (or mosaic if multiple — rare for ECOSTRESS)
-        granule = granules[0]
-        hrefs = granule["hrefs"]
+        # Try each granule until one overlaps the polygon.
+        # L2T v002 COGs are small UTM tiles; a CMR bbox search can return
+        # tiles that don't actually cover this specific polygon.
+        lst_data = None
+        qc_data = None
+        water_data = None
+        cloud_data = None
+        lst_meta = None
+        lst_transform = None
+        used_granule = None
 
-        with rasterio.Env(**env_kwargs):
-            # Read and clip each band
-            with rasterio.open(hrefs["LST"]) as src:
-                lst_clipped, lst_transform = mask(src, clip_shapes, crop=True)
-                lst_meta = src.meta.copy()
-                lst_meta.update(
-                    height=lst_clipped.shape[1],
-                    width=lst_clipped.shape[2],
-                    transform=lst_transform,
-                )
-            lst_data = lst_clipped[0].astype(np.float32)
+        with rasterio.Env(AWSSession=aws_session):
+            for gi, granule in enumerate(granules):
+                hrefs = granule["hrefs"]
+                try:
+                    with rasterio.open(hrefs["LST"]) as src:
+                        lst_clipped, lst_transform = _clip_band(src, clip_shapes)
+                        lst_meta = src.meta.copy()
+                        lst_meta.update(
+                            height=lst_clipped.shape[1],
+                            width=lst_clipped.shape[2],
+                            transform=lst_transform,
+                        )
+                    lst_data = lst_clipped[0].astype(np.float32)
 
-            with rasterio.open(hrefs["QC"]) as src:
-                qc_clipped, _ = mask(src, clip_shapes, crop=True)
-            qc_data = qc_clipped[0]
+                    with rasterio.open(hrefs["QC"]) as src:
+                        qc_clipped, _ = _clip_band(src, clip_shapes)
+                    qc_data = qc_clipped[0]
 
-            with rasterio.open(hrefs["water"]) as src:
-                water_clipped, _ = mask(src, clip_shapes, crop=True)
-            water_data = water_clipped[0]
+                    with rasterio.open(hrefs["water"]) as src:
+                        water_clipped, _ = _clip_band(src, clip_shapes)
+                    water_data = water_clipped[0]
 
-            with rasterio.open(hrefs["cloud"]) as src:
-                cloud_clipped, _ = mask(src, clip_shapes, crop=True)
-            cloud_data = cloud_clipped[0]
+                    with rasterio.open(hrefs["cloud"]) as src:
+                        cloud_clipped, _ = _clip_band(src, clip_shapes)
+                    cloud_data = cloud_clipped[0]
+
+                    used_granule = granule
+                    break  # successfully clipped
+
+                except ValueError as e:
+                    if "do not overlap" in str(e):
+                        print(f"[ECOSTRESS][{feature_id}] Granule {gi+1}/{len(granules)} does not overlap, skipping")
+                        continue
+                    raise
+
+        if lst_data is None:
+            raise NoDataError({"reason": "no_overlap", "granules_tried": len(granules)})
 
         # Apply ECOSTRESS-specific filters
         filtered_lst, filter_flags, has_water = apply_ecostress_filters(
@@ -139,9 +175,17 @@ def process_one_record(body):
         with rasterio.open(filter_tif_path, "w", **tif_meta) as dst:
             dst.write(filtered_lst, 1)
 
-        # Generate CSV with geographic coordinates (ECOSTRESS is already geographic CRS)
+        # Generate CSV with WGS84 coordinates.
+        # L2T v002 COGs are UTM-projected; reproject pixel centres to EPSG:4326.
         row_idx, col_idx = np.meshgrid(np.arange(rows), np.arange(cols), indexing="ij")
-        lons, lats = rasterio.transform.xy(lst_transform, row_idx.flatten(), col_idx.flatten())
+        xs, ys = rasterio.transform.xy(lst_transform, row_idx.flatten(), col_idx.flatten())
+
+        raster_crs = lst_meta.get("crs")
+        if raster_crs and raster_crs.to_epsg() != 4326:
+            from rasterio.warp import transform as warp_transform
+            lons, lats = warp_transform(raster_crs, "EPSG:4326", xs, ys)
+        else:
+            lons, lats = xs, ys
 
         df = pd.DataFrame({
             "longitude": lons,
@@ -194,10 +238,17 @@ def process_one_record(body):
         valid_pixels = hist.get("0", 0)
         land_pixels = sum(hist.get(str(i), 0) for i in range(16) if i & 4) if has_water else 0
 
-        # WGS84 pixel size in degrees (ECOSTRESS rasters are geographic)
+        # Pixel size in WGS84 degrees.
+        # L2T v002 COGs are UTM-projected (meters) — convert to approximate degrees.
         tf = lst_transform
-        pixel_size_deg_x = abs(tf.a)
-        pixel_size_deg_y = abs(tf.e)
+        if raster_crs and raster_crs.to_epsg() != 4326:
+            mid_lat = polygon_geom.centroid.y
+            pixel_m = abs(tf.a)
+            pixel_size_deg_x = pixel_m / (111320 * math.cos(math.radians(mid_lat)))
+            pixel_size_deg_y = pixel_m / 110540
+        else:
+            pixel_size_deg_x = abs(tf.a)
+            pixel_size_deg_y = abs(tf.e)
 
         temperature_stats = summarize_temperature_series(df_valid["LST_filter"])
         metadata = {
