@@ -11,7 +11,7 @@
 	import CircleHelpIcon from '@lucide/svelte/icons/circle-help';
 	import MapIcon from '@lucide/svelte/icons/map';
 	import * as Table from '$lib/components/ui/table';
-	import { parseFilterStats, getFilterCombinations, type FilterStats } from '$lib/filter-stats';
+	import { parseFilterStats, getFilterCombinations, hasHistogram, type FilterStats } from '$lib/filter-stats';
 
 	interface Job {
 		id: number;
@@ -34,7 +34,8 @@
 
 	const jobId = $derived($page.params.id);
 	const isLandsat = $derived(job?.job_type?.startsWith('landsat') ?? false);
-	const stats = $derived(job?.filter_stats ? parseFilterStats(job.filter_stats) : null);
+	const hasHistogramStats = $derived(job?.filter_stats ? hasHistogram(job.filter_stats) : false);
+	const stats = $derived(job?.filter_stats && hasHistogramStats ? parseFilterStats(job.filter_stats) : null);
 	const combinations = $derived(job?.filter_stats ? getFilterCombinations(job.filter_stats) : []);
 
 	async function fetchJob() {
@@ -373,7 +374,11 @@
 		{:else}
 			<Card.Card>
 				<Card.Content class="py-12 text-center text-muted-foreground">
-					No filter statistics available for this job.
+					{#if job?.filter_stats && !hasHistogramStats}
+						No histogram stats available for this job.
+					{:else}
+						No filter statistics available for this job.
+					{/if}
 				</Card.Content>
 			</Card.Card>
 		{/if}

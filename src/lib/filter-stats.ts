@@ -29,10 +29,32 @@ export interface CombinationRow {
 	pct: number;
 }
 
+export function hasHistogram(stats: FilterStats | null | undefined): boolean {
+	if (!stats || typeof stats !== 'object') return false;
+	const anyStats = stats as any;
+	const hist = anyStats.histogram;
+	return !!hist && typeof hist === 'object';
+}
+
+function getHistogram(stats: FilterStats | null | undefined): Record<string, number> {
+	if (!stats || typeof stats !== 'object') return {};
+	const hist = (stats as Partial<FilterStats>).histogram;
+	if (!hist || typeof hist !== 'object') return {};
+	return hist as Record<string, number>;
+}
+
+function getTotalPixels(stats: FilterStats | null | undefined, hist: Record<string, number>): number {
+	if (stats && typeof stats.total_pixels === 'number' && Number.isFinite(stats.total_pixels)) {
+		return stats.total_pixels;
+	}
+	// Fallback for malformed/legacy rows: derive total from histogram buckets.
+	return Object.values(hist).reduce((sum, value) => sum + (Number(value) || 0), 0);
+}
+
 /** Return non-zero histogram buckets as labeled rows, sorted by count descending. */
 export function getFilterCombinations(stats: FilterStats): CombinationRow[] {
-	const hist = stats.histogram;
-	const total = stats.total_pixels;
+	const hist = getHistogram(stats);
+	const total = getTotalPixels(stats, hist);
 	if (total === 0) return [];
 
 	const rows: CombinationRow[] = [];
@@ -58,8 +80,8 @@ export function getFilterCombinations(stats: FilterStats): CombinationRow[] {
  * NoData count includes all buckets 8-15 regardless of other flags.
  */
 export function parseFilterStats(stats: FilterStats): ParsedFilterStats {
-	const hist = stats.histogram;
-	const total = stats.total_pixels;
+	const hist = getHistogram(stats);
+	const total = getTotalPixels(stats, hist);
 	const valid = hist['0'] || 0;
 
 	// QC/cloud/water counts exclude nodata pixels (only i < 8)

@@ -7,7 +7,7 @@
 	import CircleOffIcon from '@lucide/svelte/icons/circle-off';
 	import { format } from 'date-fns';
 	import { formatShortDate as formatDateShort } from '$lib/date-utils';
-	import { parseFilterStats, type FilterStats } from '$lib/filter-stats';
+	import { parseFilterStats, type FilterStats, hasHistogram } from '$lib/filter-stats';
 
 	export interface Job {
 		id: number;
@@ -165,9 +165,11 @@
 					</Table.Cell>
 					<Table.Cell class="text-sm">{formatDuration(job.duration_ms)}</Table.Cell>
 					<Table.Cell class="text-sm">
-						{#if job.filter_stats}
+						{#if job.filter_stats && hasHistogram(job.filter_stats)}
 							<div class="font-medium">{formatFilterSummary(job.filter_stats)}</div>
 							<div class="text-xs text-muted-foreground">{getFilterBreakdown(job.filter_stats)}</div>
+						{:else if job.filter_stats}
+							<div class="text-xs text-muted-foreground">No histogram stats</div>
 						{:else}
 							-
 						{/if}
