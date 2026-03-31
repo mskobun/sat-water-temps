@@ -44,7 +44,7 @@ def process_one_record(body):
         "location": "lake",
         "granules": [{
             "granule_id": "...",
-            "hrefs": {"SurfaceTemperature": "s3://...", "QC": "s3://...", ...}
+            "hrefs": {"LST": "s3://...", "QC": "s3://...", "water": "s3://...", ...}
         }]
     }
     """
@@ -96,7 +96,7 @@ def process_one_record(body):
 
         with rasterio.Env(**env_kwargs):
             # Read and clip each band
-            with rasterio.open(hrefs["SurfaceTemperature"]) as src:
+            with rasterio.open(hrefs["LST"]) as src:
                 lst_clipped, lst_transform = mask(src, clip_shapes, crop=True)
                 lst_meta = src.meta.copy()
                 lst_meta.update(
@@ -110,11 +110,11 @@ def process_one_record(body):
                 qc_clipped, _ = mask(src, clip_shapes, crop=True)
             qc_data = qc_clipped[0]
 
-            with rasterio.open(hrefs["WaterMask"]) as src:
+            with rasterio.open(hrefs["water"]) as src:
                 water_clipped, _ = mask(src, clip_shapes, crop=True)
             water_data = water_clipped[0]
 
-            with rasterio.open(hrefs["CloudMask"]) as src:
+            with rasterio.open(hrefs["cloud"]) as src:
                 cloud_clipped, _ = mask(src, clip_shapes, crop=True)
             cloud_data = cloud_clipped[0]
 

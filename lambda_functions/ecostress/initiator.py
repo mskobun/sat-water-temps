@@ -20,18 +20,21 @@ from d1 import log_job_to_d1, get_setting, log_data_request
 SHORT_NAME = "ECO_L2T_LSTE"
 VERSION = "002"
 
-# Band names in ECOSTRESS L2T LSTE granule assets
-REQUIRED_BANDS = [
-    "SurfaceTemperature",
-    "QC",
-    "WaterMask",
-    "CloudMask",
-    "EmissivityMeanWB",
-]
-OPTIONAL_BANDS = [
-    "SurfaceTemperatureError",
-    "Height",
-]
+# Mapping from logical band name (used in SQS messages / processor) to the
+# layer suffix in ECOSTRESS L2T LSTE v002 COG filenames.
+# Filenames look like: ECOv002_L2T_LSTE_{orbit}_{scene}_{tile}_{datetime}_{build}_{iter}_{layer}.tif
+BAND_FILE_SUFFIX = {
+    "LST": "LST",
+    "QC": "QC",
+    "water": "water",
+    "cloud": "cloud",
+    "EmisWB": "EmisWB",
+}
+REQUIRED_BANDS = ["LST", "QC", "water", "cloud", "EmisWB"]
+OPTIONAL_BANDS_SUFFIX = {
+    "LST_err": "LST_err",
+    "height": "height",
+}
 
 
 def _granule_datetime(granule) -> str:
@@ -50,19 +53,18 @@ def _granule_datetime(granule) -> str:
 
 
 def _granule_hrefs(granule) -> dict:
-    """Extract HTTPS URLs for each band from a DataGranule.
+    """Extract S3 URIs for each band from a DataGranule.
 
-    earthaccess data_links() returns the direct HTTPS download URLs.
-    We match band names by checking if the URL contains the band name.
+    Matches the layer suffix at the end of the filename (before .tif).
+    Returns dict keyed by logical band name (LST, QC, water, cloud, EmisWB, etc.).
     """
     hrefs = {}
     # Use direct S3 access — Lambda runs in us-west-2, same region as LPDAAC archive
     links = granule.data_links(access="direct")
-    all_bands = REQUIRED_BANDS + OPTIONAL_BANDS
+    all_suffixes = {**BAND_FILE_SUFFIX, **OPTIONAL_BANDS_SUFFIX}
     for link in links:
-        for band in all_bands:
-            # ECOSTRESS COG filenames contain the band name
-            if f"_{band}_" in link or link.endswith(f"_{band}.tif"):
+        for band, suffix in all_suffixes.items():
+            if link.endswith(f"_{suffix}.tif"):
                 hrefs[band] = link
                 break
     return hrefs
