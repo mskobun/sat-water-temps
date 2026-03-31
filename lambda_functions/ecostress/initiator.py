@@ -105,18 +105,30 @@ def handler(event, context):
         sd = start_date.strftime("%Y-%m-%d")
         ed = end_date.strftime("%Y-%m-%d")
 
+    # Optional feature filter — accepts a name (str) or AID (int)
+    feature_filter = event.get("feature")  # e.g. "Magat" or 1
+
     if not description:
+        feature_label = f" [{feature_filter}]" if feature_filter else ""
         description = f"{'Manual' if trigger_type == 'manual' else 'Daily'} ECOSTRESS scan for {sd}" + (
             f" to {ed}" if sd != ed else ""
-        )
+        ) + feature_label
 
-    print(f"ECOSTRESS initiator: searching {sd} to {ed}")
+    print(f"ECOSTRESS initiator: searching {sd} to {ed}" + (f" (feature={feature_filter})" if feature_filter else ""))
 
     # Authenticate with Earthdata — data_links(access="direct") returns
     # s3:// URIs from CMR metadata regardless of credentials.
     earthaccess.login()
 
     polygons = load_polygons()
+    if feature_filter is not None:
+        if isinstance(feature_filter, int) or (isinstance(feature_filter, str) and feature_filter.isdigit()):
+            polygons = [p for p in polygons if p["aid"] == int(feature_filter)]
+        else:
+            polygons = [p for p in polygons if p["name"].lower() == str(feature_filter).lower()]
+        if not polygons:
+            print(f"  No polygon found matching feature={feature_filter!r}")
+            return {"statusCode": 400, "body": json.dumps({"error": f"feature {feature_filter!r} not found"})}
     sqs = boto3.client("sqs")
     start_time = time.time()
 
