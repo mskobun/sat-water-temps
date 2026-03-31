@@ -59,14 +59,10 @@ def _granule_hrefs(granule) -> dict:
     Returns dict keyed by logical band name (LST, QC, water, cloud, EmisWB, etc.).
     """
     hrefs = {}
-    # Use direct S3 access — Lambda runs in us-west-2, same region as LPDAAC archive.
-    # data_links(access="direct") should return s3:// URIs; if it falls back to https://
-    # the processor will get a 403. Filter to s3:// only and warn if none come back.
-    links = [l for l in granule.data_links(access="direct") if l.startswith("s3://")]
-    if not links:
-        # Fallback: no direct S3 links available for this granule
-        print(f"  Warning: no s3:// links found for granule, skipping")
-        return {}
+    # Use https:// links — earthaccess.open() in the processor handles cookie auth
+    # for these regardless of region. Direct s3:// access via earthaccess.open()
+    # fails in Lambda due to unreliable in-region detection.
+    links = granule.data_links()
     all_suffixes = {**BAND_FILE_SUFFIX, **OPTIONAL_BANDS_SUFFIX}
     for link in links:
         for band, suffix in all_suffixes.items():
