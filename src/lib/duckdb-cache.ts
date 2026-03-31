@@ -31,9 +31,9 @@ export interface PointHistoryEntry {
 	latitude: number;
 	distance: number;
 	source: SourceType;
-	/** Landsat raster row (present when source is landsat) */
+	/** Raster row (present when parquet has non-null row/col, i.e. projected CRS sources) */
 	row?: number;
-	/** Landsat raster col (present when source is landsat) */
+	/** Raster col (present when parquet has non-null row/col, i.e. projected CRS sources) */
 	col?: number;
 }
 
@@ -412,17 +412,14 @@ export async function getPointHistory(
 	const toleranceSquared = safeTolerance * safeTolerance;
 	const history: PointHistoryEntry[] = [];
 
-	const isLandsat = source === 'landsat';
-
 	for (const file of feature.files) {
-		const rowColSelect = isLandsat ? ', "row", "col"' : '';
 		const query = `
 			WITH candidates AS (
 				SELECT
 					date,
 					longitude,
 					latitude,
-					temperature${isLandsat ? ', "row", "col"' : ''},
+					temperature, "row", "col",
 					POWER(longitude - ${formatFiniteNumber(longitude)}, 2) +
 						POWER(latitude - ${formatFiniteNumber(latitude)}, 2) AS distance_squared
 				FROM ${quoteSqlLiteral(file.name)}
@@ -434,7 +431,7 @@ export async function getPointHistory(
 					date,
 					longitude,
 					latitude,
-					temperature${rowColSelect},
+					temperature, "row", "col",
 					distance_squared,
 					ROW_NUMBER() OVER (
 						PARTITION BY date
@@ -446,7 +443,7 @@ export async function getPointHistory(
 				date,
 				longitude,
 				latitude,
-				temperature${rowColSelect},
+				temperature, "row", "col",
 				SQRT(distance_squared) AS distance
 			FROM ranked
 			WHERE row_number = 1
@@ -467,8 +464,8 @@ export async function getPointHistory(
 			continue;
 		}
 
-		const rowVector = isLandsat ? table.getChild('row') : null;
-		const colVector = isLandsat ? table.getChild('col') : null;
+		const rowVector = table.getChild('row');
+		const colVector = table.getChild('col');
 
 		for (let i = 0; i < table.numRows; i++) {
 			const entry: PointHistoryEntry = {
@@ -480,8 +477,12 @@ export async function getPointHistory(
 				source
 			};
 			if (rowVector && colVector) {
-				entry.row = Number(rowVector.get(i));
-				entry.col = Number(colVector.get(i));
+				const rowVal = rowVector.get(i);
+				const colVal = colVector.get(i);
+				if (rowVal != null && colVal != null) {
+					entry.row = Number(rowVal);
+					entry.col = Number(colVal);
+				}
 			}
 			history.push(entry);
 		}
