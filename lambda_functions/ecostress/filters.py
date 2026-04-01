@@ -15,7 +15,9 @@ QC is a uint16 bitmask defined in PSD Table 3-5:
 We reject pixels where:
   - Mandatory QA (bits 1&0) = 10 or 11 (cloud detected or not produced)
   - Data quality (bits 3&2) = 11 (missing/bad L1B data)
-  - LST accuracy (bits 15&14) = 00 or 01 (poor or marginal, >1.5K error)
+
+LST accuracy (bits 15&14) is tracked for diagnostics only and is not used as
+a reject criterion.
 """
 
 import numpy as np
@@ -25,9 +27,39 @@ def _qc_reject_mask(qc):
     """Build boolean mask for pixels that fail QC bitmask checks."""
     mandatory_qa = qc & 0b11  # bits 1&0
     data_quality = (qc >> 2) & 0b11  # bits 3&2
+
+    return (mandatory_qa >= 2) | (data_quality == 3)
+
+
+def summarize_qc_bits(qc):
+    """Summarize ECOSTRESS QC bit categories for debugging/filter tuning."""
+    mandatory_qa = qc & 0b11  # bits 1&0
+    data_quality = (qc >> 2) & 0b11  # bits 3&2
     lst_accuracy = (qc >> 14) & 0b11  # bits 15&14
 
-    return (mandatory_qa >= 2) | (data_quality == 3) | (lst_accuracy <= 1)
+    mandatory_reject = mandatory_qa >= 2
+    data_quality_reject = data_quality == 3
+    lst_accuracy_poor_or_marginal = lst_accuracy <= 1
+
+    return {
+        "total_pixels": int(qc.size),
+        "mandatory_qa_best": int(np.sum(mandatory_qa == 0)),
+        "mandatory_qa_nominal": int(np.sum(mandatory_qa == 1)),
+        "mandatory_qa_cloud": int(np.sum(mandatory_qa == 2)),
+        "mandatory_qa_not_produced": int(np.sum(mandatory_qa == 3)),
+        "data_quality_good_l1b": int(np.sum(data_quality == 0)),
+        "data_quality_missing_stripe": int(np.sum(data_quality == 1)),
+        "data_quality_not_set": int(np.sum(data_quality == 2)),
+        "data_quality_bad_l1b": int(np.sum(data_quality == 3)),
+        "lst_accuracy_poor": int(np.sum(lst_accuracy == 0)),
+        "lst_accuracy_marginal": int(np.sum(lst_accuracy == 1)),
+        "lst_accuracy_good": int(np.sum(lst_accuracy == 2)),
+        "lst_accuracy_excellent": int(np.sum(lst_accuracy == 3)),
+        "reject_by_mandatory_qa": int(np.sum(mandatory_reject)),
+        "reject_by_data_quality": int(np.sum(data_quality_reject)),
+        "reject_by_current_qc": int(np.sum(mandatory_reject | data_quality_reject)),
+        "ignored_lst_accuracy_poor_or_marginal": int(np.sum(lst_accuracy_poor_or_marginal)),
+    }
 
 
 def apply_ecostress_filters(lst, qc, water, cloud):

@@ -28,7 +28,7 @@ from common.visualization import tif_to_png
 from common.parquet import upload_parquet_to_r2
 from common.statistics import compute_filter_stats, summarize_temperature_series
 from common.exceptions import NoDataError
-from ecostress.filters import apply_ecostress_filters
+from ecostress.filters import apply_ecostress_filters, summarize_qc_bits
 from d1 import log_job_to_d1
 
 
@@ -221,6 +221,8 @@ def process_one_record(body):
         # Compute filter statistics
         flat_flags = filter_flags.flatten()
         filter_stats = compute_filter_stats(flat_flags, len(flat_flags))
+        qc_summary = summarize_qc_bits(qc_data)
+        print(f"[ECOSTRESS][{feature_id}] QC summary: {json.dumps(qc_summary, sort_keys=True)}")
 
         rows, cols = filtered_lst.shape
         suffix = "" if has_water else "_wtoff"

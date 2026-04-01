@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lambda_functio
 
 from common.statistics import compute_filter_stats, summarize_temperature_series
 from common.exceptions import NoDataError
-from ecostress.filters import apply_ecostress_filters, _qc_reject_mask
+from ecostress.filters import apply_ecostress_filters, _qc_reject_mask, summarize_qc_bits
 
 
 # QC=0x8000: bits 15&14=10 (good LST accuracy), all other bits=00 (best/good)
@@ -67,7 +67,30 @@ class TestApplyEcostressFilters:
     def test_qc_reject_mask_operates_on_uint16_inputs(self):
         qc = np.array([GOOD_QC, 0b11, 0x4000], dtype=np.uint16)
 
-        assert _qc_reject_mask(qc).tolist() == [False, True, True]
+        assert _qc_reject_mask(qc).tolist() == [False, True, False]
+
+    def test_summarize_qc_bits_reports_category_counts(self):
+        qc = np.array([0x8000, 0b10, 0b11, 0b1100, 0x4000], dtype=np.uint16)
+
+        assert summarize_qc_bits(qc) == {
+            "total_pixels": 5,
+            "mandatory_qa_best": 3,
+            "mandatory_qa_nominal": 0,
+            "mandatory_qa_cloud": 1,
+            "mandatory_qa_not_produced": 1,
+            "data_quality_good_l1b": 4,
+            "data_quality_missing_stripe": 0,
+            "data_quality_not_set": 0,
+            "data_quality_bad_l1b": 1,
+            "lst_accuracy_poor": 3,
+            "lst_accuracy_marginal": 1,
+            "lst_accuracy_good": 1,
+            "lst_accuracy_excellent": 0,
+            "reject_by_mandatory_qa": 2,
+            "reject_by_data_quality": 1,
+            "reject_by_current_qc": 3,
+            "ignored_lst_accuracy_poor_or_marginal": 4,
+        }
 
     def test_all_valid_pixels(self):
         """All good pixels -> all in bucket 0."""
@@ -146,8 +169,8 @@ class TestApplyEcostressFilters:
         stats = compute_filter_stats(flat, len(flat))
         assert stats["histogram"].get("0", 0) == 4
 
-    def test_qc_lst_accuracy_poor_rejected(self):
-        """LST accuracy bits 15&14 = 00 (>2K, poor) -> bit 0."""
+    def test_qc_lst_accuracy_poor_not_rejected(self):
+        """LST accuracy bits 15&14 = 00 are diagnostic-only."""
         a = make_arrays(4)
         a["qc"][0] = 0  # all zeros = poor LST accuracy
 
@@ -156,10 +179,10 @@ class TestApplyEcostressFilters:
         )
         flat = flags.ravel()
         stats = compute_filter_stats(flat, len(flat))
-        assert stats["histogram"].get("1", 0) == 1
+        assert stats["histogram"].get("0", 0) == 4
 
-    def test_qc_lst_accuracy_marginal_rejected(self):
-        """LST accuracy bits 15&14 = 01 (1.5-2K, marginal) -> bit 0."""
+    def test_qc_lst_accuracy_marginal_not_rejected(self):
+        """LST accuracy bits 15&14 = 01 are diagnostic-only."""
         a = make_arrays(4)
         a["qc"][0] = 0b01_00_00_00_00_00_00_00  # 0x4000, marginal
 
@@ -168,7 +191,7 @@ class TestApplyEcostressFilters:
         )
         flat = flags.ravel()
         stats = compute_filter_stats(flat, len(flat))
-        assert stats["histogram"].get("1", 0) == 1
+        assert stats["histogram"].get("0", 0) == 4
 
     def test_qc_lst_accuracy_good_passes(self):
         """LST accuracy bits 15&14 = 10 (1-1.5K, good) passes."""
