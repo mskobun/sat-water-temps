@@ -10,7 +10,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lambda_functio
 
 from common.statistics import compute_filter_stats, summarize_temperature_series
 from common.exceptions import NoDataError
-from ecostress.filters import apply_ecostress_filters, INVALID_QC_VALUES
+from ecostress.filters import apply_ecostress_filters, _qc_reject_mask
+
+
+# QC=0x8000: bits 15&14=10 (good LST accuracy), all other bits=00 (best/good)
+GOOD_QC = 0x8000
 
 
 def make_arrays(n=10, **overrides):
@@ -20,7 +24,7 @@ def make_arrays(n=10, **overrides):
     """
     defaults = {
         "lst": np.full(n, 300.0, dtype=np.float32),
-        "qc": np.zeros(n, dtype=np.float32),
+        "qc": np.full(n, GOOD_QC, dtype=np.uint16),
         "cloud": np.zeros(n, dtype=np.float32),
         "water": np.ones(n, dtype=np.float32),  # all water
     }
@@ -60,6 +64,11 @@ class TestComputeFilterStats:
 
 
 class TestApplyEcostressFilters:
+    def test_qc_reject_mask_operates_on_uint16_inputs(self):
+        qc = np.array([GOOD_QC, 0b11, 0x4000], dtype=np.uint16)
+
+        assert _qc_reject_mask(qc).tolist() == [False, True, True]
+
     def test_all_valid_pixels(self):
         """All good pixels -> all in bucket 0."""
         a = make_arrays(5)
@@ -86,11 +95,11 @@ class TestApplyEcostressFilters:
         assert stats["histogram"].get("8", 0) == 3  # nodata only
         assert stats["histogram"].get("0", 0) == 2  # valid
 
-    def test_qc_bad_values(self):
-        """Bad QC -> bit 0."""
+    def test_qc_mandatory_qa_not_produced(self):
+        """Mandatory QA bits 1&0 = 11 (not produced) -> bit 0."""
         a = make_arrays(4)
-        a["qc"][0] = 15
-        a["qc"][1] = 65535
+        a["qc"][0] = 0b11  # not produced
+        a["qc"][1] = 0b10  # cloud detected in QC
 
         _, flags, _ = apply_ecostress_filters(
             a["lst"], a["qc"], a["water"], a["cloud"]
@@ -98,6 +107,92 @@ class TestApplyEcostressFilters:
         flat = flags.ravel()
         stats = compute_filter_stats(flat, len(flat))
         assert stats["histogram"].get("1", 0) == 2
+
+    def test_qc_data_quality_bad_l1b(self):
+        """Data quality bits 3&2 = 11 (missing/bad L1B) -> bit 0."""
+        a = make_arrays(4)
+        a["qc"][0] = 0b1100  # bad L1B, good mandatory QA
+
+        _, flags, _ = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+        flat = flags.ravel()
+        stats = compute_filter_stats(flat, len(flat))
+        assert stats["histogram"].get("1", 0) == 1
+
+    def test_qc_nominal_quality_passes(self):
+        """Mandatory QA bits 1&0 = 01 (nominal) should pass QC."""
+        a = make_arrays(4)
+        a["qc"][0] = GOOD_QC | 0b01  # nominal quality + good LST accuracy
+
+        _, flags, _ = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+        flat = flags.ravel()
+        stats = compute_filter_stats(flat, len(flat))
+        assert stats["histogram"].get("0", 0) == 4
+
+    def test_qc_informational_bits_dont_reject(self):
+        """Informational QC bits (iterations, opacity, MMD) don't cause rejection."""
+        a = make_arrays(4)
+        # Set informational bits (6-13) high, keep mandatory QA + data quality good,
+        # LST accuracy = good (10)
+        a["qc"][0] = GOOD_QC | 0b00110011000000  # bits 6-13 set
+
+        _, flags, _ = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+        flat = flags.ravel()
+        stats = compute_filter_stats(flat, len(flat))
+        assert stats["histogram"].get("0", 0) == 4
+
+    def test_qc_lst_accuracy_poor_rejected(self):
+        """LST accuracy bits 15&14 = 00 (>2K, poor) -> bit 0."""
+        a = make_arrays(4)
+        a["qc"][0] = 0  # all zeros = poor LST accuracy
+
+        _, flags, _ = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+        flat = flags.ravel()
+        stats = compute_filter_stats(flat, len(flat))
+        assert stats["histogram"].get("1", 0) == 1
+
+    def test_qc_lst_accuracy_marginal_rejected(self):
+        """LST accuracy bits 15&14 = 01 (1.5-2K, marginal) -> bit 0."""
+        a = make_arrays(4)
+        a["qc"][0] = 0b01_00_00_00_00_00_00_00  # 0x4000, marginal
+
+        _, flags, _ = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+        flat = flags.ravel()
+        stats = compute_filter_stats(flat, len(flat))
+        assert stats["histogram"].get("1", 0) == 1
+
+    def test_qc_lst_accuracy_good_passes(self):
+        """LST accuracy bits 15&14 = 10 (1-1.5K, good) passes."""
+        a = make_arrays(4)
+        a["qc"][:] = 0x8000  # good LST accuracy
+
+        _, flags, _ = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+        flat = flags.ravel()
+        stats = compute_filter_stats(flat, len(flat))
+        assert stats["histogram"].get("0", 0) == 4
+
+    def test_qc_lst_accuracy_excellent_passes(self):
+        """LST accuracy bits 15&14 = 11 (<1K, excellent) passes."""
+        a = make_arrays(4)
+        a["qc"][:] = 0xC000  # excellent LST accuracy
+
+        _, flags, _ = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+        flat = flags.ravel()
+        stats = compute_filter_stats(flat, len(flat))
+        assert stats["histogram"].get("0", 0) == 4
 
     def test_cloud_filtering(self):
         """cloud=1 -> bit 1 (value 2)."""
@@ -142,7 +237,7 @@ class TestApplyEcostressFilters:
         """Pixel with NaN LST + bad QC + cloud -> bits 0,1,3 = 11."""
         a = make_arrays(3)
         a["lst"][0] = np.nan
-        a["qc"][0] = 65535
+        a["qc"][0] = 0b11  # not produced
         a["cloud"][0] = 1
 
         _, flags, _ = apply_ecostress_filters(
@@ -157,7 +252,7 @@ class TestApplyEcostressFilters:
         """total_pixels must always equal sum of histogram values."""
         a = make_arrays(20)
         a["lst"][0:3] = np.nan
-        a["qc"][3:6] = 65535
+        a["qc"][3:6] = 0b11  # not produced
         a["cloud"][6:9] = 1
         a["water"][9:12] = 0
         a["lst"][12] = 0.0
@@ -173,7 +268,7 @@ class TestApplyEcostressFilters:
         """Every pixel lands in exactly one histogram bucket."""
         a = make_arrays(6)
         a["lst"][0] = np.nan  # swath gap
-        a["qc"][1] = 2501  # bad QC
+        a["qc"][1] = 0b11  # not produced (mandatory QA)
         a["cloud"][2] = 1  # cloud
         a["water"][3] = 0  # non-water
         a["lst"][4] = np.nan  # swath gap + cloud
@@ -197,7 +292,7 @@ class TestApplyEcostressFilters:
     def test_filtered_lst_nans_rejected(self):
         """Rejected pixels have NaN in filtered_lst."""
         a = make_arrays(3)
-        a["qc"][0] = 15  # bad QC
+        a["qc"][0] = 0b1111  # mandatory QA=11 + data quality=11
 
         filtered_lst, _, _ = apply_ecostress_filters(
             a["lst"], a["qc"], a["water"], a["cloud"]
