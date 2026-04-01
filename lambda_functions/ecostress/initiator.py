@@ -9,11 +9,12 @@ import json
 import os
 import time
 from datetime import datetime, timedelta
+from typing import Any, Dict, Iterator, List, Optional
 
 import boto3
 import earthaccess
 
-from common.polygons import load_polygons
+from common.polygons import load_polygons, filter_polygons_for_feature
 from d1 import log_job_to_d1, get_setting, log_data_request
 
 
@@ -52,21 +53,93 @@ def _granule_datetime(granule) -> str:
             return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def _granule_hrefs(granule) -> dict:
-    """Extract S3 URIs for each band from a DataGranule.
+def _granule_hrefs(granule, prefer_http: bool = False) -> dict:
+    """Extract hrefs for each band from a DataGranule.
 
     Matches the layer suffix at the end of the filename (before .tif).
-    Returns dict keyed by logical band name (LST, QC, water, cloud, EmisWB, etc.).
+    When ``prefer_http`` is True, also considers ``access="external"`` links so
+    HTTPS URLs are preferred over ``s3://`` when both are present.
     """
-    hrefs = {}
-    links = granule.data_links(access="direct")  # s3:// URIs for direct access from Lambda
+    hrefs: Dict[str, str] = {}
+    seen = set()
+    link_list: List[str] = []
+    access_modes = ("external", "direct") if prefer_http else ("direct",)
+    for access in access_modes:
+        try:
+            for link in granule.data_links(access=access):
+                if link not in seen:
+                    seen.add(link)
+                    link_list.append(link)
+        except Exception:
+            continue
     all_suffixes = {**BAND_FILE_SUFFIX, **OPTIONAL_BANDS_SUFFIX}
-    for link in links:
+    for link in link_list:
         for band, suffix in all_suffixes.items():
             if link.endswith(f"_{suffix}.tif"):
-                hrefs[band] = link
+                prev = hrefs.get(band)
+                # Prefer https over s3 when upgrading
+                if prev is None:
+                    hrefs[band] = link
+                elif prefer_http and prev.startswith("s3://") and link.startswith("http"):
+                    hrefs[band] = link
                 break
     return hrefs
+
+
+
+def iter_ecostress_processor_bodies(
+    sd: str,
+    ed: str,
+    *,
+    task_id: str,
+    polygons: list,
+    prefer_http_hrefs: bool = False,
+) -> Iterator[Dict[str, Any]]:
+    """Yield processor message bodies (same shape as SQS body) for date range and polygons."""
+    earthaccess.login()
+
+    for poly in polygons:
+        bbox = tuple(poly["bbox"])
+        results = earthaccess.search_data(
+            short_name=SHORT_NAME,
+            version=VERSION,
+            bounding_box=bbox,
+            temporal=(f"{sd}T00:00:00", f"{ed}T23:59:59"),
+        )
+        if not results:
+            continue
+
+        granules_by_date: Dict[str, list] = {}
+        for granule in results:
+            dt_str = _granule_datetime(granule)
+            date_key = dt_str[:10]
+            hrefs = _granule_hrefs(granule, prefer_http=prefer_http_hrefs)
+            missing = [b for b in REQUIRED_BANDS if b not in hrefs]
+            if missing:
+                print(f"  Skipping granule: missing bands {missing}")
+                continue
+            granules_by_date.setdefault(date_key, []).append(
+                {
+                    "granule_id": granule.get("meta", {}).get("concept-id", ""),
+                    "hrefs": hrefs,
+                    "datetime": dt_str,
+                }
+            )
+
+        for date_key, granules in granules_by_date.items():
+            granule_datetime = min(g["datetime"] for g in granules)
+            yield {
+                "source": "ecostress",
+                "aid": poly["aid"],
+                "date": granule_datetime,
+                "name": poly["name"],
+                "location": poly["location"],
+                "task_id": task_id,
+                "granules": granules,
+            }
+            print(
+                f"  Yield: AID={poly['aid']} ({poly['name']}) date={date_key} ({len(granules)} granule(s))"
+            )
 
 
 def handler(event, context):
@@ -112,19 +185,19 @@ def handler(event, context):
 
     print(f"ECOSTRESS initiator: searching {sd} to {ed}" + (f" (feature={feature_filter})" if feature_filter else ""))
 
-    # Authenticate with Earthdata — data_links(access="direct") returns
-    # s3:// URIs from CMR metadata regardless of credentials.
-    earthaccess.login()
-
     polygons = load_polygons()
-    if feature_filter is not None:
-        if isinstance(feature_filter, int) or (isinstance(feature_filter, str) and feature_filter.isdigit()):
-            polygons = [p for p in polygons if p["aid"] == int(feature_filter)]
-        else:
-            polygons = [p for p in polygons if p["name"].lower() == str(feature_filter).lower()]
-        if not polygons:
-            print(f"  No polygon found matching feature={feature_filter!r}")
-            return {"statusCode": 400, "body": json.dumps({"error": f"feature {feature_filter!r} not found"})}
+    polygons = filter_polygons_for_feature(polygons, feature_filter)
+    if polygons is None:
+        print(f"  No polygon found matching feature={feature_filter!r}")
+        return {
+            "statusCode": 400,
+            "body": json.dumps({"error": f"feature {feature_filter!r} not found"}),
+        }
+
+    prefer_http = bool(
+        event.get("prefer_http_hrefs")
+        or os.environ.get("ECOSTRESS_PREFER_HTTP_HREFS", "").lower() in ("1", "true", "yes")
+    )
     sqs = boto3.client("sqs")
     start_time = time.time()
 
@@ -140,61 +213,21 @@ def handler(event, context):
     total_messages = 0
 
     try:
-        for poly in polygons:
-            # earthaccess expects bounding_box as (west, south, east, north)
-            bbox = tuple(poly["bbox"])  # already (minx, miny, maxx, maxy)
-
-            results = earthaccess.search_data(
-                short_name=SHORT_NAME,
-                version=VERSION,
-                bounding_box=bbox,
-                temporal=(f"{sd}T00:00:00", f"{ed}T23:59:59"),
+        for message_body in iter_ecostress_processor_bodies(
+            sd,
+            ed,
+            task_id=task_id,
+            polygons=polygons,
+            prefer_http_hrefs=prefer_http,
+        ):
+            sqs.send_message(
+                QueueUrl=sqs_queue_url,
+                MessageBody=json.dumps(message_body),
             )
-
-            if not results:
-                continue
-
-            # Group granules by date for this polygon
-            granules_by_date = {}
-            for granule in results:
-                dt_str = _granule_datetime(granule)
-                date_key = dt_str[:10]  # YYYY-MM-DD for grouping
-
-                hrefs = _granule_hrefs(granule)
-                # Check required bands are present
-                missing = [b for b in REQUIRED_BANDS if b not in hrefs]
-                if missing:
-                    granule_id = getattr(granule, "concept_id", lambda: "unknown")
-                    print(f"  Skipping granule: missing bands {missing}")
-                    continue
-
-                if date_key not in granules_by_date:
-                    granules_by_date[date_key] = []
-                granules_by_date[date_key].append({
-                    "granule_id": granule.get("meta", {}).get("concept-id", ""),
-                    "hrefs": hrefs,
-                    "datetime": dt_str,
-                })
-
-            # Send one SQS message per (AID, date)
-            for date_key, granules in granules_by_date.items():
-                # Use earliest granule datetime
-                granule_datetime = min(g["datetime"] for g in granules)
-                message_body = {
-                    "source": "ecostress",
-                    "aid": poly["aid"],
-                    "date": granule_datetime,
-                    "name": poly["name"],
-                    "location": poly["location"],
-                    "task_id": task_id,
-                    "granules": granules,
-                }
-                sqs.send_message(
-                    QueueUrl=sqs_queue_url,
-                    MessageBody=json.dumps(message_body),
-                )
-                total_messages += 1
-                print(f"  Queued: AID={poly['aid']} ({poly['name']}) date={date_key} ({len(granules)} granule(s))")
+            total_messages += 1
+            print(
+                f"  Queued: AID={message_body['aid']} ({message_body['name']}) date={message_body['date'][:10]}"
+            )
 
         duration_ms = int((time.time() - start_time) * 1000)
 

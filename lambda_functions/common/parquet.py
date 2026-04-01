@@ -67,7 +67,7 @@ def align_parquet_table_to_feature_schema(tbl: pa.Table) -> pa.Table:
     return pa.table(out, schema=target)
 
 
-def upload_parquet_to_r2(s3_client, bucket_name, parquet_key, df, date):
+def upload_parquet_to_r2(storage, bucket_name, parquet_key, df, date):
     """Append data to a per-year, sorted Parquet file in R2.
 
     The caller passes a base key (without year suffix). This function derives
@@ -103,8 +103,7 @@ def upload_parquet_to_r2(s3_client, bucket_name, parquet_key, df, date):
     # Download existing year Parquet if it exists, to merge
     existing_tables = []
     try:
-        resp = s3_client.get_object(Bucket=bucket_name, Key=year_key)
-        existing_buf = resp["Body"].read()
+        existing_buf = storage.get_object_bytes(bucket_name, year_key)
         existing_pf = pq.ParquetFile(pa.BufferReader(existing_buf))
         for i in range(existing_pf.metadata.num_row_groups):
             rg_table = existing_pf.read_row_group(i)
@@ -113,10 +112,10 @@ def upload_parquet_to_r2(s3_client, bucket_name, parquet_key, df, date):
             if rg_key == date_utc:
                 continue
             existing_tables.append(align_parquet_table_to_feature_schema(rg_table))
+    except FileNotFoundError:
+        pass
     except Exception as e:
-        err_code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
-        if err_code not in ("NoSuchKey", "404"):
-            print(f"Warning: could not read existing Parquet {year_key}: {e}")
+        print(f"Warning: could not read existing Parquet {year_key}: {e}")
 
     # Concatenate all tables, sort by (longitude, latitude), write as one sorted file
     all_tables = existing_tables + [new_table]
@@ -128,9 +127,11 @@ def upload_parquet_to_r2(s3_client, bucket_name, parquet_key, df, date):
     pq.write_table(combined, buf, compression="zstd")
 
     buf.seek(0)
-    s3_client.put_object(
-        Bucket=bucket_name, Key=year_key, Body=buf.getvalue(),
-        ContentType="application/octet-stream",
+    storage.put_object(
+        bucket_name,
+        year_key,
+        buf.getvalue(),
+        content_type="application/octet-stream",
     )
     print(f"Uploaded Parquet to {year_key} ({combined.num_rows:,} rows, {len(buf.getvalue()):,} bytes)")
     return year_key

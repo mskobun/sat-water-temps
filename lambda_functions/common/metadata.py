@@ -62,7 +62,8 @@ def insert_metadata_to_d1(
     feature_params = [feature_id, name, location, date, int(time.time())]
 
     with xray_recorder.capture("d1_insert_feature") as subsegment:
-        subsegment.put_metadata("feature_id", feature_id)
+        if subsegment is not None:
+            subsegment.put_metadata("feature_id", feature_id)
         query_d1(feature_sql, feature_params)
 
     # Now insert metadata with file paths (after feature exists)
@@ -109,11 +110,12 @@ def insert_metadata_to_d1(
         tf.get("f"),
     ]
     with xray_recorder.capture("d1_insert_temperature_metadata") as subsegment:
-        subsegment.put_metadata("feature_id", feature_id)
-        subsegment.put_metadata("date", date)
-        subsegment.put_metadata(
-            "has_filter_stats", bool(filter_stats_json and filter_stats_json != "{}")
-        )
+        if subsegment is not None:
+            subsegment.put_metadata("feature_id", feature_id)
+            subsegment.put_metadata("date", date)
+            subsegment.put_metadata(
+                "has_filter_stats", bool(filter_stats_json and filter_stats_json != "{}")
+            )
         query_d1(meta_sql, meta_params)
 
     print(f"✓ Inserted metadata to D1 with R2 paths")

@@ -37,6 +37,29 @@ Local development uses a local D1 database with remote R2 for file access. This 
 | `npm run db:migrate:local` | Apply migrations locally |
 | `npm run db:migrate:remote` | Apply migrations to prod |
 
+### Running Processors Locally
+
+`local_fill` runs ECOSTRESS or Landsat pipelines in-process for one feature and date range, bypassing SQS. With `--runtime local` it writes to Wrangler local D1/R2 instead of prod.
+
+**Prerequisites:** NASA Earthdata credentials (`~/.netrc` or env vars).
+
+```bash
+cd lambda_functions
+
+# Write to prod D1 + R2 (needs .env with R2/D1/Earthdata creds)
+uv run python -m local_fill --source ecostress --feature NamTheun2 --start-date 2026-03-15
+
+# Write to local Wrangler D1 + R2 (no cloud creds needed beyond Earthdata)
+uv run python -m local_fill --runtime local --source ecostress --feature NamTheun2 --start-date 2026-03-15
+uv run python -m local_fill --runtime local --source landsat  --feature Magat       --start-date 2024-12-27
+```
+
+Seed local R2 with static assets before first local run:
+
+```bash
+npm run r2:seed:local
+```
+
 ### Schema Change Workflow
 
 1. Create migration file in `migrations/`

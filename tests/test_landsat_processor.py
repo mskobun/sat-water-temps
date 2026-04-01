@@ -27,6 +27,7 @@ from landsat.filters import (
     QA_BIT_WATER,
 )
 from landsat.processor import SCALE_FACTOR, ADD_OFFSET
+from common.storage import Boto3R2Backend
 
 
 # Magat reservoir polygon bbox (from plan fixture)
@@ -340,7 +341,7 @@ class TestLandsatProcessOneRecordFixture:
         ), patch(
             "landsat.processor.insert_metadata_to_d1", side_effect=capture_insert
         ), patch("landsat.processor.log_job_to_d1"), patch(
-            "landsat.processor.get_s3_client", return_value=mock_s3
+            "landsat.processor.get_r2_backend", return_value=Boto3R2Backend(mock_s3)
         ), patch("landsat.processor.tif_to_png", return_value=__import__('io').BytesIO(b'\x89PNG')):
             from landsat.processor import process_one_record
 
@@ -389,7 +390,7 @@ class TestLandsatProcessOneRecordFixture:
         ), patch(
             "landsat.processor.insert_metadata_to_d1"
         ), patch("landsat.processor.log_job_to_d1"), patch(
-            "landsat.processor.get_s3_client", return_value=MagicMock()
+            "landsat.processor.get_r2_backend", return_value=Boto3R2Backend(MagicMock())
         ), patch("landsat.processor.tif_to_png", return_value=__import__('io').BytesIO(b'\x89PNG')):
             from landsat.processor import process_one_record
             process_one_record(magat_landsat_body)

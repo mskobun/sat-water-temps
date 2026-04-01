@@ -22,6 +22,7 @@ from common.parquet import (  # noqa: E402
     parquet_feature_schema,
     upload_parquet_to_r2,
 )
+from common.storage import Boto3R2Backend  # noqa: E402
 from common.dates import to_parquet_date_utc  # noqa: E402
 
 
@@ -107,7 +108,7 @@ def test_upload_parquet_replaces_row_group_same_instant(repo_root):
         }
     )
 
-    upload_parquet_to_r2(s3, "bucket", "ECO/X/lake/X_lake.parquet", df, "2024362041923")
+    upload_parquet_to_r2(Boto3R2Backend(s3), "bucket", "ECO/X/lake/X_lake.parquet", df, "2024362041923")
 
     assert "body" in captured
     pf = pq.ParquetFile(io.BytesIO(captured["body"]))

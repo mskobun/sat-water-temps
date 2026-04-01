@@ -13,18 +13,17 @@ import math
 import os
 import time
 
-import boto3
 import numpy as np
 import pandas as pd
 import rasterio
 from rasterio.merge import merge
 from rasterio.mask import mask
-from rasterio.session import AWSSession
 from rasterio.warp import transform_geom
 from shapely.geometry import shape, mapping
 
 from common.polygons import get_aid_folder_mapping
-from common.storage import get_s3_client, upload_to_r2, upload_csv_to_r2
+from common.raster_inputs import landsat_rasterio_env, open_landsat_band
+from common.storage import get_r2_backend, upload_to_r2, upload_csv_to_r2
 from common.metadata import affine_transform_to_dict, insert_metadata_to_d1
 from common.visualization import tif_to_png, GLOBAL_MIN, GLOBAL_MAX
 from common.parquet import upload_parquet_to_r2
@@ -39,14 +38,6 @@ R2_PREFIX = "LANDSAT"
 # Landsat ST_B10 scale factors
 SCALE_FACTOR = 0.00341802
 ADD_OFFSET = 149.0
-
-
-def _open_cog(href):
-    """Open a COG from S3 with requester-pays."""
-    aws_session = AWSSession(boto3.Session(), requester_pays=True)
-    env = rasterio.Env(AWSSession=aws_session, AWS_REQUEST_PAYER='requester')
-    env.__enter__()
-    return rasterio.open(href)
 
 
 def process_one_record(body):
@@ -102,18 +93,15 @@ def process_one_record(body):
         def _geom_for_raster(crs):
             return transform_geom("EPSG:4326", crs, mapping(polygon_geom))
 
-        # Open all ST_B10 and QA_PIXEL rasters with requester-pays session
-        aws_session = AWSSession(boto3.Session(), requester_pays=True)
-
-        with rasterio.Env(AWSSession=aws_session, AWS_REQUEST_PAYER='requester'):
+        with landsat_rasterio_env(scenes):
             # Read and mosaic ST_B10
             st_datasets = []
             qa_pixel_datasets = []
 
             for scene in scenes:
                 hrefs = scene["hrefs"]
-                st_datasets.append(rasterio.open(hrefs["lwir11"]))
-                qa_pixel_datasets.append(rasterio.open(hrefs["qa_pixel"]))
+                st_datasets.append(open_landsat_band(hrefs["lwir11"]))
+                qa_pixel_datasets.append(open_landsat_band(hrefs["qa_pixel"]))
 
             # Mosaic if multiple scenes
             if len(st_datasets) == 1:
@@ -225,18 +213,18 @@ def process_one_record(body):
         df_valid.to_csv(filter_csv_path, index=False)
 
         # Upload to R2
-        s3_client = get_s3_client()
+        storage = get_r2_backend()
         bucket_name = os.environ.get("R2_BUCKET_NAME", "multitifs")
 
         tif_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.tif"
-        upload_to_r2(s3_client, bucket_name, tif_key, filter_tif_path, "image/tiff")
+        upload_to_r2(storage, bucket_name, tif_key, filter_tif_path, "image/tiff")
 
         csv_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.csv.gz"
-        upload_csv_to_r2(s3_client, bucket_name, csv_key, filter_csv_path)
+        upload_csv_to_r2(storage, bucket_name, csv_key, filter_csv_path)
 
         # Parquet (per-year sorted file)
         parquet_base_key = f"{R2_PREFIX}/{name}/{location}/{name}_{location}.parquet"
-        parquet_key = upload_parquet_to_r2(s3_client, bucket_name, parquet_base_key, df_valid, date_str)
+        parquet_key = upload_parquet_to_r2(storage, bucket_name, parquet_base_key, df_valid, date_str)
 
         # PNGs
         png_r2_keys = {}
@@ -247,7 +235,7 @@ def process_one_record(body):
                 with open(png_path, "wb") as f:
                     f.write(png_bytes.getvalue())
                 png_key = f"{R2_PREFIX}/{name}/{location}/{base_name}_{scale}.png"
-                upload_to_r2(s3_client, bucket_name, png_key, png_path, "image/png")
+                upload_to_r2(storage, bucket_name, png_key, png_path, "image/png")
                 png_r2_keys[scale] = png_key
             except Exception as e:
                 print(f"[Landsat][{feature_id}] PNG generation failed for {scale}: {e}")
@@ -286,7 +274,7 @@ def process_one_record(body):
         with open(metadata_path, "w") as f:
             json.dump(metadata, f)
         meta_key = f"{R2_PREFIX}/{name}/{location}/metadata/{base_name}_metadata.json"
-        upload_to_r2(s3_client, bucket_name, meta_key, metadata_path, "application/json")
+        upload_to_r2(storage, bucket_name, meta_key, metadata_path, "application/json")
 
         # Insert into D1 with source='landsat'
         insert_metadata_to_d1(feature_id, date_str, metadata, csv_key, tif_key, png_r2_keys,

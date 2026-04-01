@@ -13,7 +13,6 @@ import math
 import os
 import time
 
-import earthaccess
 import numpy as np
 import pandas as pd
 import rasterio
@@ -22,7 +21,8 @@ from rasterio.merge import merge
 from rasterio.warp import transform_geom
 from shapely.geometry import shape, mapping, box
 
-from common.storage import get_s3_client, upload_to_r2, upload_csv_to_r2
+from common.raster_inputs import open_ecostress_granule_rasters
+from common.storage import get_r2_backend, upload_to_r2, upload_csv_to_r2
 from common.metadata import affine_transform_to_dict, insert_metadata_to_d1
 from common.visualization import tif_to_png
 from common.parquet import upload_parquet_to_r2
@@ -115,12 +115,6 @@ def process_one_record(body):
         polygon_geom = shape(roi["features"][aid - 1]["geometry"])
         clip_shapes = [mapping(polygon_geom)]
 
-        # earthaccess detects region by querying EC2 IMDS at 169.254.169.254,
-        # which doesn't exist in Lambda (Firecracker microVMs). The request
-        # times out and in_region defaults to False. Override it.
-        earthaccess.login()
-        earthaccess.__store__.in_region = True
-
         # L2T v002 COGs are small UTM tiles — a CMR bbox search can
         # return multiple tiles needed to cover the polygon.  Open all
         # overlapping tiles and merge them (like Landsat scenes).
@@ -132,15 +126,8 @@ def process_one_record(body):
         for gi, granule in enumerate(granules):
             hrefs = granule["hrefs"]
             try:
-                band_keys = ["LST", "QC", "water", "cloud"]
-                band_uris = {k: hrefs[k] for k in band_keys}
-                file_objects = earthaccess.open(
-                    list(band_uris.values()),
-                    credentials_endpoint="https://data.lpdaac.earthdatacloud.nasa.gov/s3credentials",
-                )
-                file_map = dict(zip(band_keys, file_objects))
-
-                lst_src = rasterio.open(file_map["LST"])
+                band_datasets = open_ecostress_granule_rasters(hrefs)
+                lst_src = band_datasets["LST"]
                 raster_crs = lst_src.crs
                 if raster_crs and raster_crs.to_epsg() != 4326:
                     poly_proj = shape(transform_geom("EPSG:4326", raster_crs, mapping(polygon_geom)))
@@ -149,13 +136,18 @@ def process_one_record(body):
 
                 if not box(*lst_src.bounds).intersects(poly_proj):
                     lst_src.close()
+                    for k in ("QC", "water", "cloud"):
+                        try:
+                            band_datasets[k].close()
+                        except Exception:
+                            pass
                     print(f"[ECOSTRESS][{feature_id}] Granule {gi+1}/{len(granules)} does not overlap, skipping")
                     continue
 
                 lst_datasets.append(lst_src)
-                qc_datasets.append(rasterio.open(file_map["QC"]))
-                water_datasets.append(rasterio.open(file_map["water"]))
-                cloud_datasets.append(rasterio.open(file_map["cloud"]))
+                qc_datasets.append(band_datasets["QC"])
+                water_datasets.append(band_datasets["water"])
+                cloud_datasets.append(band_datasets["cloud"])
                 print(f"[ECOSTRESS][{feature_id}] Granule {gi+1}/{len(granules)} overlaps polygon")
 
             except Exception as e:
@@ -270,18 +262,18 @@ def process_one_record(body):
         df_valid.to_csv(filter_csv_path, index=False)
 
         # Upload to R2
-        s3_client = get_s3_client()
+        storage = get_r2_backend()
         bucket_name = os.environ.get("R2_BUCKET_NAME", "multitifs")
 
         tif_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.tif"
-        upload_to_r2(s3_client, bucket_name, tif_key, filter_tif_path, "image/tiff")
+        upload_to_r2(storage, bucket_name, tif_key, filter_tif_path, "image/tiff")
 
         csv_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.csv.gz"
-        upload_csv_to_r2(s3_client, bucket_name, csv_key, filter_csv_path)
+        upload_csv_to_r2(storage, bucket_name, csv_key, filter_csv_path)
 
         # Parquet (per-year sorted file)
         parquet_base_key = f"{R2_PREFIX}/{name}/{location}/{name}_{location}.parquet"
-        parquet_key = upload_parquet_to_r2(s3_client, bucket_name, parquet_base_key, df_valid, date_str)
+        parquet_key = upload_parquet_to_r2(storage, bucket_name, parquet_base_key, df_valid, date_str)
 
         # PNGs
         png_r2_keys = {}
@@ -292,7 +284,7 @@ def process_one_record(body):
                 with open(png_path, "wb") as f:
                     f.write(png_bytes.getvalue())
                 png_key = f"{R2_PREFIX}/{name}/{location}/{base_name}_{scale}.png"
-                upload_to_r2(s3_client, bucket_name, png_key, png_path, "image/png")
+                upload_to_r2(storage, bucket_name, png_key, png_path, "image/png")
                 png_r2_keys[scale] = png_key
             except Exception as e:
                 print(f"[ECOSTRESS][{feature_id}] PNG generation failed for {scale}: {e}")
@@ -337,7 +329,7 @@ def process_one_record(body):
         with open(metadata_path, "w") as f:
             json.dump(metadata, f)
         meta_key = f"{R2_PREFIX}/{name}/{location}/metadata/{base_name}_metadata.json"
-        upload_to_r2(s3_client, bucket_name, meta_key, metadata_path, "application/json")
+        upload_to_r2(storage, bucket_name, meta_key, metadata_path, "application/json")
 
         # Insert into D1 with source='ecostress'
         insert_metadata_to_d1(feature_id, date_str, metadata, csv_key, tif_key, png_r2_keys,
