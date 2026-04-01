@@ -243,7 +243,15 @@ function parseFilterStats(
   raw: unknown,
 ) {
   if (!raw) return null;
-  return JSON.parse(raw as string);
+  return typeof raw === 'string' ? JSON.parse(raw) : raw;
+}
+
+function mapJobWithMetadata(job: any) {
+  const metadata = job.metadata ? JSON.parse(job.metadata as string) : null;
+  const filterStats = metadata?.filter_stats
+    ? parseFilterStats(metadata.filter_stats)
+    : parseFilterStats(job.filter_stats);
+  return { ...job, metadata, filter_stats: filterStats };
 }
 
 export async function getProcessingJobs(
@@ -274,15 +282,7 @@ export async function getProcessingJobs(
       ? await stmt.bind(status, limit, offset).all()
       : await stmt.bind(limit, offset).all();
 
-    // Parse JSON metadata and filter_stats
-    // For nodata jobs, filter_stats lives in j.metadata (no temperature_metadata row)
-    return (result.results || []).map((job: any) => {
-      const metadata = job.metadata ? JSON.parse(job.metadata as string) : null;
-      const filterStats = job.filter_stats
-        ? parseFilterStats(job.filter_stats)
-        : metadata?.filter_stats ?? null;
-      return { ...job, metadata, filter_stats: filterStats };
-    });
+    return (result.results || []).map(mapJobWithMetadata);
   } catch (err) {
     console.error("D1 query error:", err);
     return [];
@@ -310,12 +310,7 @@ export async function getJobWithFilterStats(
 
     if (!job) return null;
 
-    // Parse JSON fields — nodata jobs store filter_stats in j.metadata
-    const metadata = job.metadata ? JSON.parse(job.metadata as string) : null;
-    const filterStats = job.filter_stats
-      ? parseFilterStats(job.filter_stats)
-      : metadata?.filter_stats ?? null;
-    return { ...job, metadata, filter_stats: filterStats };
+    return mapJobWithMetadata(job);
   } catch (err) {
     console.error("D1 query error:", err);
     return null;
@@ -402,13 +397,7 @@ export async function getJobsByFeature(
       ? await stmt.bind(featureId, status, limit, offset).all()
       : await stmt.bind(featureId, limit, offset).all();
 
-    return (result.results || []).map((job: any) => {
-      const metadata = job.metadata ? JSON.parse(job.metadata as string) : null;
-      const filterStats = job.filter_stats
-        ? parseFilterStats(job.filter_stats)
-        : metadata?.filter_stats ?? null;
-      return { ...job, metadata, filter_stats: filterStats };
-    });
+    return (result.results || []).map(mapJobWithMetadata);
   } catch (err) {
     console.error("D1 query error:", err);
     return [];
@@ -529,13 +518,7 @@ export async function getDataRequestDetail(
 
     return {
       request,
-      jobs: (jobsResult.results || []).map((job: any) => {
-        const metadata = job.metadata ? JSON.parse(job.metadata as string) : null;
-        const filterStats = job.filter_stats
-          ? parseFilterStats(job.filter_stats)
-          : metadata?.filter_stats ?? null;
-        return { ...job, metadata, filter_stats: filterStats };
-      })
+      jobs: (jobsResult.results || []).map(mapJobWithMetadata)
     };
   } catch (err) {
     console.error("D1 query error:", err);
