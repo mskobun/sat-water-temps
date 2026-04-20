@@ -224,9 +224,14 @@ def process_one_record(body):
         qc_summary = summarize_qc_bits(qc_data)
         print(f"[ECOSTRESS][{feature_id}] QC summary: {json.dumps(qc_summary, sort_keys=True)}")
 
+        # Reject scenes where the water mask detected no water pixels — without
+        # the mask the remaining pixels would be a land/water mix and degrade
+        # downstream stats. Logged as a nodata outcome by the dispatcher.
+        if not has_water:
+            raise NoDataError({"reason": "no_water_detected", **filter_stats})
+
         rows, cols = filtered_lst.shape
-        suffix = "" if has_water else "_wtoff"
-        base_name = f"{name}_{location}_{date_day}_filter{suffix}"
+        base_name = f"{name}_{location}_{date_day}_filter"
         filter_tif_path = os.path.join(work_dir, f"{base_name}.tif")
 
         # Write filtered TIF
@@ -318,7 +323,6 @@ def process_one_record(body):
             "data_points": int(len(df_valid)),
             "water_pixel_count": valid_pixels,
             "land_pixel_count": land_pixels,
-            "wtoff": not has_water,
             "filter_stats": filter_stats,
             "pixel_size": float(pixel_size_deg_y),
             "pixel_size_x": float(pixel_size_deg_x),

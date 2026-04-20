@@ -70,11 +70,11 @@ def insert_metadata_to_d1(
     meta_sql = """
     INSERT OR REPLACE INTO temperature_metadata
     (feature_id, date, min_temp, max_temp, mean_temp, median_temp, std_dev,
-     data_points, water_pixel_count, land_pixel_count, wtoff,
+     data_points, water_pixel_count, land_pixel_count,
      csv_path, tif_path, png_path, filter_stats, source, pixel_size, pixel_size_x,
      parquet_path, source_crs, transform_a, transform_b, transform_c, transform_d,
      transform_e, transform_f)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
 
     # Serialize filter_stats to JSON
@@ -92,7 +92,6 @@ def insert_metadata_to_d1(
         metadata.get("data_points", 0),
         metadata.get("water_pixel_count", 0),
         metadata.get("land_pixel_count", 0),
-        1 if metadata.get("wtoff", False) else 0,
         csv_path,
         tif_path,
         png_path,

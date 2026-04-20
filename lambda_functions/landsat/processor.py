@@ -174,11 +174,16 @@ def process_one_record(body):
         total_pixels = int(np.sum(st_clipped[0] != 0))  # Non-fill pixels within clip
         filter_stats = compute_filter_stats(flat_flags, len(flat_flags))
 
+        # Reject scenes where QA_PIXEL reported no water pixels — without the
+        # mask the remaining pixels would be a land/water mix and degrade
+        # downstream stats. Logged as a nodata outcome by the dispatcher.
+        if not has_water:
+            raise NoDataError({"reason": "no_water_detected", **filter_stats})
+
         # Single-band TIF with DEFLATE compression
         rows, cols = filtered_lst.shape
 
-        suffix = "" if has_water else "_wtoff"
-        base_name = f"{name}_{location}_{date_day}_filter{suffix}"
+        base_name = f"{name}_{location}_{date_day}_filter"
         filter_tif_path = os.path.join(work_dir, f"{base_name}.tif")
 
         tif_meta = st_meta.copy()
@@ -261,7 +266,6 @@ def process_one_record(body):
             "data_points": int(len(df_valid)),
             "water_pixel_count": valid_pixels,
             "land_pixel_count": land_pixels,
-            "wtoff": not has_water,
             "filter_stats": filter_stats,
             "pixel_size": float(pixel_deg_y),
             "pixel_size_x": float(pixel_deg_x),

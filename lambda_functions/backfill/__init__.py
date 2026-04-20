@@ -9,6 +9,7 @@ _HANDLERS = {
     "backfill:regzip": "backfill.regzip",
     "backfill:temp_stats": "backfill.temp_stats",
     "backfill:nodata": "backfill.nodata",
+    "backfill:wtoff": "backfill.wtoff",
 }
 
 
