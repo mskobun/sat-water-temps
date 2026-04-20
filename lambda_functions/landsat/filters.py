@@ -1,6 +1,17 @@
-"""Landsat QA_PIXEL bitmask filtering."""
+"""Landsat QA_PIXEL bitmask filtering.
+
+filter_flags bit positions written by apply_landsat_filters:
+  Bit 0 = reserved (unused on Landsat path today)
+  Bit 1 = cloud / dilated cloud / cloud shadow
+  Bit 2 = non-water reject (when a water mask is active)
+  Bit 3 = nodata / fill
+  Bit 4 = out-of-physical-range (Kelvin bounds, see common.outliers)
+  Bit 5 = spatial outlier (local median-MAD / Hampel test, see common.outliers)
+"""
 
 import numpy as np
+
+from common.outliers import hampel_outlier_mask, range_outlier_mask
 
 # QA_PIXEL bitmask positions
 QA_BIT_FILL = 0          # Bit 0: fill
@@ -47,6 +58,15 @@ def apply_landsat_filters(lst_kelvin, qa_pixel):
     else:
         # No water detected — don't apply water filter
         pass
+
+    # Bit 4: Out-of-physical-range LST (hard Kelvin bounds)
+    range_mask = range_outlier_mask(lst_kelvin)
+    filter_flags = np.where(range_mask, filter_flags | 16, filter_flags)
+
+    # Bit 5: Spatial outlier (local median-MAD / Hampel test over 5x5 window)
+    valid_so_far = filter_flags == 0
+    spatial_mask = hampel_outlier_mask(lst_kelvin, valid_so_far)
+    filter_flags = np.where(spatial_mask, filter_flags | 32, filter_flags)
 
     # Apply all filters to LST
     filtered_lst = lst_kelvin.copy()

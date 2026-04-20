@@ -12,15 +12,21 @@ QC is a uint16 bitmask defined in PSD Table 3-5:
   Bits 13&12 Emis accuracy:  informational
   Bits 15&14 LST accuracy:   00=>2K (poor), 01=1.5-2K (marginal), 10=1-1.5K (good), 11=<1K (excellent)
 
-We reject pixels where:
-  - Mandatory QA (bits 1&0) = 10 or 11 (cloud detected or not produced)
-  - Data quality (bits 3&2) = 11 (missing/bad L1B data)
+filter_flags bit positions written by apply_ecostress_filters:
+  Bit 0 = QC reject (mandatory QA + data quality bitmask)
+  Bit 1 = cloud reject
+  Bit 2 = non-water reject (when a water mask is active)
+  Bit 3 = nodata / swath gap
+  Bit 4 = out-of-physical-range (Kelvin bounds, see common.outliers)
+  Bit 5 = spatial outlier (local median-MAD / Hampel test, see common.outliers)
 
 LST accuracy (bits 15&14) is tracked for diagnostics only and is not used as
 a reject criterion.
 """
 
 import numpy as np
+
+from common.outliers import hampel_outlier_mask, range_outlier_mask
 
 
 def _qc_reject_mask(qc):
@@ -91,6 +97,15 @@ def apply_ecostress_filters(lst, qc, water, cloud):
     if has_water:
         non_water_mask = water == 0
         filter_flags = np.where(non_water_mask, filter_flags | 4, filter_flags)
+
+    # Bit 4: Out-of-physical-range LST (hard Kelvin bounds)
+    range_mask = range_outlier_mask(lst)
+    filter_flags = np.where(range_mask, filter_flags | 16, filter_flags)
+
+    # Bit 5: Spatial outlier (local median-MAD / Hampel test over 5x5 window)
+    valid_so_far = filter_flags == 0
+    spatial_mask = hampel_outlier_mask(lst, valid_so_far)
+    filter_flags = np.where(spatial_mask, filter_flags | 32, filter_flags)
 
     # Apply all filters to LST
     filtered_lst = lst.astype(np.float32).copy()

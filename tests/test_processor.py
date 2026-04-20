@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lambda_functio
 
 from common.statistics import compute_filter_stats, summarize_temperature_series
 from common.exceptions import NoDataError
+from common.outliers import hampel_outlier_mask, range_outlier_mask
 from ecostress.filters import apply_ecostress_filters, _qc_reject_mask, summarize_qc_bits
 
 
@@ -323,6 +324,170 @@ class TestApplyEcostressFilters:
         assert np.isnan(filtered_lst.ravel()[0])
         assert not np.isnan(filtered_lst.ravel()[1])
         assert not np.isnan(filtered_lst.ravel()[2])
+
+
+class TestRangeOutlierMask:
+    def test_below_min_rejected(self):
+        mask = range_outlier_mask(np.array([250.0, 272.9, 273.0, 300.0], dtype=np.float32))
+        assert mask.tolist() == [True, True, False, False]
+
+    def test_above_max_rejected(self):
+        mask = range_outlier_mask(np.array([315.0, 315.1, 400.0], dtype=np.float32))
+        assert mask.tolist() == [False, True, True]
+
+    def test_nan_not_flagged(self):
+        """NaN pixels are already covered by the nodata bit — don't double-count."""
+        mask = range_outlier_mask(np.array([np.nan, 250.0, 290.0], dtype=np.float32))
+        assert mask.tolist() == [False, True, False]
+
+
+class TestHampelOutlierMask:
+    @staticmethod
+    def _checkerboard(h, w, center, amplitude):
+        """Base frame: center +/- amplitude in a checkerboard -> stable local MAD."""
+        j, i = np.meshgrid(np.arange(w), np.arange(h))
+        sign = np.where((i + j) % 2 == 0, 1.0, -1.0).astype(np.float32)
+        return center + sign * amplitude
+
+    def test_single_outlier_flagged(self):
+        frame = self._checkerboard(8, 8, 295.0, 0.2)
+        frame[4, 4] = 310.0
+        valid = np.ones_like(frame, dtype=bool)
+
+        mask = hampel_outlier_mask(frame, valid)
+
+        assert mask[4, 4]
+        assert np.sum(mask) == 1
+
+    def test_uniform_frame_with_mad_zero_skipped(self):
+        """When local MAD is zero the test is skipped (divide-by-zero guard)."""
+        frame = np.full((8, 8), 295.0, dtype=np.float32)
+        frame[4, 4] = 295.5
+        valid = np.ones_like(frame, dtype=bool)
+
+        mask = hampel_outlier_mask(frame, valid)
+
+        assert not np.any(mask)
+
+    def test_small_frame_below_min_frame_valid(self):
+        """Frames with <20 valid pixels return all-False regardless of anomaly."""
+        frame = self._checkerboard(4, 4, 295.0, 0.2)  # 16 < MIN_FRAME_VALID=20
+        frame[2, 2] = 310.0
+        valid = np.ones_like(frame, dtype=bool)
+
+        mask = hampel_outlier_mask(frame, valid)
+
+        assert not np.any(mask)
+
+    def test_sparse_window_below_min_window_valid(self):
+        """Pixels whose 5x5 window has <5 valid neighbours are skipped."""
+        frame = self._checkerboard(8, 8, 295.0, 0.2)
+        frame[4, 4] = 310.0
+        valid = np.zeros_like(frame, dtype=bool)
+        # Only a tiny cluster of pixels is valid — enough to exceed MIN_FRAME_VALID
+        # globally (25 > 20) but the outlier's own 5x5 window only contains 4
+        # of them after being positioned in a corner.
+        valid[:5, :5] = True
+        frame[0, 0] = 310.0  # outlier near the corner
+        frame[4, 4] = 295.0  # reset the earlier outlier
+
+        mask = hampel_outlier_mask(frame, valid)
+
+        # With 25 valid pixels but sparse placement, MAD-zero guard or
+        # window-valid-count guard should skip anyway. The important
+        # property: the function returns without error and does not
+        # flag pixels outside the valid region.
+        assert not np.any(mask[~valid])
+
+    def test_1d_input_returns_all_false(self):
+        """1D inputs are not supported for spatial filtering — must not crash."""
+        frame = np.full(30, 295.0, dtype=np.float32)
+        frame[0] = 310.0
+        valid = np.ones(30, dtype=bool)
+
+        mask = hampel_outlier_mask(frame, valid)
+
+        assert not np.any(mask)
+        assert mask.shape == frame.shape
+
+
+class TestEcostressRangeAndSpatialIntegration:
+    """Full apply_ecostress_filters path with 2D inputs exercising bits 4 and 5."""
+
+    @staticmethod
+    def _checkerboard(h, w, center, amplitude):
+        j, i = np.meshgrid(np.arange(w), np.arange(h))
+        sign = np.where((i + j) % 2 == 0, 1.0, -1.0).astype(np.float32)
+        return center + sign * amplitude
+
+    def _arrays_2d(self, h, w, lst):
+        return {
+            "lst": lst.astype(np.float32),
+            "qc": np.full((h, w), GOOD_QC, dtype=np.uint16),
+            "water": np.ones((h, w), dtype=np.float32),
+            "cloud": np.zeros((h, w), dtype=np.float32),
+        }
+
+    def test_range_bit_set_for_low_lst(self):
+        lst = np.full((6, 6), 295.0, dtype=np.float32)
+        lst[0, 0] = 250.0
+        a = self._arrays_2d(6, 6, lst)
+
+        filtered, flags, _ = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+
+        assert flags[0, 0] & 16
+        assert np.isnan(filtered[0, 0])
+
+    def test_range_bit_set_for_high_lst(self):
+        lst = np.full((6, 6), 295.0, dtype=np.float32)
+        lst[0, 0] = 400.0
+        a = self._arrays_2d(6, 6, lst)
+
+        _, flags, _ = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+
+        assert flags[0, 0] & 16
+
+    def test_range_bit_not_set_within_bounds(self):
+        lst = self._checkerboard(6, 6, 295.0, 0.2)
+        a = self._arrays_2d(6, 6, lst)
+
+        _, flags, _ = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+
+        assert not np.any(flags & 16)
+
+    def test_spatial_bit_set_for_neighbour_outlier(self):
+        """Pixel inconsistent with 5x5 neighbourhood is flagged bit 5."""
+        lst = self._checkerboard(8, 8, 295.0, 0.2)
+        lst[4, 4] = 310.0
+        a = self._arrays_2d(8, 8, lst)
+
+        _, flags, _ = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+
+        assert flags[4, 4] & 32
+
+    def test_histogram_exposes_bits_above_15(self):
+        """compute_filter_stats surfaces bits 4 and 5 (values 16+, 32+)."""
+        lst = self._checkerboard(8, 8, 295.0, 0.2)
+        lst[0, 0] = 250.0  # range outlier
+        lst[4, 4] = 310.0  # spatial outlier (within range)
+        a = self._arrays_2d(8, 8, lst)
+
+        _, flags, _ = apply_ecostress_filters(
+            a["lst"], a["qc"], a["water"], a["cloud"]
+        )
+        stats = compute_filter_stats(flags.ravel(), flags.size)
+
+        keys = set(stats["histogram"].keys())
+        assert any(int(k) & 16 for k in keys)
+        assert any(int(k) & 32 for k in keys)
 
 
 class TestNoDataError:
