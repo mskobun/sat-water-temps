@@ -359,8 +359,9 @@ class TestHampelOutlierMask:
         assert mask[4, 4]
         assert np.sum(mask) == 1
 
-    def test_uniform_frame_with_mad_zero_skipped(self):
-        """When local MAD is zero the test is skipped (divide-by-zero guard)."""
+    def test_deviation_below_floor_not_flagged(self):
+        """A 0.5 K deviation on a calm frame is below MIN_OUTLIER_DELTA_K=2 K
+        and must not be flagged — it sits inside product-uncertainty noise."""
         frame = np.full((8, 8), 295.0, dtype=np.float32)
         frame[4, 4] = 295.5
         valid = np.ones_like(frame, dtype=bool)
@@ -368,6 +369,29 @@ class TestHampelOutlierMask:
         mask = hampel_outlier_mask(frame, valid)
 
         assert not np.any(mask)
+
+    def test_deviation_above_floor_flagged_on_uniform_frame(self):
+        """With MAD=0 the MAD-based threshold collapses to 0; the 2 K floor
+        still lets genuinely large deviations through."""
+        frame = np.full((8, 8), 295.0, dtype=np.float32)
+        frame[4, 4] = 300.0  # 5 K above neighbours — well past the floor
+        valid = np.ones_like(frame, dtype=bool)
+
+        mask = hampel_outlier_mask(frame, valid)
+
+        assert mask[4, 4]
+        assert np.sum(mask) == 1
+
+    def test_just_below_floor_not_flagged(self):
+        """Sanity: deviation just under the floor is not flagged even when
+        the local MAD would otherwise say 'reject'."""
+        frame = self._checkerboard(8, 8, 295.0, 0.1)  # MAD ≈ 0.1 K
+        frame[4, 4] = 295.0 + 1.9  # 1.9 K off — below 2 K floor
+        valid = np.ones_like(frame, dtype=bool)
+
+        mask = hampel_outlier_mask(frame, valid)
+
+        assert not mask[4, 4]
 
     def test_small_frame_below_min_frame_valid(self):
         """Frames with <20 valid pixels return all-False regardless of anomaly."""

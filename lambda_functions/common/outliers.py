@@ -28,6 +28,14 @@ LOCAL_WINDOW = 5
 MIN_WINDOW_VALID = 5
 MIN_FRAME_VALID = 20
 
+# Minimum deviation (K) required to flag a spatial outlier, regardless of how
+# small the local MAD is. Anchored to the published single-pixel LST product
+# uncertainty (ECOSTRESS L2 LSTE target ~1.5 K, Landsat Collection 2 L2 ST
+# ~2 K). Below this floor we can't distinguish genuine pixel-to-pixel product
+# noise from real contamination, so we refuse to flag. Typical cloud-shadow /
+# thin-cirrus / adjacency contamination is 3-15 K and still clears the floor.
+MIN_OUTLIER_DELTA_K = 2.0
+
 OUTLIER_RANGE_BIT = 4
 OUTLIER_SPATIAL_BIT = 5
 
@@ -53,8 +61,11 @@ def hampel_outlier_mask(lst, valid_mask):
 
     Returns an all-False mask if the frame has fewer than ``MIN_FRAME_VALID``
     valid pixels. Individual pixels whose 5x5 window has fewer than
-    ``MIN_WINDOW_VALID`` valid neighbours are also skipped, as are pixels whose
-    local MAD is zero (degenerate — would produce divide-by-zero behaviour).
+    ``MIN_WINDOW_VALID`` valid neighbours are also skipped.
+
+    The rejection threshold is floored at ``MIN_OUTLIER_DELTA_K`` so that on
+    very calm water (tiny local MAD) we don't reject pixels whose deviation is
+    within the single-pixel product-uncertainty noise floor.
     """
     lst = np.asarray(lst, dtype=np.float32)
     valid_mask = np.asarray(valid_mask, dtype=bool)
@@ -82,7 +93,7 @@ def hampel_outlier_mask(lst, valid_mask):
         local_median = np.nanmedian(flat, axis=-1)
         local_mad = np.nanmedian(np.abs(flat - local_median[..., None]), axis=-1)
         deviation = np.abs(lst - local_median)
-        threshold = HAMPEL_K * MAD_SCALE * local_mad
+        threshold = np.maximum(HAMPEL_K * MAD_SCALE * local_mad, MIN_OUTLIER_DELTA_K)
         reject = deviation > threshold
 
     skip = (
@@ -90,7 +101,6 @@ def hampel_outlier_mask(lst, valid_mask):
         | np.isnan(lst)
         | np.isnan(local_median)
         | np.isnan(local_mad)
-        | (local_mad <= 0)
         | (valid_count < MIN_WINDOW_VALID)
     )
     return np.where(skip, False, reject)
