@@ -9,9 +9,11 @@ def compute_filter_stats(filter_flags, total_pixels, padding_count=0):
     total_pixels counts only pixels inside the polygon (excludes grid padding).
     padding_count is tracked separately for reference.
     """
-    # Create histogram of bit flag values (0-15, 4 bits)
+    # Create histogram of bit flag values (0-63, 6 bits).
+    # Bits 0-3 are set by source-specific filters; bits 4-5 are the
+    # range/spatial-outlier checks added by common.outliers.
     histogram = {}
-    for flag_value in range(16):
+    for flag_value in range(64):
         count = int(np.sum(filter_flags == flag_value))
         if count > 0:  # Only store non-zero counts
             histogram[str(flag_value)] = count

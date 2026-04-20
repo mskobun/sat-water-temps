@@ -8,12 +8,13 @@ import json
 import os
 import time
 from datetime import datetime, timedelta
+from typing import Any, Dict, Iterator
 
 import boto3
 from pystac_client import Client as STACClient
 from shapely.geometry import shape, mapping
 
-from common.polygons import load_polygons
+from common.polygons import load_polygons, filter_polygons_for_feature
 from d1 import log_job_to_d1, get_setting, log_data_request
 
 
@@ -39,6 +40,7 @@ def _search_stac(start_date: str, end_date: str, bbox: list) -> list:
     return list(search.items())
 
 
+
 def _get_s3_hrefs(item) -> dict:
     """Extract S3 hrefs from STAC item assets (alternate.s3.href)."""
     hrefs = {}
@@ -55,6 +57,49 @@ def _get_s3_hrefs(item) -> dict:
             s3_href = asset.href
         hrefs[key] = s3_href
     return hrefs
+
+
+def iter_landsat_processor_bodies(
+    sd: str, ed: str, *, polygons: list
+) -> Iterator[Dict[str, Any]]:
+    """Yield Landsat processor message bodies for the given date range and polygons."""
+    for poly in polygons:
+        items = _search_stac(sd, ed, poly["bbox"])
+        if not items:
+            continue
+        scenes_by_date: Dict[str, list] = {}
+        for item in items:
+            item_geom = shape(item.geometry)
+            if not item_geom.intersects(poly["geometry"]):
+                continue
+            scene_date = item.datetime.strftime("%Y-%m-%d")
+            hrefs = _get_s3_hrefs(item)
+            if len(hrefs) < len(REQUIRED_ASSETS):
+                print(
+                    f"  Skipping {item.id}: missing assets {set(REQUIRED_ASSETS) - set(hrefs.keys())}"
+                )
+                continue
+            scenes_by_date.setdefault(scene_date, []).append(
+                {
+                    "scene_id": item.id,
+                    "hrefs": hrefs,
+                    "cloud_cover": item.properties.get("eo:cloud_cover"),
+                    "datetime": item.datetime.strftime("%Y-%m-%dT%H:%M:%S"),
+                }
+            )
+        for scene_date, scenes in scenes_by_date.items():
+            scene_datetime = min(s["datetime"] for s in scenes)
+            yield {
+                "source": "landsat",
+                "aid": poly["aid"],
+                "date": scene_datetime,
+                "name": poly["name"],
+                "location": poly["location"],
+                "scenes": scenes,
+            }
+            print(
+                f"  Yield: AID={poly['aid']} ({poly['name']}) date={scene_date} ({len(scenes)} scene(s))"
+            )
 
 
 def handler(event, context):
@@ -86,14 +131,23 @@ def handler(event, context):
         sd = start_date.strftime("%Y-%m-%d")
         ed = end_date.strftime("%Y-%m-%d")
 
+    feature_filter = event.get("feature")
     if not description:
+        feature_label = f" [{feature_filter}]" if feature_filter else ""
         description = f"{'Manual' if trigger_type == 'manual' else 'Daily'} Landsat scan for {sd}" + (
             f" to {ed}" if sd != ed else ""
-        )
+        ) + feature_label
 
-    print(f"Landsat initiator: searching {sd} to {ed}")
+    print(f"Landsat initiator: searching {sd} to {ed}" + (f" (feature={feature_filter})" if feature_filter else ""))
 
     polygons = load_polygons()
+    polygons = filter_polygons_for_feature(polygons, feature_filter)
+    if polygons is None:
+        print(f"  No polygon found matching feature={feature_filter!r}")
+        return {
+            "statusCode": 400,
+            "body": json.dumps({"error": f"feature {feature_filter!r} not found"}),
+        }
     sqs = boto3.client("sqs")
     start_time = time.time()
 
@@ -108,55 +162,15 @@ def handler(event, context):
     total_messages = 0
 
     try:
-        # For each polygon, query STAC and find matching scenes
-        for poly in polygons:
-            items = _search_stac(sd, ed, poly["bbox"])
-            if not items:
-                continue
-
-            # Group scenes by date for this polygon
-            scenes_by_date = {}
-            for item in items:
-                # Check spatial intersection
-                item_geom = shape(item.geometry)
-                if not item_geom.intersects(poly["geometry"]):
-                    continue
-
-                # Extract date (YYYY-MM-DD)
-                scene_date = item.datetime.strftime("%Y-%m-%d")
-                hrefs = _get_s3_hrefs(item)
-
-                if len(hrefs) < len(REQUIRED_ASSETS):
-                    print(f"  Skipping {item.id}: missing assets {set(REQUIRED_ASSETS) - set(hrefs.keys())}")
-                    continue
-
-                if scene_date not in scenes_by_date:
-                    scenes_by_date[scene_date] = []
-                scenes_by_date[scene_date].append({
-                    "scene_id": item.id,
-                    "hrefs": hrefs,
-                    "cloud_cover": item.properties.get("eo:cloud_cover"),
-                    "datetime": item.datetime.strftime("%Y-%m-%dT%H:%M:%S"),
-                })
-
-            # Send one SQS message per (AID, date)
-            for scene_date, scenes in scenes_by_date.items():
-                # Use earliest scene datetime for the record timestamp
-                scene_datetime = min(s["datetime"] for s in scenes)
-                message_body = {
-                    "source": "landsat",
-                    "aid": poly["aid"],
-                    "date": scene_datetime,
-                    "name": poly["name"],
-                    "location": poly["location"],
-                    "scenes": scenes,
-                }
-                sqs.send_message(
-                    QueueUrl=sqs_queue_url,
-                    MessageBody=json.dumps(message_body),
-                )
-                total_messages += 1
-                print(f"  Queued: AID={poly['aid']} ({poly['name']}) date={scene_date} ({len(scenes)} scene(s))")
+        for message_body in iter_landsat_processor_bodies(sd, ed, polygons=polygons):
+            sqs.send_message(
+                QueueUrl=sqs_queue_url,
+                MessageBody=json.dumps(message_body),
+            )
+            total_messages += 1
+            print(
+                f"  Queued: AID={message_body['aid']} ({message_body['name']}) date={message_body['date'][:10]}"
+            )
 
         duration_ms = int((time.time() - start_time) * 1000)
 

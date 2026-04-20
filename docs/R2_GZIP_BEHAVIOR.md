@@ -1,70 +1,70 @@
 # R2 Transparent Gzip Decompression
 
-Cloudflare R2 has undocumented behavior around `ContentEncoding: gzip` that affects how gzipped objects are served. This was discovered through trial and error during our CSV compression migration.
+This repo stores some CSV assets in R2 as gzipped objects. Cloudflare R2 has behavior here that matters for both Workers and Lambda tooling.
 
-## The behavior
+## What R2 does
 
-When you upload a gzipped object to R2 with `ContentEncoding: gzip`, R2 **transparently decompresses** it on read. The client receives plain (decompressed) bytes and the `ContentEncoding` header is stripped from the response.
+If an object is uploaded with `ContentEncoding: gzip`, R2 transparently decompresses it on read.
 
-This happens regardless of `ContentType` — it is solely triggered by `ContentEncoding: gzip`.
+That means:
 
-## What works and what doesn't
+- clients receive plain bytes, not gzip bytes
+- the `ContentEncoding` header is stripped from the response
+- this behavior is driven by `ContentEncoding: gzip`, not by `ContentType`
 
-| Upload metadata | R2 serves on GET | Decompressed? |
+## Behavior summary
+
+| Upload metadata | GET response body | Transparent decompression |
 |---|---|---|
-| `ContentType: application/gzip` | gzip bytes as-is | No |
-| `ContentType: text/csv` | gzip bytes as-is | No |
-| `ContentType: text/csv`, `ContentEncoding: gzip` | **plain text** | **Yes** |
-| `ContentType: application/gzip`, `ContentEncoding: gzip` | **plain text** | **Yes** |
-| `ContentType: application/octet-stream`, `ContentEncoding: gzip` | **plain text** | **Yes** |
-| `ContentType: text/csv`, `ContentEncoding: identity` | gzip bytes as-is | No |
+| `ContentType: application/gzip` | gzip bytes | No |
+| `ContentType: text/csv` | raw uploaded bytes | No |
+| `ContentType: text/csv`, `ContentEncoding: gzip` | plain CSV text | Yes |
+| `ContentType: application/gzip`, `ContentEncoding: gzip` | plain bytes | Yes |
 
-**Rule: `ContentEncoding: gzip` = R2 decompresses. Anything else = R2 serves raw bytes.**
+Rule of thumb:
 
-## Checksum bug
+- `ContentEncoding: gzip` means R2 serves decompressed content
+- otherwise R2 serves the uploaded bytes as-is
 
-R2 stores the checksum against the **compressed** bytes at upload time. But when it transparently decompresses on read, the served bytes no longer match that checksum. This causes boto3 (and possibly other S3 clients) to throw `FlexibleChecksumError`.
+## Checksum mismatch caveat
 
-Workaround: disable checksum validation on the client:
+R2 appears to keep checksums for the compressed upload, even when it later serves decompressed bytes. Some S3 clients can fail validation because the body they receive does not match the stored checksum metadata.
+
+For boto3/botocore clients, the current workaround is to relax checksum validation:
 
 ```python
 from botocore.config import Config
 
-s3 = boto3.client("s3", ..., config=Config(
-    request_checksum_calculation="when_required",
-    response_checksum_validation="when_required",
-))
-```
-
-This is arguably an R2 bug — if R2 decompresses the body, it should recompute or strip the checksum.
-
-## Miniflare (local dev)
-
-Miniflare's R2 emulation does **not** do transparent decompression, even when `remote = true` in `wrangler.toml`. The R2 binding proxy serves the raw gzip bytes regardless of `ContentEncoding`. This means local dev and production behave differently.
-
-Our `r2Text()` function in `src/lib/db.ts` handles both cases by checking for gzip magic bytes (`0x1f 0x8b`) and decompressing client-side as a fallback.
-
-## Our approach
-
-We store gzipped CSVs with:
-
-```python
-s3.put_object(
-    Bucket=bucket, Key="path/to/file.csv.gz", Body=compressed,
-    ContentType="text/csv",
-    ContentEncoding="gzip",
+s3 = boto3.client(
+    "s3",
+    ...,
+    config=Config(
+        request_checksum_calculation="when_required",
+        response_checksum_validation="when_required",
+    ),
 )
 ```
 
-This way R2 decompresses transparently on read, and the Cloudflare Worker receives plain CSV without spending CPU time on decompression. The `.csv.gz` extension is kept for clarity but the served content is plain text.
+## Local dev difference
 
-### Migration
+Miniflare/Wrangler local R2 emulation does not fully mirror this behavior. In local development you may still receive raw gzip bytes even when production R2 would transparently decompress them.
 
-Older files were uploaded with `ContentType: application/gzip` (no `ContentEncoding`), which forces workers to decompress manually. The backfill handler `backfill regzip` re-uploads these with the correct metadata:
+Code that reads R2 text should therefore tolerate both cases:
+
+- already decompressed text
+- raw gzip bytes that still need local decompression
+
+## Current repo usage
+
+The data pipeline uploads gzipped CSVs to R2 with `ContentEncoding: gzip` so production reads can stay simple and efficient.
+
+Older assets may still need metadata fixes or re-uploading. The repo keeps backfill utilities under `lambda_functions/backfill/` for maintenance tasks like regzipping and metadata normalization.
+
+Example:
 
 ```bash
 cd lambda_functions
-uv run python -m backfill regzip              # all features
-uv run python -m backfill regzip NamTheun2    # one feature
-uv run python -m backfill regzip --via-sqs    # fan out via SQS
+uv run python -m backfill regzip
+uv run python -m backfill regzip NamTheun2
+uv run python -m backfill regzip --via-sqs
 ```

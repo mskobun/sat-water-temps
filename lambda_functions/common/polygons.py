@@ -1,4 +1,5 @@
 import json
+from typing import Optional
 
 from shapely.geometry import shape
 
@@ -32,6 +33,24 @@ def load_polygons():
             "bbox": list(bounds),
         })
     return _polygon_data
+
+
+def filter_polygons_for_feature(polygons: list, feature_filter) -> Optional[list]:
+    """Return polygons matching ``feature_filter`` (AID int/str or case-insensitive name).
+
+    Returns None if no match (so callers can distinguish "no filter" from "filter found nothing").
+    """
+    if feature_filter is None:
+        return polygons
+    if isinstance(feature_filter, int) or (
+        isinstance(feature_filter, str) and str(feature_filter).isdigit()
+    ):
+        filtered = [p for p in polygons if p["aid"] == int(feature_filter)]
+    else:
+        filtered = [
+            p for p in polygons if p["name"].lower() == str(feature_filter).lower()
+        ]
+    return filtered if filtered else None
 
 
 def get_aid_folder_mapping():

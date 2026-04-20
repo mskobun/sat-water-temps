@@ -7,6 +7,7 @@ import type { PickingInfo } from '@deck.gl/core';
 import type { AffineTransform } from '$lib/landsat-pixel-quads';
 import {
 	computeLandsatQuadsFlat,
+	computeRectQuadsFlat,
 	flatQuadsToPolygons,
 	hasLandsatQuadInputs
 } from '$lib/landsat-pixel-quads';
@@ -81,13 +82,10 @@ function tempToRGBA(
 
 function createTemperatureLayer(
 	opts: UpdateOptions,
-	mode: 'rect' | 'landsat-precomputed',
-	landsatPolygons: [number, number][][] | null
+	polygons: [number, number][][]
 ): SolidPolygonLayer {
 	const {
 		triplets,
-		halfPixelX,
-		halfPixelY,
 		colorScale,
 		minTemp,
 		maxTemp,
@@ -97,36 +95,15 @@ function createTemperatureLayer(
 		onClick
 	} = opts;
 
-	const count = (triplets.length / 3) | 0;
 	const hasFilter = filterMin != null && filterMax != null;
 	const fMin = filterMin ?? 0;
 	const fMax = filterMax ?? 0;
 
-	const data =
-		mode === 'landsat-precomputed' && landsatPolygons ? landsatPolygons : { length: count };
-
 	return new SolidPolygonLayer({
 		id: 'temperature-cells',
 		beforeId: 'selected-point-layer',
-		data,
-		getPolygon:
-			mode === 'landsat-precomputed' && landsatPolygons
-				? (d: [number, number][]) => d
-				: (_: unknown, { index }: { index: number }) => {
-						const o = index * 3;
-						const lng = triplets[o];
-						const lat = triplets[o + 1];
-						const x0 = lng - halfPixelX;
-						const x1 = lng + halfPixelX;
-						const y0 = lat - halfPixelY;
-						const y1 = lat + halfPixelY;
-						return [
-							[x0, y0],
-							[x1, y0],
-							[x1, y1],
-							[x0, y1]
-						];
-					},
+		data: polygons,
+		getPolygon: (d: [number, number][]) => d,
 		extruded: false,
 		filled: true,
 		getFillColor: (_: unknown, { index }: { index: number }) => {
@@ -165,11 +142,7 @@ function createTemperatureLayer(
 			}
 		},
 		updateTriggers: {
-			getFillColor: [colorScale, minTemp, maxTemp, filterMin, filterMax],
-			getPolygon:
-				mode === 'landsat-precomputed' && landsatPolygons
-					? [landsatPolygons]
-					: [triplets, halfPixelX, halfPixelY]
+			getFillColor: [colorScale, minTemp, maxTemp, filterMin, filterMax]
 		}
 	});
 }
@@ -180,6 +153,14 @@ export class DeckTemperatureOverlay {
 	private mainLayer: SolidPolygonLayer | null = null;
 	private highlightFill: SolidPolygonLayer | null = null;
 	private highlightStroke: PathLayer | null = null;
+	// Cache so color/filter-only updates skip quad recomputation.
+	private cachedPolygons: [number, number][][] | null = null;
+	private cachedGeomKey: {
+		triplets: Float64Array;
+		rowCol: Int32Array | null;
+		halfPixelX: number;
+		halfPixelY: number;
+	} | null = null;
 
 	constructor() {
 		this.overlay = new MapboxOverlay({
@@ -205,7 +186,9 @@ export class DeckTemperatureOverlay {
 			triplets,
 			landsatSourceCrs,
 			landsatTransform,
-			rowCol
+			rowCol,
+			halfPixelX,
+			halfPixelY
 		} = opts;
 
 		const count = (triplets.length / 3) | 0;
@@ -214,27 +197,48 @@ export class DeckTemperatureOverlay {
 			return;
 		}
 
-		const useProjQuads =
-			hasLandsatQuadInputs(landsatSourceCrs ?? null, landsatTransform ?? null, rowCol ?? null) &&
-			rowCol!.length === count * 2 &&
-			rowCol![0] !== -1;
+		// Reuse precomputed polygons when only color/filter changed.
+		const prev = this.cachedGeomKey;
+		const sameGeom =
+			prev !== null &&
+			prev.triplets === triplets &&
+			prev.rowCol === (rowCol ?? null) &&
+			prev.halfPixelX === halfPixelX &&
+			prev.halfPixelY === halfPixelY &&
+			this.cachedPolygons !== null &&
+			this.cachedPolygons.length === count;
 
-		if (!useProjQuads) {
-			this.mainLayer = createTemperatureLayer(opts, 'rect', null);
+		let polygons: [number, number][][];
+		if (sameGeom) {
+			polygons = this.cachedPolygons!;
 		} else {
-			const crs = landsatSourceCrs!;
-			const tf = landsatTransform!;
+			const useProjQuads =
+				hasLandsatQuadInputs(landsatSourceCrs ?? null, landsatTransform ?? null, rowCol ?? null) &&
+				rowCol!.length === count * 2 &&
+				rowCol![0] !== -1;
 
-			try {
-				const flat = computeLandsatQuadsFlat(crs, tf, rowCol!, count);
-				const polygons = flatQuadsToPolygons(flat, count);
-				this.mainLayer = createTemperatureLayer(opts, 'landsat-precomputed', polygons);
-			} catch (err) {
-				console.error('[deck] Projected quad compute failed:', err);
-				this.mainLayer = createTemperatureLayer(opts, 'rect', null);
+			let flat: Float64Array;
+			if (useProjQuads) {
+				try {
+					flat = computeLandsatQuadsFlat(landsatSourceCrs!, landsatTransform!, rowCol!, count);
+				} catch (err) {
+					console.error('[deck] Projected quad compute failed:', err);
+					flat = computeRectQuadsFlat(triplets, halfPixelX, halfPixelY, count);
+				}
+			} else {
+				flat = computeRectQuadsFlat(triplets, halfPixelX, halfPixelY, count);
 			}
+			polygons = flatQuadsToPolygons(flat, count);
+			this.cachedPolygons = polygons;
+			this.cachedGeomKey = {
+				triplets,
+				rowCol: rowCol ?? null,
+				halfPixelX,
+				halfPixelY
+			};
 		}
 
+		this.mainLayer = createTemperatureLayer(opts, polygons);
 		this.syncLayers();
 	}
 
@@ -280,6 +284,8 @@ export class DeckTemperatureOverlay {
 		this.mainLayer = null;
 		this.highlightFill = null;
 		this.highlightStroke = null;
+		this.cachedPolygons = null;
+		this.cachedGeomKey = null;
 		this.overlay.setProps({ layers: [] });
 	}
 }

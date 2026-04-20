@@ -82,9 +82,6 @@ multitifs/
 ### Schema
 - `migrations/0001_init_schema.sql` - D1 tables (no temperature_data table)
 
-### Migration
-- `migrate_csv_to_d1.py` - Migrates metadata only (not CSV data)
-
 ### Lambda
 - `lambda_functions/processor.py`
   - `insert_metadata_to_d1()` - Inserts metadata with R2 paths
@@ -126,9 +123,9 @@ multitifs/
    wrangler d1 migrations apply sat-water-temps-db
    ```
 
-2. **Migrate metadata** (not CSV data):
+2. **Seed local data** when needed:
    ```bash
-   python migrate_csv_to_d1.py
+   npm run db:export && npm run db:seed
    ```
 
 3. **Deploy updated Lambda** (inserts metadata only)

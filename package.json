@@ -15,7 +15,8 @@
     "db:reset": "rm -rf .wrangler/state/v3/d1",
     "db:seed": "npm run db:reset && wrangler d1 execute sat-water-temps-db --local --file=seed.sql",
     "db:migrate:local": "wrangler d1 migrations apply sat-water-temps-db --local",
-    "db:migrate:remote": "wrangler d1 migrations apply sat-water-temps-db --remote"
+    "db:migrate:remote": "wrangler d1 migrations apply sat-water-temps-db --remote",
+    "r2:seed:local": "bash scripts/r2-seed-local.sh"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240512.0",

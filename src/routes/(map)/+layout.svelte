@@ -85,7 +85,6 @@
 	let relativeMax = $state(0);
 	let avgTemp = $state(0);
 	let histogramData: Array<{ range: string; count: number }> = $state([]);
-	let waterOff = $state(false);
 	let dataSource = $state('');
 	let pixelSizeDeg = $state<number | null>(null);
 	let pixelSizeXDeg = $state<number | null>(null);
@@ -394,7 +393,6 @@
 
 		// Clear previous tile state but keep parquet cache (same feature, different date)
 		resetTileState();
-		waterOff = false;
 
 		if (!featureId || !date) return;
 
@@ -438,7 +436,6 @@
 			avgTemp = stats.avg;
 			histogramData = stats.histogram;
 
-			waterOff = meta.wtoff || false;
 			dataSource = meta.source || 'ecostress';
 
 			{
@@ -826,7 +823,6 @@
 						{relativeMax}
 						{avgTemp}
 						{histogramData}
-						{waterOff}
 						{temperatureLoading}
 						on:close={handleSidebarClose}
 						on:dateChange={handleDateChange}
@@ -1038,7 +1034,6 @@
 						{relativeMax}
 						{avgTemp}
 						{histogramData}
-						{waterOff}
 						{temperatureLoading}
 						on:close={handleSidebarClose}
 						on:dateChange={handleDateChange}

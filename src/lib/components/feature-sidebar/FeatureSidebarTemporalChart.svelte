@@ -18,7 +18,6 @@
 		data_points: number | null;
 		water_pixel_count: number | null;
 		land_pixel_count: number | null;
-		wtoff: boolean;
 	};
 
 	export let entries: FeatureStatsHistoryEntry[] = [];

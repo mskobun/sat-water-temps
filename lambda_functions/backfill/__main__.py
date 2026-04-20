@@ -28,6 +28,7 @@ from backfill.parquet import handle as handle_parquet
 from backfill.raster_meta import handle as handle_raster_meta
 from backfill.regzip import handle as handle_regzip
 from backfill.temp_stats import handle as handle_temp_stats
+from backfill.wtoff import handle as handle_wtoff
 
 
 def _run_backfill(args, msg_type, handler):
@@ -53,6 +54,10 @@ def _run_backfill(args, msg_type, handler):
 
 def cmd_nodata(args):
     _run_backfill(args, "backfill:nodata", handle_nodata)
+
+
+def cmd_wtoff(args):
+    _run_backfill(args, "backfill:wtoff", handle_wtoff)
 
 
 def cmd_parquet(args):
@@ -152,6 +157,14 @@ def main():
     p_nodata.add_argument("features", nargs="*", help="Feature IDs (default: all)")
     p_nodata.add_argument("--via-sqs", action="store_true", help="Fan out via SQS instead of running locally")
     p_nodata.set_defaults(func=cmd_nodata)
+
+    p_wtoff = subparsers.add_parser(
+        "wtoff",
+        help="Delete legacy wtoff=1 observations (D1 row, R2 CSV/TIF/PNG, and rows in per-year parquet)",
+    )
+    p_wtoff.add_argument("features", nargs="*", help="Feature IDs (default: all)")
+    p_wtoff.add_argument("--via-sqs", action="store_true", help="Fan out via SQS instead of running locally")
+    p_wtoff.set_defaults(func=cmd_wtoff)
 
     args = parser.parse_args()
     args.func(args)

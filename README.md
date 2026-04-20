@@ -1,111 +1,146 @@
 # Satellite Water Temperatures
 
-Satellite water temperature monitoring platform using ECOSTRESS data.
+Satellite water temperature monitoring platform with:
 
-## Quick Start
+- a SvelteKit app on Cloudflare Pages
+- D1 for metadata and job/request state
+- R2 for rasters and derived data files
+- Python Lambda pipelines for ECOSTRESS and Landsat ingestion
+
+## What is in the repo
+
+- `src/` — SvelteKit map UI, admin UI, and API routes
+- `lambda_functions/` — ECOSTRESS/Landsat initiators, processors, shared helpers, and local CLIs
+- `migrations/` — D1 schema migrations
+- `terraform/` — AWS infrastructure for Lambda, ECR, scheduler, SQS, and Cognito
+- `scripts/` — utility scripts for local seeding and data maintenance
+
+## Current architecture
+
+The Cloudflare side serves the user-facing app and admin dashboard. It reads feature metadata from D1 and data assets from R2.
+
+The AWS side runs the ingestion pipeline. Manual or scheduled requests create `data_requests` rows, initiators fan work out, processors pull remote raster inputs, compute stats and outputs, then write metadata to D1 and files to R2.
+
+Supported sources in the current codebase:
+
+- `ecostress`
+- `landsat`
+
+## Main app surfaces
+
+- `/` — map view
+- `/feature/[id]` — per-feature detail page
+- `/archive/[id]` — feature archive page
+- `/admin/*` — protected admin pages for requests, jobs, features, and settings
+
+## Main API routes
+
+- `/api/polygons`
+- `/api/feature/[id]/get_dates`
+- `/api/feature/[id]/stats`
+- `/api/feature/[id]/archive`
+- `/api/feature/[id]/temperature`
+- `/api/feature/[id]/temperature/[date]`
+- `/api/feature/[id]/parquet`
+- `/api/feature/[id]/tif/[date]/[scale]`
+- `/api/feature/[id]/tif/[date]/file`
+- `/api/admin/requests`
+- `/api/admin/jobs`
+- `/api/admin/features`
+- `/api/admin/settings`
+- `/api/admin/trigger`
+
+## Development commands
 
 ```bash
 npm install
+npm run dev                    # Frontend only at http://localhost:5173
+npm run wrangler:dev           # Full stack with local D1 + remote R2 at http://localhost:8788
+npm run wrangler:dev:remote    # Full stack against remote D1 + remote R2 at http://localhost:8788
+npm run lint                   # Svelte + TypeScript checks
+uv run pytest tests/ -v        # Lambda unit tests
+```
 
-# First-time setup: seed local database from prod
+## Local data and migrations
+
+Local D1 lives in `.wrangler/state/v3/d1/`.
+
+```bash
+npm run db:export              # Export remote D1 to seed.sql
+npm run db:seed                # Reset local D1 and apply seed.sql
+npm run db:migrate:local       # Apply migrations locally
+npm run db:migrate:remote      # Apply migrations remotely
+npm run r2:seed:local          # Seed local R2 with static assets
+```
+
+Typical local setup:
+
+```bash
+npm install
 npm run db:export
 npm run db:seed
-
-# Start development server (local D1 + remote R2)
-npm run wrangler:dev    # http://localhost:8788
+npm run r2:seed:local
+npm run wrangler:dev
 ```
 
-## Development
+## Running processors locally
 
-### Local Database Staging
+`local_fill` runs the ingestion pipeline in-process for a single feature and date range without SQS.
 
-Local development uses a local D1 database with remote R2 for file access. This allows testing schema changes without affecting production.
+Prerequisites:
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Frontend only (no D1/R2) at :5173 |
-| `npm run wrangler:dev` | Local D1 + remote R2 at :8788 |
-| `npm run wrangler:dev:remote` | Full prod (remote D1 + R2) at :8788 |
-| `uv run pytest tests/ -v` | Run Lambda unit tests |
+- NASA Earthdata credentials in `~/.netrc` or env vars
+- for cloud runtime, the required R2/D1 credentials in `lambda_functions/.env`
 
-### Database Commands
-
-| Command | Description |
-|---------|-------------|
-| `npm run db:export` | Export prod D1 → `seed.sql` |
-| `npm run db:seed` | Apply migrations + seed to local D1 |
-| `npm run db:migrate:local` | Apply migrations locally |
-| `npm run db:migrate:remote` | Apply migrations to prod |
-
-### Schema Change Workflow
-
-1. Create migration file in `migrations/`
-2. `npm run db:migrate:local` — test locally
-3. `npm run wrangler:dev` — verify with frontend
-4. `npm run db:migrate:remote` — deploy to prod
-
-### Refresh Local Data
+Examples:
 
 ```bash
-npm run db:export && npm run db:seed
+cd lambda_functions
+
+# Write to cloud resources
+uv run python -m local_fill --source ecostress --feature NamTheun2 --start-date 2026-03-15
+
+# Write to local Wrangler D1 + R2
+uv run python -m local_fill --runtime local --source ecostress --feature NamTheun2 --start-date 2026-03-15
+uv run python -m local_fill --runtime local --source landsat --feature Magat --start-date 2024-12-27
 ```
 
-## Deployment
-
-Deployment is automated via GitHub Actions on push to `main`.
-
-### Required GitHub Secrets
-
-| Secret | Description |
-|--------|-------------|
-| `AWS_ACCESS_KEY_ID` | AWS credentials for Lambda/ECR |
-| `AWS_SECRET_ACCESS_KEY` | AWS credentials |
-| `CLOUDFLARE_API_TOKEN` | Cloudflare API token (D1, R2, Pages) |
-| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID |
-| `R2_BUCKET_NAME` | R2 bucket name |
-| `R2_ACCESS_KEY_ID` | R2 credentials for Lambda |
-| `R2_SECRET_ACCESS_KEY` | R2 credentials |
-| `R2_ENDPOINT` | R2 S3-compatible endpoint |
-| `APPEEARS_USER` | NASA AppEEARS credentials |
-| `APPEEARS_PASS` | NASA AppEEARS credentials |
-| `PAGES_DOMAIN` | Production domain (e.g., `sat-water-temps.pages.dev`) |
-
-### Manual Deployment
+Help:
 
 ```bash
-# Frontend (Cloudflare Pages)
+cd lambda_functions
+uv run python -m local_fill --help
+```
+
+## Authentication
+
+Admin routes use Auth.js with AWS Cognito.
+
+- Route protection lives in `src/hooks.server.ts`
+- Auth configuration lives in `src/auth.ts`
+- Local setup helper: `./scripts/setup-dev-auth.sh`
+
+## Deploy
+
+```bash
 npm run deploy
-
-# Backend + Infrastructure (AWS Lambda, Cognito, etc.)
 cd terraform && terraform apply
 ```
 
-### Post-Deployment: Create Admin User
+`npm run deploy` publishes the Cloudflare Pages app. Terraform manages the AWS Lambda infrastructure and Cognito resources.
 
-After first deploy, create an admin user for the `/admin` dashboard:
+## Key files
 
-1. Go to AWS Console → Cognito → User Pools
-2. Select `eco-water-temps-admin-pool`
-3. Users → Create User
-4. Enter email and temporary password
+- `src/lib/db.ts` — D1 query helpers used by API routes
+- `src/routes/api/` — SvelteKit server routes
+- `lambda_functions/ecostress/` — ECOSTRESS initiator and processor
+- `lambda_functions/landsat/` — Landsat initiator and processor
+- `lambda_functions/common/` — shared storage, raster, metadata, and parquet helpers
+- `lambda_functions/local_fill/` — local CLI entrypoint
+- `wrangler.toml` — Cloudflare bindings and Pages config
 
-## Admin Authentication
+## More context
 
-Admin routes (`/admin/*`) are protected by AWS Cognito via Auth.js.
-
-### Local Development with Auth
-
-After deploying, run the setup script to create `.dev.vars`:
-
-```bash
-./scripts/setup-dev-auth.sh
-```
-
-This fetches Cognito credentials from Terraform and creates the `.dev.vars` file automatically.
-
-## Architecture
-
-- **Frontend**: SvelteKit on Cloudflare Pages
-- **Database**: Cloudflare D1 (metadata) + R2 (CSV/TIF/PNG files)
-- **Backend**: AWS Lambda + Step Functions for ECOSTRESS data processing
-- **Auth**: AWS Cognito (ap-southeast-1) via Auth.js
+- [CLAUDE.md](./CLAUDE.md) — contributor/agent notes
+- [docs/LOCAL_DEVELOPMENT.md](./docs/LOCAL_DEVELOPMENT.md) — detailed local workflow
+- [HYBRID_ARCHITECTURE.md](./HYBRID_ARCHITECTURE.md) — D1/R2 storage design notes

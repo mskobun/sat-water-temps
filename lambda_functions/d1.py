@@ -17,7 +17,15 @@ def query_d1(sql: str, params: List = None, fatal: bool = True) -> Dict:
     When fatal=True (default), raises D1Error on failure instead of
     returning {"success": False}. This lets SQS-triggered Lambdas
     fail loudly so the message gets retried.
+
+    When ``PROCESSOR_RUNTIME=local``, runs ``wrangler d1 execute --local`` instead
+    (see :mod:`common.local_wrangler`).
     """
+    if os.environ.get("PROCESSOR_RUNTIME", "cloud").lower() == "local":
+        from common.local_wrangler import query_d1_via_wrangler
+
+        return query_d1_via_wrangler(sql, params, fatal=fatal)
+
     d1_db_id = os.environ.get("D1_DATABASE_ID")
     cf_account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
     cf_api_token = os.environ.get("CLOUDFLARE_API_TOKEN")

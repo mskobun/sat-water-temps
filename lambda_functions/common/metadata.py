@@ -62,18 +62,19 @@ def insert_metadata_to_d1(
     feature_params = [feature_id, name, location, date, int(time.time())]
 
     with xray_recorder.capture("d1_insert_feature") as subsegment:
-        subsegment.put_metadata("feature_id", feature_id)
+        if subsegment is not None:
+            subsegment.put_metadata("feature_id", feature_id)
         query_d1(feature_sql, feature_params)
 
     # Now insert metadata with file paths (after feature exists)
     meta_sql = """
     INSERT OR REPLACE INTO temperature_metadata
     (feature_id, date, min_temp, max_temp, mean_temp, median_temp, std_dev,
-     data_points, water_pixel_count, land_pixel_count, wtoff,
+     data_points, water_pixel_count, land_pixel_count,
      csv_path, tif_path, png_path, filter_stats, source, pixel_size, pixel_size_x,
      parquet_path, source_crs, transform_a, transform_b, transform_c, transform_d,
      transform_e, transform_f)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
 
     # Serialize filter_stats to JSON
@@ -91,7 +92,6 @@ def insert_metadata_to_d1(
         metadata.get("data_points", 0),
         metadata.get("water_pixel_count", 0),
         metadata.get("land_pixel_count", 0),
-        1 if metadata.get("wtoff", False) else 0,
         csv_path,
         tif_path,
         png_path,
@@ -109,11 +109,12 @@ def insert_metadata_to_d1(
         tf.get("f"),
     ]
     with xray_recorder.capture("d1_insert_temperature_metadata") as subsegment:
-        subsegment.put_metadata("feature_id", feature_id)
-        subsegment.put_metadata("date", date)
-        subsegment.put_metadata(
-            "has_filter_stats", bool(filter_stats_json and filter_stats_json != "{}")
-        )
+        if subsegment is not None:
+            subsegment.put_metadata("feature_id", feature_id)
+            subsegment.put_metadata("date", date)
+            subsegment.put_metadata(
+                "has_filter_stats", bool(filter_stats_json and filter_stats_json != "{}")
+            )
         query_d1(meta_sql, meta_params)
 
     print(f"✓ Inserted metadata to D1 with R2 paths")
