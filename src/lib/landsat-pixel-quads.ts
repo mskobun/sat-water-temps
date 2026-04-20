@@ -68,6 +68,35 @@ export function computeLandsatQuadsFlat(
 	return out;
 }
 
+/**
+ * Axis-aligned rectangular quads around pixel centers, WGS84. Output layout matches
+ * {@link computeLandsatQuadsFlat}: 8 floats per pixel (4 corners CCW from lower-left),
+ * ready for {@link flatQuadsToPolygons}.
+ */
+export function computeRectQuadsFlat(
+	triplets: Float64Array,
+	halfPixelX: number,
+	halfPixelY: number,
+	count: number
+): Float64Array {
+	const out = new Float64Array(count * 8);
+	for (let i = 0; i < count; i++) {
+		const ti = i * 3;
+		const lng = triplets[ti]!;
+		const lat = triplets[ti + 1]!;
+		const x0 = lng - halfPixelX;
+		const x1 = lng + halfPixelX;
+		const y0 = lat - halfPixelY;
+		const y1 = lat + halfPixelY;
+		const o = i * 8;
+		out[o]     = x0; out[o + 1] = y0;
+		out[o + 2] = x1; out[o + 3] = y0;
+		out[o + 4] = x1; out[o + 5] = y1;
+		out[o + 6] = x0; out[o + 7] = y1;
+	}
+	return out;
+}
+
 /** Unpack flat buffer from {@link computeLandsatQuadsFlat} (cheap; runs on main thread). */
 export function flatQuadsToPolygons(flat: Float64Array, count: number): [number, number][][] {
 	const polys: [number, number][][] = new Array(count);

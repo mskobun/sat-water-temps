@@ -1,4 +1,5 @@
 import * as duckdb from '@duckdb/duckdb-wasm';
+import type { Table } from 'apache-arrow';
 
 // Use runtime CDN assets so large WASM binaries are not emitted into
 // SvelteKit/Pages build artifacts (Cloudflare Pages limit: 25 MiB/file).
@@ -296,7 +297,7 @@ export async function getPointsForDate(
 	let hasRowCol: boolean | null = null;
 
 	for (const file of feature.files) {
-		let table;
+		let table: Table;
 		if (hasRowCol !== false) {
 			try {
 				table = await withConnection(source, (connection) =>
@@ -327,20 +328,27 @@ export async function getPointsForDate(
 			);
 		}
 
-		if (table.numRows === 0) continue;
+		const numRows = table.numRows;
+		if (numRows === 0) continue;
 		const longitude = table.getChild('longitude');
 		const latitude = table.getChild('latitude');
 		const temperature = table.getChild('temperature');
 		if (!longitude || !latitude || !temperature) continue;
 
-		const chunk = new Float64Array(table.numRows * 3);
-		let offset = 0;
-		for (let i = 0; i < table.numRows; i++) {
-			chunk[offset++] = Number(longitude.get(i));
-			chunk[offset++] = Number(latitude.get(i));
-			chunk[offset++] = Number(temperature.get(i));
+		// Arrow Vector.toArray() on a primitive numeric column returns a concatenated
+		// TypedArray. Avoids per-row .get(i) virtual dispatch (was ~18 s on main for large features).
+		const lngArr = longitude.toArray() as Float64Array;
+		const latArr = latitude.toArray() as Float64Array;
+		const tempArr = temperature.toArray() as Float64Array;
+
+		const chunk = new Float64Array(numRows * 3);
+		for (let i = 0; i < numRows; i++) {
+			const o = i * 3;
+			chunk[o] = lngArr[i];
+			chunk[o + 1] = latArr[i];
+			chunk[o + 2] = tempArr[i];
 		}
-		totalRows += table.numRows;
+		totalRows += numRows;
 		chunks.push(chunk);
 
 		if (hasRowCol === true) {
@@ -348,25 +356,17 @@ export async function getPointsForDate(
 			const colChild = table.getChild('col');
 			if (!rowChild || !colChild) {
 				hasRowCol = false;
+			} else if (rowChild.nullCount > 0 || colChild.nullCount > 0) {
+				hasRowCol = false;
 			} else {
-				const rc = new Int32Array(table.numRows * 2);
-				let ro = 0;
-				let allValid = true;
-				for (let i = 0; i < table.numRows; i++) {
-					const r = rowChild.get(i);
-					const c = colChild.get(i);
-					if (r == null || c == null) {
-						allValid = false;
-						break;
-					}
-					rc[ro++] = Number(r);
-					rc[ro++] = Number(c);
+				const rowArr = rowChild.toArray() as ArrayLike<number | bigint>;
+				const colArr = colChild.toArray() as ArrayLike<number | bigint>;
+				const rc = new Int32Array(numRows * 2);
+				for (let i = 0; i < numRows; i++) {
+					rc[i * 2] = Number(rowArr[i]);
+					rc[i * 2 + 1] = Number(colArr[i]);
 				}
-				if (allValid) {
-					rowColChunks.push(rc);
-				} else {
-					hasRowCol = false;
-				}
+				rowColChunks.push(rc);
 			}
 		}
 	}
@@ -463,7 +463,8 @@ export async function getPointHistory(
 
 		const table = await withConnection(source, (connection) => connection.query(query));
 
-		if (table.numRows === 0) continue;
+		const numRows = table.numRows;
+		if (numRows === 0) continue;
 
 		const dateVector = table.getChild('date');
 		const longitudeVector = table.getChild('longitude');
@@ -477,22 +478,32 @@ export async function getPointHistory(
 		const rowVector = table.getChild('row');
 		const colVector = table.getChild('col');
 
-		for (let i = 0; i < table.numRows; i++) {
+		// Materialize primitive columns as typed arrays in one shot.
+		const lngArr = longitudeVector.toArray() as Float64Array;
+		const latArr = latitudeVector.toArray() as Float64Array;
+		const tempArr = temperatureVector.toArray() as Float64Array;
+		const distArr = distanceVector.toArray() as Float64Array;
+		const rowArr =
+			rowVector && rowVector.nullCount === 0
+				? (rowVector.toArray() as ArrayLike<number | bigint>)
+				: null;
+		const colArr =
+			colVector && colVector.nullCount === 0
+				? (colVector.toArray() as ArrayLike<number | bigint>)
+				: null;
+
+		for (let i = 0; i < numRows; i++) {
 			const entry: PointHistoryEntry = {
 				date: arrowDateCellToApiIso(dateVector.get(i)),
-				longitude: Number(longitudeVector.get(i)),
-				latitude: Number(latitudeVector.get(i)),
-				temperature: Number(temperatureVector.get(i)),
-				distance: Number(distanceVector.get(i)),
+				longitude: lngArr[i],
+				latitude: latArr[i],
+				temperature: tempArr[i],
+				distance: distArr[i],
 				source
 			};
-			if (rowVector && colVector) {
-				const rowVal = rowVector.get(i);
-				const colVal = colVector.get(i);
-				if (rowVal != null && colVal != null) {
-					entry.row = Number(rowVal);
-					entry.col = Number(colVal);
-				}
+			if (rowArr && colArr) {
+				entry.row = Number(rowArr[i]);
+				entry.col = Number(colArr[i]);
 			}
 			history.push(entry);
 		}
