@@ -1,0 +1,77 @@
+segp:
+  title: "Web-based System for Automated Retrieval and Analysis of Satellite-Based Water Temperature Data"
+  author: ["Abdullah Usmani", "Darren Raj Manuel Raj", "Jephtha Ashter Tandri", "Muhammad Ahmad Suhail", "Muhammad Syukran Shabaruddin"]
+  type: "report"
+  date: 2025
+proposal:
+  title: "Project Proposal: Satellite Water Temperature Web Application Enhancement"
+  author: "Maksim Skobun"
+  type: "report"
+  date: 2025
+heroku-pricing:
+  title: "Heroku Pricing"  
+  author: "Heroku"
+  type: "web"
+  url:
+    value: "https://www.heroku.com/pricing"
+    date: 2025-12-31
+supabase-pricing:
+  title: "Supabase Pricing"
+  author: "Supabase"
+  type: "web"
+  url:
+    value: "https://www.supabase.com/pricing"
+    date: 2025-12-31
+serverless-compiuting:
+  title: "Serverless computing: economic and architectural impact"
+  author: ["G. Adzic", "R. Chatley"]
+  url: "https://www.doc.ic.ac.uk/~rbc/papers/fse-serverless-17.pdf"
+  type: "article"
+infra-as-code:
+  title: "Infrastructure as Code: Managing Servers in the Cloud"
+  author: "K. Morris"
+  type: "book"
+  publisher: "O'Reilly Media"
+  date: 2016
+ecostress:
+  title: "ECOsystem Spaceborne Thermal Radiometer Experiment on Space Station (ECOSTRESS)"
+  author: "NASA Jet Propulsion Laboratory"
+  type: "web"
+  url:
+    value: "https://ecostress.jpl.nasa.gov/"
+    date: 2025-12-31
+appeears:
+  title: "Application for Extracting and Exploring Analysis Ready Samples (AppEEARS)"
+  author: "NASA Land Processes Distributed Active Archive Center"
+  type: "web"
+  url:
+    value: "https://appeears.earthdatacloud.nasa.gov/"
+    date: 2025-12-31
+gitops:
+  title: "Guide To GitOps"
+  author: "Weaveworks"
+  type: "web"
+  url:
+    value: "https://www.gitops.tech/"
+    date: 2025-12-31
+aws-lambda:
+  title: "AWS Lambda Documentation"
+  author: "Amazon Web Services"
+  type: "web"
+  url:
+    value: "https://docs.aws.amazon.com/lambda/"
+    date: 2025-12-31
+cloudflare-workers:
+  title: "How Workers works"
+  author: "Cloudflare"
+  type: "web"
+  url:
+    value: "https://developers.cloudflare.com/workers/reference/how-workers-works/"
+    date: 2025-12-31
+exponential-backoff:
+  title: "Timeouts, retries, and backoff with jitter"
+  author: "Amazon Web Services"
+  type: "web"
+  url:
+    value: "https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/"
+    date: 2025-12-31
