@@ -48,7 +48,7 @@ npx wrangler d1 migrations apply sat-water-temps-db --local
 
 **Note**: The local database starts empty. You can either:
 - Use the remote database (recommended for testing with real data)
-- Run the migration script to populate local D1: `python migrate_csv_to_d1.py`
+- Export and seed production data with `npm run db:export` followed by `npm run db:seed`
 
 ### 4. Run SvelteKit dev server
 
@@ -233,7 +233,7 @@ npx wrangler d1 execute sat-water-temps-db --remote --command="SELECT * FROM fea
 ### Local D1 database is empty
 - Run migrations: `npx wrangler d1 migrations apply sat-water-temps-db --local`
 - Or use remote database: remove `--local` flag
-- Or populate with migration script: `python migrate_csv_to_d1.py`
+- Or seed local data with `npm run db:export && npm run db:seed`
 
 ### Port already in use
 - Change port: `npx wrangler pages dev .svelte-kit/cloudflare --port=8789`
@@ -278,4 +278,4 @@ When developing API routes:
 - Fetch CSV files from R2: `platform.env.R2_DATA`
 - See `src/lib/db.ts` for helper functions
 
-For more details, see [HYBRID_ARCHITECTURE.md](./HYBRID_ARCHITECTURE.md).
+For more details, see [HYBRID_ARCHITECTURE.md](../HYBRID_ARCHITECTURE.md).
