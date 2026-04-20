@@ -49,6 +49,8 @@ resource "aws_lambda_function" "processor_lambda" {
   role          = aws_iam_role.lambda_role.arn
   package_type  = "Image"
   image_uri     = "${aws_ecr_repository.lambda_repo.repository_url}@${data.aws_ecr_image.lambda_image.image_digest}"
+  # Keep processor concurrency bounded because higher fan-out can overload Cloudflare D1.
+  reserved_concurrent_executions = 50
 
   image_config {
     command = ["processor.handler"]
@@ -186,6 +188,11 @@ resource "aws_lambda_event_source_mapping" "sqs_trigger" {
   function_name                      = aws_lambda_function.processor_lambda.arn
   batch_size                         = 5
   maximum_batching_window_in_seconds = 10
+
+  # Match the Lambda cap so SQS polling does not drive concurrency high enough to overload D1.
+  scaling_config {
+    maximum_concurrency = 50
+  }
 
   function_response_types = ["ReportBatchItemFailures"]
 }
