@@ -5,7 +5,6 @@
 	import FeatureSidebarSnapshot from '$lib/components/feature-sidebar/FeatureSidebarSnapshot.svelte';
 	import FeatureSidebarTemporalChart from '$lib/components/feature-sidebar/FeatureSidebarTemporalChart.svelte';
 	import FeatureSidebarDistribution from '$lib/components/feature-sidebar/FeatureSidebarDistribution.svelte';
-	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Spinner } from '$lib/components/ui/spinner';
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import { Separator } from '$lib/components/ui/separator';
@@ -23,7 +22,6 @@
 		data_points: number | null;
 		water_pixel_count: number | null;
 		land_pixel_count: number | null;
-		wtoff: boolean;
 	};
 
 	export let featureId: string;
@@ -37,8 +35,6 @@
 	export let histogramData: Array<{ range: string; count: number }> = [];
 	// Temperature unit (shared with parent for tooltip)
 	export let currentUnit: 'Kelvin' | 'Celsius' | 'Fahrenheit' = 'Celsius';
-	// Water off status (passed from parent, fetched with temperature data)
-	export let waterOff: boolean = false;
 	export let temperatureLoading: boolean = false;
 	export let initialDate: string = '';
 	export let initialFilterMin: number | null = null;
@@ -123,7 +119,7 @@
 		selectedDate = value;
 		dataSource = getSourceForDate(value);
 		dispatch('dateChange', selectedDate);
-		// Temperature data (including waterOff) is loaded by parent via handleDateChange
+		// Temperature data is loaded by parent via handleDateChange
 	}
 
 	function handleColorScaleChange(value: 'relative' | 'fixed' | 'gray') {
@@ -200,12 +196,6 @@
 					observationCount={dates.length}
 					showAdminActions={Boolean(session?.user)}
 				/>
-
-			{#if waterOff}
-				<Alert variant="destructive" class="py-2">
-					<AlertDescription class="text-sm">Water not detected — data may include land pixels.</AlertDescription>
-				</Alert>
-			{/if}
 
 				<FeatureSidebarOverlayControls
 					bind:this={overlayControlsRef}

@@ -2,7 +2,6 @@ import type { AffineTransform } from '$lib/landsat-pixel-quads';
 
 export interface TemperatureMetadata {
 	date: string;
-	wtoff: boolean;
 	source: 'ecostress' | 'landsat';
 	pixelSize: number | null;
 	pixelSizeX: number | null;
@@ -36,7 +35,6 @@ export async function fetchTemperatureMetadata(
 
 	const meta: TemperatureMetadata = {
 		date: raw.date,
-		wtoff: raw.wtoff || false,
 		source: raw.source === 'landsat' ? 'landsat' : 'ecostress',
 		pixelSize: raw.pixel_size ?? null,
 		pixelSizeX: raw.pixel_size_x ?? null,

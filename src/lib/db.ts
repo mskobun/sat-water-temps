@@ -5,7 +5,6 @@ import type { D1Database } from '@cloudflare/workers-types';
 /** D1-only observation metadata (no CSV parsing). */
 export type ObservationMeta = {
   date: string;
-  wtoff: boolean;
   source: string;
   pixel_size: number | null;
   pixel_size_x: number | null;
@@ -28,7 +27,7 @@ export async function queryObservationMeta(
   try {
     const row = await db
       .prepare(
-        `SELECT wtoff, source, pixel_size, pixel_size_x,
+        `SELECT source, pixel_size, pixel_size_x,
          source_crs, transform_a, transform_b, transform_c, transform_d, transform_e, transform_f
          FROM temperature_metadata WHERE feature_id = ? AND date = ?`
       )
@@ -46,7 +45,6 @@ export async function queryObservationMeta(
 
     return {
       date,
-      wtoff: Boolean(row.wtoff),
       source: String(row.source || 'ecostress'),
       pixel_size,
       pixel_size_x,
@@ -88,7 +86,6 @@ export type FeatureStatsHistoryEntry = {
   data_points: number | null;
   water_pixel_count: number | null;
   land_pixel_count: number | null;
-  wtoff: boolean;
 };
 
 export async function getFeatureArchive(
@@ -134,8 +131,7 @@ export async function getFeatureStatsHistory(
           std_dev,
           data_points,
           water_pixel_count,
-          land_pixel_count,
-          wtoff
+          land_pixel_count
          FROM temperature_metadata
          WHERE feature_id = ?
          ORDER BY date DESC`
@@ -156,8 +152,7 @@ export async function getFeatureStatsHistory(
       std_dev: num(r.std_dev),
       data_points: num(r.data_points),
       water_pixel_count: num(r.water_pixel_count),
-      land_pixel_count: num(r.land_pixel_count),
-      wtoff: Boolean(r.wtoff)
+      land_pixel_count: num(r.land_pixel_count)
     }));
   } catch (err) {
     console.error('D1 query error:', err);
