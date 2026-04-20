@@ -5,6 +5,8 @@
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import { Badge } from '$lib/components/ui/badge';
 	import SourceBadge from '$lib/components/SourceBadge.svelte';
+	import Sparkline from '$lib/components/Sparkline.svelte';
+	import UserMenu from '$lib/components/UserMenu.svelte';
 	import * as Table from '$lib/components/ui/table';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { formatShortDate } from '$lib/date-utils';
@@ -16,10 +18,13 @@
 	import ArchiveIcon from '@lucide/svelte/icons/archive';
 	import type { DashboardFeature } from '../api/dashboard/+server';
 
+	type SortKey = keyof DashboardFeature | 'change';
+
 	let features: DashboardFeature[] = $state([]);
 	let loading = $state(true);
+	let error = $state<string | null>(null);
 	let searchQuery = $state('');
-	let sortKey = $state<keyof DashboardFeature>('name');
+	let sortKey = $state<SortKey>('name');
 	let sortDirection = $state<'asc' | 'desc'>('asc');
 	let unit = $state<'C' | 'F'>('C');
 
@@ -45,6 +50,16 @@
 
 	const unitSymbol = $derived(unit === 'C' ? '\u00B0C' : '\u00B0F');
 
+	function sortValue(f: DashboardFeature, key: SortKey): string | number | null {
+		if (key === 'change') {
+			if (f.latest_mean_temp == null || f.prev_mean_temp == null) return null;
+			return f.latest_mean_temp - f.prev_mean_temp;
+		}
+		const v = f[key];
+		if (Array.isArray(v)) return null;
+		return v;
+	}
+
 	const filteredFeatures = $derived.by(() => {
 		let result = features;
 		if (searchQuery.trim()) {
@@ -57,8 +72,8 @@
 			);
 		}
 		return result.toSorted((a, b) => {
-			const aVal = a[sortKey];
-			const bVal = b[sortKey];
+			const aVal = sortValue(a, sortKey);
+			const bVal = sortValue(b, sortKey);
 			if (aVal == null && bVal == null) return 0;
 			if (aVal == null) return 1;
 			if (bVal == null) return -1;
@@ -72,7 +87,7 @@
 		});
 	});
 
-	function toggleSort(key: keyof DashboardFeature) {
+	function toggleSort(key: SortKey) {
 		if (sortKey === key) {
 			sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
 		} else {
@@ -81,14 +96,7 @@
 		}
 	}
 
-	// Summary stats
 	const totalFeatures = $derived(features.length);
-	const featuresWithData = $derived(features.filter((f) => f.latest_date).length);
-	const avgMeanTemp = $derived.by(() => {
-		const temps = features.filter((f) => f.latest_mean_temp != null).map((f) => f.latest_mean_temp!);
-		if (temps.length === 0) return null;
-		return temps.reduce((a, b) => a + b, 0) / temps.length;
-	});
 	const staleCount = $derived(
 		features.filter((f) => f.days_since_observation != null && f.days_since_observation > 14).length
 	);
@@ -107,93 +115,85 @@
 		return `${days}d ago`;
 	}
 
-	onMount(async () => {
+	async function load() {
+		loading = true;
+		error = null;
 		try {
 			const res = await fetch('/api/dashboard');
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const data = await res.json();
 			features = data.features || [];
 		} catch (err) {
 			console.error('Error loading dashboard:', err);
+			error = "Couldn't load dashboard.";
 		} finally {
 			loading = false;
 		}
-	});
+	}
+
+	onMount(load);
 </script>
 
 <svelte:head>
 	<title>Dashboard - Satellite Water Temps</title>
 </svelte:head>
 
-<div class="min-h-screen bg-background text-foreground">
+<div class="min-h-screen bg-background text-foreground relative">
+	<UserMenu />
 	<!-- Header -->
-	<header class="border-b px-6 py-5 flex items-center justify-between">
+	<header class="border-b px-6 py-5 pr-20 flex items-center justify-between">
 		<div>
 			<h1 class="text-2xl font-bold">Water Body Dashboard</h1>
 			<p class="text-sm text-muted-foreground mt-1">
 				Overview of all monitored water bodies
 			</p>
 		</div>
-		<div class="flex items-center gap-2">
-			<div class="flex items-center gap-1 rounded-lg border p-1 bg-muted/50">
-				<button
-					class="px-2 py-0.5 text-sm rounded-md transition-colors {unit === 'C'
-						? 'bg-background shadow-sm font-medium'
-						: 'text-muted-foreground hover:text-foreground'}"
-					onclick={() => (unit = 'C')}
-				>
-					&deg;C
-				</button>
-				<button
-					class="px-2 py-0.5 text-sm rounded-md transition-colors {unit === 'F'
-						? 'bg-background shadow-sm font-medium'
-						: 'text-muted-foreground hover:text-foreground'}"
-					onclick={() => (unit = 'F')}
-				>
-					&deg;F
-				</button>
-			</div>
-			<Button variant="outline" href="/">
-				<MapIcon class="size-4 mr-2" />
-				Map
-			</Button>
+		<div class="flex items-center gap-1 rounded-lg border p-1 bg-muted/50">
+			<button
+				class="px-2 py-0.5 text-sm rounded-md transition-colors {unit === 'C'
+					? 'bg-background shadow-sm font-medium'
+					: 'text-muted-foreground hover:text-foreground'}"
+				onclick={() => (unit = 'C')}
+			>
+				&deg;C
+			</button>
+			<button
+				class="px-2 py-0.5 text-sm rounded-md transition-colors {unit === 'F'
+					? 'bg-background shadow-sm font-medium'
+					: 'text-muted-foreground hover:text-foreground'}"
+				onclick={() => (unit = 'F')}
+			>
+				&deg;F
+			</button>
 		</div>
 	</header>
 
 	<div class="w-[95%] mx-auto py-5">
-		<!-- Summary cards -->
-		{#if !loading}
-			<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-				<div class="rounded-lg border p-4">
-					<div class="text-sm text-muted-foreground">Total Features</div>
-					<div class="text-2xl font-bold mt-1">{totalFeatures}</div>
-				</div>
-				<div class="rounded-lg border p-4">
-					<div class="text-sm text-muted-foreground">With Data</div>
-					<div class="text-2xl font-bold mt-1">{featuresWithData}</div>
-				</div>
-				<div class="rounded-lg border p-4">
-					<div class="text-sm text-muted-foreground">Avg Temp</div>
-					<div class="text-2xl font-bold mt-1">
-						{avgMeanTemp != null ? convertTemp(avgMeanTemp) + unitSymbol : '--'}
-					</div>
-				</div>
-				<div class="rounded-lg border p-4">
-					<div class="text-sm text-muted-foreground">Stale (&gt;14d)</div>
-					<div class="text-2xl font-bold mt-1 {staleCount > 0 ? 'text-red-600 dark:text-red-400' : ''}">
-						{staleCount}
-					</div>
-				</div>
+		{#if error}
+			<div class="mb-4 flex items-center justify-between rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm">
+				<span class="text-destructive">{error}</span>
+				<Button variant="outline" size="sm" onclick={load}>Retry</Button>
 			</div>
 		{/if}
 
-		<!-- Search -->
-		<div class="relative mb-4 max-w-sm">
-			<SearchIcon class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-			<Input
-				placeholder="Filter water bodies..."
-				class="pl-9"
-				bind:value={searchQuery}
-			/>
+		<!-- Search + meta -->
+		<div class="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+			<div class="relative max-w-sm flex-1 min-w-[200px]">
+				<SearchIcon class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+				<Input
+					placeholder="Filter water bodies..."
+					class="pl-9"
+					bind:value={searchQuery}
+				/>
+			</div>
+			{#if !loading}
+				<div class="text-xs text-muted-foreground tabular-nums">
+					Showing {filteredFeatures.length} of {totalFeatures}
+					{#if staleCount > 0}
+						&middot; <span class="text-red-600 dark:text-red-400">{staleCount} stale (&gt;14d)</span>
+					{/if}
+				</div>
+			{/if}
 		</div>
 
 		<!-- Table -->
@@ -205,8 +205,9 @@
 							<Table.Head>Name</Table.Head>
 							<Table.Head>Type</Table.Head>
 							<Table.Head class="text-right">Mean Temp</Table.Head>
-							<Table.Head class="text-right">Range</Table.Head>
+							<Table.Head>Trend <span class="text-muted-foreground font-normal">(last 10)</span></Table.Head>
 							<Table.Head class="text-right">Change</Table.Head>
+							<Table.Head class="text-right">Range</Table.Head>
 							<Table.Head>Source</Table.Head>
 							<Table.Head class="text-right">Obs</Table.Head>
 							<Table.Head class="text-right">Freshness</Table.Head>
@@ -214,13 +215,14 @@
 						</Table.Row>
 					</Table.Header>
 					<Table.Body>
-						{#each Array(12) as _}
+						{#each Array(15) as _}
 							<Table.Row>
 								<Table.Cell><Skeleton class="h-4 w-28" /></Table.Cell>
 								<Table.Cell><Skeleton class="h-5 w-12 rounded-full" /></Table.Cell>
 								<Table.Cell><Skeleton class="h-4 w-14 ml-auto" /></Table.Cell>
-								<Table.Cell><Skeleton class="h-4 w-20 ml-auto" /></Table.Cell>
+								<Table.Cell><Skeleton class="h-[20px] w-20" /></Table.Cell>
 								<Table.Cell><Skeleton class="h-4 w-14 ml-auto" /></Table.Cell>
+								<Table.Cell><Skeleton class="h-4 w-20 ml-auto" /></Table.Cell>
 								<Table.Cell><Skeleton class="h-5 w-20 rounded-full" /></Table.Cell>
 								<Table.Cell><Skeleton class="h-4 w-8 ml-auto" /></Table.Cell>
 								<Table.Cell><Skeleton class="h-4 w-14 ml-auto" /></Table.Cell>
@@ -243,35 +245,40 @@
 				<Table.Root>
 					<Table.Header>
 						<Table.Row>
-							{@const sortableHead = (key: keyof DashboardFeature, label: string, align: string = '') => {
-								const active = sortKey === key;
-								return { key, label, align, active };
-							}}
 							{#each [
-								sortableHead('name', 'Name'),
-								sortableHead('location', 'Type'),
-								sortableHead('latest_mean_temp', 'Mean Temp', 'text-right'),
-								sortableHead('latest_min_temp', 'Range', 'text-right'),
-								sortableHead('latest_mean_temp', 'Change', 'text-right'),
-								sortableHead('latest_source', 'Source'),
-								sortableHead('observation_count', 'Obs', 'text-right'),
-								sortableHead('days_since_observation', 'Freshness', 'text-right'),
-							] as col, i}
+								{ key: 'name' as SortKey, label: 'Name', align: '', sortable: true },
+								{ key: 'location' as SortKey, label: 'Type', align: '', sortable: true },
+								{ key: 'latest_mean_temp' as SortKey, label: 'Mean Temp', align: 'text-right', sortable: true },
+								{ key: null, label: 'Trend', sublabel: 'last 10', align: '', sortable: false },
+								{ key: 'change' as SortKey, label: 'Change', align: 'text-right', sortable: true },
+								{ key: 'latest_min_temp' as SortKey, label: 'Range', align: 'text-right', sortable: true },
+								{ key: 'latest_source' as SortKey, label: 'Source', align: '', sortable: true },
+								{ key: 'observation_count' as SortKey, label: 'Obs', align: 'text-right', sortable: true },
+								{ key: 'days_since_observation' as SortKey, label: 'Freshness', align: 'text-right', sortable: true },
+							] as col}
 								<Table.Head class="{col.align} select-none">
-									<button
-										class="inline-flex items-center gap-1 hover:text-foreground transition-colors"
-										onclick={() => {
-											// Change column uses latest_mean_temp key but we handle it visually
-											if (i === 4) return; // Change is not independently sortable
-											toggleSort(col.key);
-										}}
-										disabled={i === 4}
-									>
-										{col.label}
-										{#if col.active && i !== 4}
-											<span class="text-xs">{sortDirection === 'asc' ? '\u2191' : '\u2193'}</span>
-										{/if}
-									</button>
+									{#if col.sortable && col.key}
+										{@const active = sortKey === col.key}
+										<button
+											class="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+											onclick={() => toggleSort(col.key!)}
+										>
+											{col.label}
+											<span
+												class="text-xs w-3 inline-block text-muted-foreground"
+												aria-hidden="true"
+											>
+												{active ? (sortDirection === 'asc' ? '\u2191' : '\u2193') : ''}
+											</span>
+										</button>
+									{:else}
+										<span class="inline-flex items-center gap-1">
+											{col.label}
+											{#if col.sublabel}
+												<span class="text-muted-foreground font-normal">({col.sublabel})</span>
+											{/if}
+										</span>
+									{/if}
 								</Table.Head>
 							{/each}
 							<Table.Head class="w-20"></Table.Head>
@@ -297,12 +304,8 @@
 								<Table.Cell class="text-right tabular-nums font-medium">
 									{convertTemp(feature.latest_mean_temp)}{feature.latest_mean_temp != null ? unitSymbol : ''}
 								</Table.Cell>
-								<Table.Cell class="text-right tabular-nums text-sm text-muted-foreground">
-									{#if feature.latest_min_temp != null && feature.latest_max_temp != null}
-										{convertTemp(feature.latest_min_temp)} - {convertTemp(feature.latest_max_temp)}
-									{:else}
-										--
-									{/if}
+								<Table.Cell>
+									<Sparkline values={feature.recent_means} />
 								</Table.Cell>
 								<Table.Cell class="text-right">
 									{#if delta != null}
@@ -318,6 +321,13 @@
 										</span>
 									{:else}
 										<span class="text-muted-foreground">--</span>
+									{/if}
+								</Table.Cell>
+								<Table.Cell class="text-right tabular-nums text-sm text-muted-foreground">
+									{#if feature.latest_min_temp != null && feature.latest_max_temp != null}
+										{convertTemp(feature.latest_min_temp)} – {convertTemp(feature.latest_max_temp)}
+									{:else}
+										--
 									{/if}
 								</Table.Cell>
 								<Table.Cell>
@@ -391,9 +401,6 @@
 					</Table.Body>
 				</Table.Root>
 			</div>
-			<p class="text-xs text-muted-foreground mt-2">
-				Showing {filteredFeatures.length} of {features.length} water bodies
-			</p>
 		{/if}
 	</div>
 </div>

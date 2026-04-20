@@ -9,6 +9,8 @@
 
 	let session = $derived($page.data.session);
 	let aboutOpen = $state(false);
+	let onDashboard = $derived($page.url.pathname.startsWith('/dashboard'));
+	let onMap = $derived(!onDashboard && !$page.url.pathname.startsWith('/admin') && !$page.url.pathname.startsWith('/archive'));
 
 	function handleSignOut() {
 		signOut({ callbackUrl: '/admin/login' });
@@ -26,12 +28,22 @@
 			{/snippet}
 		</Popover.Trigger>
 		<Popover.Content class="w-52 p-2" align="end">
-			<a
-				href="/dashboard"
-				class="block w-full text-left text-sm py-1.5 px-2 rounded hover:bg-muted"
-			>
-				Dashboard
-			</a>
+			{#if !onMap}
+				<a
+					href="/"
+					class="block w-full text-left text-sm py-1.5 px-2 rounded hover:bg-muted"
+				>
+					Map
+				</a>
+			{/if}
+			{#if !onDashboard}
+				<a
+					href="/dashboard"
+					class="block w-full text-left text-sm py-1.5 px-2 rounded hover:bg-muted"
+				>
+					Dashboard
+				</a>
+			{/if}
 			{#if session?.user}
 				<div class="px-2 py-1.5 text-xs text-muted-foreground truncate">
 					{session.user.email}

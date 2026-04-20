@@ -13,6 +13,7 @@ export type DashboardFeature = {
 	latest_source: string | null;
 	prev_mean_temp: number | null;
 	days_since_observation: number | null;
+	recent_means: number[];
 };
 
 export const GET: RequestHandler = async ({ platform }) => {
@@ -35,6 +36,15 @@ export const GET: RequestHandler = async ({ platform }) => {
 						tm.source,
 						ROW_NUMBER() OVER (PARTITION BY tm.feature_id ORDER BY tm.date DESC) as rn
 					FROM temperature_metadata tm
+				),
+				recent AS (
+					SELECT
+						feature_id,
+						json_group_array(mean_temp) as recent_means_json
+					FROM (
+						SELECT feature_id, mean_temp, rn FROM ranked WHERE rn <= 10 ORDER BY feature_id, rn
+					)
+					GROUP BY feature_id
 				)
 				SELECT
 					f.id as feature_id,
@@ -46,10 +56,12 @@ export const GET: RequestHandler = async ({ platform }) => {
 					r1.min_temp as latest_min_temp,
 					r1.max_temp as latest_max_temp,
 					r1.source as latest_source,
-					r2.mean_temp as prev_mean_temp
+					r2.mean_temp as prev_mean_temp,
+					rec.recent_means_json as recent_means_json
 				FROM features f
 				LEFT JOIN ranked r1 ON r1.feature_id = f.id AND r1.rn = 1
 				LEFT JOIN ranked r2 ON r2.feature_id = f.id AND r2.rn = 2
+				LEFT JOIN recent rec ON rec.feature_id = f.id
 				ORDER BY f.name
 			`)
 			.all();
@@ -66,6 +78,18 @@ export const GET: RequestHandler = async ({ platform }) => {
 			const num = (v: unknown) =>
 				v != null && v !== '' && !Number.isNaN(Number(v)) ? Number(v) : null;
 
+			let recent_means: number[] = [];
+			if (r.recent_means_json) {
+				try {
+					const parsed = JSON.parse(String(r.recent_means_json));
+					if (Array.isArray(parsed)) {
+						recent_means = parsed.filter((v): v is number => typeof v === 'number');
+					}
+				} catch {
+					recent_means = [];
+				}
+			}
+
 			return {
 				feature_id: String(r.feature_id),
 				name: String(r.name),
@@ -78,6 +102,7 @@ export const GET: RequestHandler = async ({ platform }) => {
 				latest_source: r.latest_source ? String(r.latest_source) : null,
 				prev_mean_temp: num(r.prev_mean_temp),
 				days_since_observation: daysSince,
+				recent_means,
 			};
 		});
 
