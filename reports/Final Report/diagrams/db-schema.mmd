@@ -1,0 +1,69 @@
+%% D1 Database Schema (live tables after migrations 0001..0022).
+%% Only the columns referenced in the report text are shown.
+erDiagram
+  features ||--o{ temperature_metadata : "has observations"
+  features ||--o{ processing_jobs      : "has jobs"
+  data_requests ||--o{ processing_jobs : "triggers jobs"
+
+  features {
+    TEXT id PK
+    TEXT name
+    TEXT location
+    TEXT latest_date
+    INTEGER last_updated
+  }
+
+  temperature_metadata {
+    TEXT feature_id PK "FK to features"
+    TEXT date PK
+    TEXT source "ecostress or landsat"
+    REAL min_temp
+    REAL max_temp
+    REAL mean_temp
+    INTEGER water_pixel_count
+    INTEGER land_pixel_count
+    TEXT csv_path "R2 key"
+    TEXT tif_path "R2 key"
+    TEXT png_path "R2 key"
+    TEXT parquet_path "R2 key"
+    REAL pixel_size_x
+    REAL pixel_size_y
+    TEXT source_crs
+    TEXT raster_geometry "GeoJSON bounds"
+  }
+
+  processing_jobs {
+    INTEGER id PK
+    TEXT job_type "scrape or process"
+    TEXT task_id "links to data_requests"
+    TEXT feature_id FK
+    TEXT date
+    TEXT status "started, success, failed, nodata"
+    INTEGER started_at
+    INTEGER completed_at
+    INTEGER duration_ms
+    TEXT error_message
+    TEXT filter_stats "JSON: per-bit counts"
+    TEXT metadata "JSON"
+  }
+
+  data_requests {
+    INTEGER id PK
+    TEXT source "ecostress or landsat"
+    TEXT task_id
+    TEXT trigger_type "timer or manual"
+    TEXT triggered_by
+    TEXT description
+    TEXT start_date
+    TEXT end_date
+    INTEGER scenes_count
+    INTEGER created_at
+    INTEGER dispatched_at
+    TEXT error_message
+  }
+
+  app_settings {
+    TEXT key PK
+    TEXT value
+    INTEGER updated_at
+  }

@@ -1,3 +1,10 @@
+leaflet:
+  title: "Leaflet — an open-source JavaScript library for mobile-friendly interactive maps"
+  author: "Agafonkin, Vladimir"
+  type: "web"
+  url:
+    value: "https://leafletjs.com"
+    date: 2026-04-23
 segp:
   title: "Web-based System for Automated Retrieval and Analysis of Satellite-Based Water Temperature Data"
   author: ["Abdullah Usmani", "Darren Raj Manuel Raj", "Jephtha Ashter Tandri", "Muhammad Ahmad Suhail", "Muhammad Syukran Shabaruddin"]
@@ -75,3 +82,322 @@ exponential-backoff:
   url:
     value: "https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/"
     date: 2025-12-31
+ndwi:
+  title: "The use of the Normalized Difference Water Index (NDWI) in the delineation of open water features"
+  author: "S. K. McFeeters"
+  type: "article"
+  date: 1996
+maplibre:
+  title: "MapLibre GL JS — Open-source fork of Mapbox GL JS"
+  author: "MapLibre Contributors"
+  type: "web"
+  url:
+    value: "https://maplibre.org/maplibre-gl-js/docs/"
+    date: 2026-04-21
+deckgl:
+  title: "deck.gl — WebGL2-powered visualization framework"
+  author: "Uber / OpenJS Foundation"
+  type: "web"
+  url:
+    value: "https://deck.gl/"
+    date: 2026-04-21
+sveltekit:
+  title: "SvelteKit Documentation"
+  author: "Svelte Contributors"
+  type: "web"
+  url:
+    value: "https://kit.svelte.dev/docs"
+    date: 2026-04-21
+authjs:
+  title: "Auth.js — Authentication for the Web"
+  author: "Auth.js Contributors"
+  type: "web"
+  url:
+    value: "https://authjs.dev/"
+    date: 2026-04-21
+cognito:
+  title: "Amazon Cognito User Pools Documentation"
+  author: "Amazon Web Services"
+  type: "web"
+  url:
+    value: "https://docs.aws.amazon.com/cognito/latest/developerguide/"
+    date: 2026-04-21
+terraform:
+  title: "Terraform Documentation"
+  author: "HashiCorp"
+  type: "web"
+  url:
+    value: "https://developer.hashicorp.com/terraform/docs"
+    date: 2026-04-21
+uv:
+  title: "uv — An extremely fast Python package and project manager"
+  author: "Astral Software"
+  type: "web"
+  url:
+    value: "https://docs.astral.sh/uv/"
+    date: 2026-04-21
+gam4water:
+  title: "GAM4Water: a tool for surface-water extent mapping using generalized additive models"
+  author: "GAM4Water Contributors"
+  type: "repository"
+  date: 2024
+ecostress-psd:
+  title: "ECOSTRESS Level-2 Land Surface Temperature and Emissivity Product Specification Document (PSD v1.1)"
+  author: ["G. C. Hulley", "S. J. Hook"]
+  type: "report"
+  publisher: "NASA Jet Propulsion Laboratory"
+  date: 2019
+landsat-c2-st:
+  title: "Landsat Collection 2 Level-2 Science Product Guide"
+  author: "U.S. Geological Survey"
+  type: "report"
+  url:
+    value: "https://www.usgs.gov/landsat-missions/landsat-collection-2-level-2-science-products"
+    date: 2026-04-22
+stac-spec:
+  title: "SpatioTemporal Asset Catalog Specification"
+  author: "STAC Contributors"
+  type: "web"
+  url:
+    value: "https://stacspec.org/"
+    date: 2026-04-22
+cog-spec:
+  title: "Cloud Optimized GeoTIFF Specification"
+  author: "Cloud Optimized GeoTIFF Working Group"
+  type: "web"
+  url:
+    value: "https://www.cogeo.org/"
+    date: 2026-04-22
+mvt-spec:
+  title: "Mapbox Vector Tile Specification 2.1"
+  author: "Mapbox"
+  type: "web"
+  url:
+    value: "https://github.com/mapbox/vector-tile-spec"
+    date: 2026-04-22
+duckdb-wasm:
+  title: "DuckDB-Wasm: Fast Analytical Processing for the Web"
+  author: ["A. Kohn", "D. Moritz", "M. Raasveldt", "H. Mühleisen", "T. Neumann"]
+  type: "article"
+  date: 2022
+  url:
+    value: "https://www.vldb.org/pvldb/vol15/p3574-kohn.pdf"
+    date: 2026-04-22
+parquet-spec:
+  title: "Apache Parquet File Format"
+  author: "Apache Software Foundation"
+  type: "web"
+  url:
+    value: "https://parquet.apache.org/docs/file-format/"
+    date: 2026-04-22
+rasterio:
+  title: "Rasterio: Geospatial Raster I/O for Python Programmers"
+  author: ["S. Gillies"]
+  type: "web"
+  url:
+    value: "https://rasterio.readthedocs.io/"
+    date: 2026-04-22
+shapely:
+  title: "Shapely: Manipulation and Analysis of Geometric Objects"
+  author: ["S. Gillies"]
+  type: "web"
+  url:
+    value: "https://shapely.readthedocs.io/"
+    date: 2026-04-22
+earthaccess:
+  title: "earthaccess: NASA Earthdata Search and Access for Python"
+  author: "NASA Openscapes"
+  type: "web"
+  url:
+    value: "https://earthaccess.readthedocs.io/"
+    date: 2026-04-22
+pystac-client:
+  title: "pystac-client: A Python client for STAC APIs"
+  author: "Radiant Earth Foundation"
+  type: "web"
+  url:
+    value: "https://pystac-client.readthedocs.io/"
+    date: 2026-04-22
+hampel-1974:
+  title: "The Influence Curve and Its Role in Robust Estimation"
+  author: "F. R. Hampel"
+  type: "article"
+  date: 1974
+shadcn-svelte:
+  title: "shadcn-svelte: Accessible and customisable components for Svelte"
+  author: "shadcn-svelte Contributors"
+  type: "web"
+  url:
+    value: "https://www.shadcn-svelte.com/"
+    date: 2026-04-22
+usgs-do-water:
+  title: "Dissolved Oxygen and Water"
+  author: "U.S. Geological Survey"
+  type: "web"
+  url:
+    value: "https://www.usgs.gov/water-science-school/science/dissolved-oxygen-and-water"
+    date: 2026-04-22
+reservoir-do-warming:
+  title: "Dynamics of oxygen evolution in a thermally stratified reservoir under climate warming"
+  author: ["Y. Wei", "M. Mi", "J. Peng", "Y. Xu", "C. Wang", "J. Wang", "Y. Gao", "A. Lorke"]
+  type: "article"
+  date: 2025
+  url:
+    value: "https://doi.org/10.1038/s41598-025-13432-2"
+    date: 2026-04-22
+hab-inland-waters:
+  title: "Harmful algal blooms in inland waters"
+  author: ["H. Ma", "A. M. Michalak", "X. Hou", "B. Qin"]
+  type: "article"
+  date: 2024
+  url:
+    value: "https://doi.org/10.1038/s43017-024-00578-2"
+    date: 2026-04-22
+mekong-climate-hydropower:
+  title: "Integrated impact assessment of climate change and hydropower operation on streamflow and inundation in the lower Mekong Basin"
+  author: ["S. Try", "L. P. Hoang", "F. T. T. Nhi", "A. E. Try", "S. Hak"]
+  type: "article"
+  date: 2023
+  url:
+    value: "https://doi.org/10.1186/s40645-023-00586-8"
+    date: 2026-04-22
+ecostress-l2t:
+  title: "ECOSTRESS Tiled Land Surface Temperature and Emissivity Instantaneous L2 Global 70 m V002"
+  author: "NASA"
+  type: "web"
+  url:
+    value: "https://data.nasa.gov/dataset/ecostress-tiled-land-surface-temperature-and-emissivity-instantaneous-l2-global-70-m-v002-09540"
+    date: 2026-04-22
+ecostress-orbit:
+  title: "ECOSTRESS Mission Information"
+  author: "NASA Jet Propulsion Laboratory"
+  type: "web"
+  url:
+    value: "https://ecostress.jpl.nasa.gov/"
+    date: 2026-04-22
+landsat-acquisition:
+  title: "Landsat Acquisition"
+  author: "U.S. Geological Survey"
+  type: "web"
+  url:
+    value: "https://landsat.usgs.gov/landsat_acq"
+    date: 2026-04-22
+modis-lst:
+  title: "MODIS/Terra Land Surface Temperature/Emissivity Daily L3 Global 1km SIN Grid V061"
+  author: "NASA Earthdata"
+  type: "web"
+  url:
+    value: "https://www.earthdata.nasa.gov/data/catalog/lpcloud-mod11a1-061"
+    date: 2026-04-23
+vercel-pricing:
+  title: "Vercel Pricing"
+  author: "Vercel"
+  type: "web"
+  url:
+    value: "https://vercel.com/pricing"
+    date: 2026-04-23
+netlify-pricing:
+  title: "Netlify Pricing"
+  author: "Netlify"
+  type: "web"
+  url:
+    value: "https://www.netlify.com/pricing/"
+    date: 2026-04-23
+aws-s3-pricing:
+  title: "Amazon S3 Pricing"
+  author: "Amazon Web Services"
+  type: "web"
+  url:
+    value: "https://aws.amazon.com/s3/pricing/"
+    date: 2026-04-23
+cloudflare-r2-pricing:
+  title: "Cloudflare R2 Pricing"
+  author: "Cloudflare"
+  type: "web"
+  url:
+    value: "https://developers.cloudflare.com/r2/pricing/"
+    date: 2026-04-22
+cloudflare-workers-pricing:
+  title: "Cloudflare Workers Pricing"
+  author: "Cloudflare"
+  type: "web"
+  url:
+    value: "https://developers.cloudflare.com/workers/platform/pricing/"
+    date: 2026-04-22
+cloudflare-d1-pricing:
+  title: "Cloudflare D1 Pricing"
+  author: "Cloudflare"
+  type: "web"
+  url:
+    value: "https://developers.cloudflare.com/d1/platform/pricing/"
+    date: 2026-04-22
+cloudflare-pages-limits:
+  title: "Cloudflare Pages Limits"
+  author: "Cloudflare"
+  type: "web"
+  url:
+    value: "https://developers.cloudflare.com/pages/platform/limits/"
+    date: 2026-04-22
+aws-lambda-quotas:
+  title: "AWS Lambda Quotas"
+  author: "Amazon Web Services"
+  type: "web"
+  url:
+    value: "https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html"
+    date: 2026-04-22
+aws-lambda-pricing:
+  title: "AWS Lambda Pricing"
+  author: "Amazon Web Services"
+  type: "web"
+  url:
+    value: "https://aws.amazon.com/lambda/pricing/"
+    date: 2026-04-22
+aws-ecr-pricing:
+  title: "Amazon ECR Pricing"
+  author: "Amazon Web Services"
+  type: "web"
+  url:
+    value: "https://aws.amazon.com/ecr/pricing/"
+    date: 2026-04-22
+aws-sqs-pricing:
+  title: "Amazon SQS Pricing"
+  author: "Amazon Web Services"
+  type: "web"
+  url:
+    value: "https://aws.amazon.com/sqs/pricing/"
+    date: 2026-04-22
+aws-batch:
+  title: "AWS Batch Documentation"
+  author: "Amazon Web Services"
+  type: "web"
+  url:
+    value: "https://docs.aws.amazon.com/batch/"
+    date: 2026-04-24
+aws-kinesis:
+  title: "Amazon Kinesis Data Streams Documentation"
+  author: "Amazon Web Services"
+  type: "web"
+  url:
+    value: "https://docs.aws.amazon.com/streams/latest/dev/"
+    date: 2026-04-24
+aws4fetch:
+  title: "aws4fetch: AWS API request signing for fetch"
+  author: "Michael Hart"
+  type: "web"
+  url:
+    value: "https://github.com/mhart/aws4fetch"
+    date: 2026-04-24
+opera-dswx-hls:
+  title: "OPERA Dynamic Surface Water Extent from Harmonized Landsat Sentinel-2 (DSWx-HLS)"
+  author: "NASA Jet Propulsion Laboratory"
+  type: "web"
+  url:
+    value: "https://www.jpl.nasa.gov/go/opera/products/dswx-product-suite/"
+    date: 2026-04-23
+ukis-csmask:
+  title: "ukis-csmask: Multi-spectral cloud and cloud shadow mask for Landsat and Sentinel-2"
+  author: "German Aerospace Center (DLR) Earth Observation Center"
+  type: "repository"
+  url:
+    value: "https://github.com/dlr-eoc/ukis-csmask"
+    date: 2026-04-23
