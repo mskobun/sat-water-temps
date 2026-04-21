@@ -415,8 +415,9 @@
 			const feature = await duckdbCache.fetchDuckDBFeature(featureId, source);
 			if (gen !== loadGen) return;
 			if (!feature) return;
+			if (!meta.parquetPath) return;
 
-			const parquetResult = await duckdbCache.getPointsForDate(feature, date, source);
+			const parquetResult = await duckdbCache.getPointsForDate(feature, date, source, meta.parquetPath);
 			if (gen !== loadGen) return;
 			if (!parquetResult) return;
 

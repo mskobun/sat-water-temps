@@ -10,6 +10,8 @@ type SourceType = 'ecostress' | 'landsat';
 interface RegisteredParquetFile {
 	name: string;
 	url: string;
+	/** Original R2 key (matches temperature_metadata.parquet_path). */
+	path: string;
 }
 
 export interface CachedDuckDBFeature {
@@ -49,6 +51,18 @@ const cachedBySource: Record<SourceType, CachedDuckDBFeature | null> = {
 // Serializes concurrent fetchDuckDBFeature calls per source so that drop+register
 // is never interleaved, which would leave orphaned file registrations in the WASM heap.
 const fetchLockBySource: Record<SourceType, Promise<unknown>> = {
+	ecostress: Promise.resolve(),
+	landsat: Promise.resolve()
+};
+// Tracks which logical file names are currently registered with the WASM FS,
+// so ensureFilesRegistered() can skip already-registered parquets.
+const registeredNames: Record<SourceType, Set<string>> = {
+	ecostress: new Set(),
+	landsat: new Set()
+};
+// Serializes registerFileURL calls per source to guard against two concurrent
+// getPointsForDate() calls racing to register the same file.
+const registerLockBySource: Record<SourceType, Promise<unknown>> = {
 	ecostress: Promise.resolve(),
 	landsat: Promise.resolve()
 };
@@ -201,6 +215,31 @@ async function dropRegisteredFiles(source: SourceType, files: RegisteredParquetF
 	if (!files.length) return;
 	const db = await getDb(source);
 	await db.dropFiles(files.map((file) => file.name));
+	const registered = registeredNames[source];
+	for (const file of files) registered.delete(file.name);
+}
+
+/**
+ * Register any files not already known to the WASM FS. Serialized per source so
+ * concurrent callers (e.g. rapid date switching) don't issue duplicate registrations.
+ */
+async function ensureFilesRegistered(
+	source: SourceType,
+	files: RegisteredParquetFile[]
+): Promise<void> {
+	const result = registerLockBySource[source].then(async () => {
+		const registered = registeredNames[source];
+		const missing = files.filter((file) => !registered.has(file.name));
+		if (missing.length === 0) return;
+		const db = await getDb(source);
+		await Promise.all(missing.map((file) => registerRemoteParquet(db, file.name, file.url)));
+		for (const file of missing) registered.add(file.name);
+	});
+	registerLockBySource[source] = result.then(
+		() => undefined,
+		() => undefined
+	);
+	await result;
 }
 
 async function registerRemoteParquet(
@@ -245,7 +284,6 @@ export async function fetchDuckDBFeature(
 			cachedBySource[source] = null;
 		}
 
-		const db = await getDb(source);
 		const filteredEntries = entries.filter(({ path }) =>
 			source === 'landsat' ? path.startsWith('LANDSAT/') : path.startsWith('ECO/')
 		);
@@ -253,12 +291,9 @@ export async function fetchDuckDBFeature(
 
 		const files = filteredEntries.map(({ path }, index) => ({
 			name: featureFileName(featureId, index),
-			url: `/api/feature/${enc}/parquet?path=${encodeURIComponent(path)}`
+			url: `/api/feature/${enc}/parquet?path=${encodeURIComponent(path)}`,
+			path
 		}));
-
-		await Promise.all(
-			files.map((file) => registerRemoteParquet(db, file.name, file.url))
-		);
 
 		cachedBySource[source] = {
 			featureId,
@@ -285,18 +320,23 @@ export async function fetchDuckDBFeature(
 export async function getPointsForDate(
 	feature: CachedDuckDBFeature,
 	date: string,
-	source: SourceType
+	source: SourceType,
+	parquetPath: string
 ): Promise<{
 	points: ArrayBuffer;
 	stats: TemperatureStats;
 	rowCol?: ArrayBufferLike;
 } | null> {
+	const target = feature.files.find((f) => f.path === parquetPath);
+	if (!target) return null;
+	await ensureFilesRegistered(source, [target]);
+
 	const chunks: Float64Array[] = [];
 	const rowColChunks: Int32Array[] = [];
 	let totalRows = 0;
 	let hasRowCol: boolean | null = null;
 
-	for (const file of feature.files) {
+	for (const file of [target]) {
 		let table: Table;
 		if (hasRowCol !== false) {
 			try {
@@ -421,6 +461,8 @@ export async function getPointHistory(
 	const maxLatitude = latitude + safeTolerance;
 	const toleranceSquared = safeTolerance * safeTolerance;
 	const history: PointHistoryEntry[] = [];
+
+	await ensureFilesRegistered(source, feature.files);
 
 	for (const file of feature.files) {
 		const query = `

@@ -17,6 +17,8 @@ export type ObservationMeta = {
   transform_d: number | null;
   transform_e: number | null;
   transform_f: number | null;
+  /** R2 key of the parquet file containing this observation. */
+  parquet_path: string | null;
 };
 
 export async function queryObservationMeta(
@@ -28,7 +30,8 @@ export async function queryObservationMeta(
     const row = await db
       .prepare(
         `SELECT source, pixel_size, pixel_size_x,
-         source_crs, transform_a, transform_b, transform_c, transform_d, transform_e, transform_f
+         source_crs, transform_a, transform_b, transform_c, transform_d, transform_e, transform_f,
+         parquet_path
          FROM temperature_metadata WHERE feature_id = ? AND date = ?`
       )
       .bind(featureId, date)
@@ -54,7 +57,8 @@ export async function queryObservationMeta(
       transform_c: num(row.transform_c),
       transform_d: num(row.transform_d),
       transform_e: num(row.transform_e),
-      transform_f: num(row.transform_f)
+      transform_f: num(row.transform_f),
+      parquet_path: row.parquet_path != null && row.parquet_path !== '' ? String(row.parquet_path) : null
     };
   } catch (err) {
     console.error('Error fetching observation meta:', err);

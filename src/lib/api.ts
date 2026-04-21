@@ -7,6 +7,7 @@ export interface TemperatureMetadata {
 	pixelSizeX: number | null;
 	sourceCrs: string | null;
 	transform: AffineTransform | null;
+	parquetPath: string | null;
 }
 
 const metadataCache: Record<string, TemperatureMetadata> = {};
@@ -48,7 +49,8 @@ export async function fetchTemperatureMetadata(
 					e: Number(raw.transform_e),
 					f: Number(raw.transform_f)
 				}
-			: null
+			: null,
+		parquetPath: raw.parquet_path ?? null
 	};
 
 	metadataCache[key] = meta;
