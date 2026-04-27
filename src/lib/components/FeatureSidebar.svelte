@@ -36,6 +36,7 @@
 	// Temperature unit (shared with parent for tooltip)
 	export let currentUnit: 'Kelvin' | 'Celsius' | 'Fahrenheit' = 'Celsius';
 	export let temperatureLoading: boolean = false;
+	export let parquetProgress: { loaded: number; total: number } | null = null;
 	export let initialDate: string = '';
 	export let initialFilterMin: number | null = null;
 	export let initialFilterMax: number | null = null;
@@ -218,7 +219,13 @@
 				{#if temperatureLoading}
 					<div class="flex flex-col items-center justify-center py-12 gap-3">
 						<Spinner class="size-6 text-muted-foreground" />
-						<p class="text-sm text-muted-foreground">Loading temperature data...</p>
+						{#if parquetProgress && parquetProgress.total > 0}
+							<p class="text-sm text-muted-foreground">
+								Loading temperature data · {(parquetProgress.loaded / 1_048_576).toFixed(1)} / {(parquetProgress.total / 1_048_576).toFixed(1)} MB
+							</p>
+						{:else}
+							<p class="text-sm text-muted-foreground">Loading temperature data...</p>
+						{/if}
 					</div>
 				{:else}
 					<FeatureSidebarSnapshot

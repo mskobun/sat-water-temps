@@ -46,6 +46,7 @@
 	// --- Internal state ---
 	let entries: PointHistoryEntry[] = $state([]);
 	let loading = $state(false);
+	let parquetProgress: { loaded: number; total: number } | null = $state(null);
 
 	// --- Reactively load history when selectedPoint changes ---
 	let prevPointKey = '';
@@ -82,10 +83,13 @@
 
 	async function loadHistory(fid: string, longitude: number, latitude: number) {
 		loading = true;
+		parquetProgress = null;
+		let unsubProgress: (() => void) | undefined;
 		try {
 			const source = (dataSource === 'landsat' ? 'landsat' : 'ecostress') as 'ecostress' | 'landsat';
 			const duckdbCache = await getDuckDBCacheModule();
 			if (!duckdbCache) return;
+			unsubProgress = duckdbCache.parquetLoadProgress.subscribe((v) => { parquetProgress = v; });
 			const feature = await duckdbCache.fetchDuckDBFeature(fid, source);
 			if (!feature) {
 				entries = [];
@@ -96,6 +100,8 @@
 			console.error('Error loading point history:', err);
 			entries = [];
 		} finally {
+			unsubProgress?.();
+			parquetProgress = null;
 			loading = false;
 		}
 	}
@@ -204,7 +210,13 @@
 	{:else if loading}
 		<div class="flex items-center justify-center gap-2 py-6">
 			<Spinner class="size-4 text-muted-foreground" />
-			<p class="text-xs text-muted-foreground">Querying…</p>
+			{#if parquetProgress && parquetProgress.total > 0}
+				<p class="text-xs text-muted-foreground">
+					Querying · {(parquetProgress.loaded / 1_048_576).toFixed(1)} / {(parquetProgress.total / 1_048_576).toFixed(1)} MB
+				</p>
+			{:else}
+				<p class="text-xs text-muted-foreground">Querying…</p>
+			{/if}
 		</div>
 
 	{:else}

@@ -1,5 +1,6 @@
 import * as duckdb from '@duckdb/duckdb-wasm';
 import type { Table } from 'apache-arrow';
+import { writable } from 'svelte/store';
 
 // Use runtime CDN assets so large WASM binaries are not emitted into
 // SvelteKit/Pages build artifacts (Cloudflare Pages limit: 25 MiB/file).
@@ -18,7 +19,11 @@ export interface CachedDuckDBFeature {
 	featureId: string;
 	source: SourceType;
 	files: RegisteredParquetFile[];
+	totalBytes: number;
 }
+
+/** Live download progress for the current parquet fetch. Null when idle. */
+export const parquetLoadProgress = writable<{ loaded: number; total: number } | null>(null);
 
 export interface TemperatureStats {
 	min: number;
@@ -232,7 +237,16 @@ async function ensureFilesRegistered(
 		const missing = files.filter((file) => !registered.has(file.name));
 		if (missing.length === 0) return;
 		const db = await getDb(source);
-		await Promise.all(missing.map((file) => registerRemoteParquet(db, file.name, file.url)));
+		// Register sequentially so per-file byte progress accumulates cleanly.
+		let loadedSoFar = 0;
+		for (const file of missing) {
+			const fileBytes = await registerRemoteParquet(db, file.name, file.url, (fileLoaded) => {
+				parquetLoadProgress.update(
+					(prev) => (prev ? { ...prev, loaded: loadedSoFar + fileLoaded } : null)
+				);
+			});
+			loadedSoFar += fileBytes;
+		}
 		for (const file of missing) registered.add(file.name);
 	});
 	registerLockBySource[source] = result.then(
@@ -242,18 +256,37 @@ async function ensureFilesRegistered(
 	await result;
 }
 
+/** Fetch a remote Parquet file as a buffer and register it with DuckDB's WASM FS.
+ * Uses streaming fetch so `onProgress` receives cumulative bytes loaded for this file.
+ * Returns the total number of bytes fetched.
+ */
 async function registerRemoteParquet(
 	db: duckdb.AsyncDuckDB,
 	name: string,
-	url: string
-) {
-	// DuckDB WASM passes the URL to XMLHttpRequest.open() which requires an
-	// absolute URL. Resolve relative paths against the current origin.
+	url: string,
+	onProgress: (loaded: number) => void
+): Promise<number> {
 	const absoluteUrl = new URL(url, globalThis.location.origin).href;
-	// directIO: false — let the buffer manager coalesce nearby reads into fewer,
-	// larger range requests. Range-request enforcement is handled at the DB level
-	// via forceFullHTTPReads: false + allowFullHTTPReads: false in db.open().
-	await db.registerFileURL(name, absoluteUrl, duckdb.DuckDBDataProtocol.HTTP, false);
+	const response = await fetch(absoluteUrl);
+	if (!response.ok) throw new Error(`Failed to fetch parquet ${url}: ${response.status}`);
+	const reader = response.body!.getReader();
+	const chunks: Uint8Array[] = [];
+	let loaded = 0;
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		chunks.push(value);
+		loaded += value.byteLength;
+		onProgress(loaded);
+	}
+	const buffer = new Uint8Array(loaded);
+	let offset = 0;
+	for (const chunk of chunks) {
+		buffer.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
+	await db.registerFileBuffer(name, buffer);
+	return loaded;
 }
 
 /**
@@ -289,6 +322,9 @@ export async function fetchDuckDBFeature(
 		);
 		if (filteredEntries.length === 0) return null;
 
+		const totalBytes = filteredEntries.reduce((sum, e) => sum + e.size, 0);
+		parquetLoadProgress.set({ loaded: 0, total: totalBytes });
+
 		const files = filteredEntries.map(({ path }, index) => ({
 			name: featureFileName(featureId, index),
 			url: `/api/feature/${enc}/parquet?path=${encodeURIComponent(path)}`,
@@ -298,7 +334,8 @@ export async function fetchDuckDBFeature(
 		cachedBySource[source] = {
 			featureId,
 			source,
-			files
+			files,
+			totalBytes
 		};
 		return cachedBySource[source];
 	});

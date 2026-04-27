@@ -89,6 +89,7 @@
 	let pixelSizeDeg = $state<number | null>(null);
 	let pixelSizeXDeg = $state<number | null>(null);
 	let temperatureLoading = $state(false);
+	let parquetProgress: { loaded: number; total: number } | null = $state(null);
 	let rasterPngUrl: string | null = $state(null);
 	let loadGen = 0; // incremented each time loadTemperatureData starts; guards stale async results
 	const globalMin = 273.15;
@@ -102,6 +103,7 @@
 		landsatSourceCrs = null;
 		landsatTransform = null;
 		rasterPngUrl = null;
+		parquetProgress = null;
 		relativeMin = 0;
 		relativeMax = 0;
 		avgTemp = 0;
@@ -399,6 +401,7 @@
 		if (!featureId || !date) return;
 
 		temperatureLoading = true;
+		let unsubProgress: (() => void) | undefined;
 		try {
 			const enc = encodeURIComponent(featureId);
 
@@ -413,6 +416,10 @@
 			const duckdbCache = await getDuckDBCacheModule();
 			if (gen !== loadGen) return;
 			if (!duckdbCache) return;
+
+			unsubProgress = duckdbCache.parquetLoadProgress.subscribe((v) => {
+				if (gen === loadGen) parquetProgress = v;
+			});
 
 			const feature = await duckdbCache.fetchDuckDBFeature(featureId, source);
 			if (gen !== loadGen) return;
@@ -463,7 +470,11 @@
 			} catch (err) {
 			console.error('Error loading temperature data:', err);
 		} finally {
-			if (gen === loadGen) temperatureLoading = false;
+			unsubProgress?.();
+			if (gen === loadGen) {
+				parquetProgress = null;
+				temperatureLoading = false;
+			}
 		}
 	}
 
@@ -889,6 +900,7 @@
 						{avgTemp}
 						{histogramData}
 						{temperatureLoading}
+						{parquetProgress}
 						on:close={handleSidebarClose}
 						on:dateChange={handleDateChange}
 						on:colorScaleChange={handleColorScaleChange}
@@ -1127,6 +1139,7 @@
 						{avgTemp}
 						{histogramData}
 						{temperatureLoading}
+						{parquetProgress}
 						on:close={handleSidebarClose}
 						on:dateChange={handleDateChange}
 						on:colorScaleChange={handleColorScaleChange}
