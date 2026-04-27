@@ -1033,23 +1033,25 @@
 					<div
 						class="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] max-w-xs
 							   rounded-md bg-background/80 backdrop-blur-sm px-4 py-2.5 shadow-sm border border-border/50
-							   transition-opacity duration-300"
+							   transition-opacity duration-300 pointer-events-none"
 						style="opacity: {hint1Visible ? 1 : 0};"
 					>
 						<p class="text-xs text-muted-foreground leading-snug">Satellite surface water temperatures for lakes and reservoirs across Southeast Asia.</p>
-						<p class="text-xs font-medium leading-snug mt-0.5">Click any highlighted water body to explore.</p>
+						<p class="text-xs font-medium leading-snug mt-0.5">{isMobile.current ? 'Tap' : 'Click'} any highlighted water body to explore.</p>
 					</div>
 				{/if}
 
 				<!-- Stage 2: heatmap loaded — hint to click a pixel for point history -->
-				{#if showHint2 && !isMobile.current}
+				{#if showHint2}
 					<div
 						class="absolute bottom-14 left-1/2 -translate-x-1/2 z-30
 							   rounded-md bg-background/80 backdrop-blur-sm px-4 py-2.5 shadow-sm border border-border/50
-							   animate-in fade-in-0 slide-in-from-bottom-2 duration-300"
+							   animate-in fade-in-0 slide-in-from-bottom-2 duration-300 pointer-events-none"
 					>
-						<p class="text-[11px] text-muted-foreground leading-snug">Click a heatmap point to view its temperature history</p>
-						<p class="text-[11px] text-muted-foreground leading-snug mt-0.5">Right-click anywhere to copy coordinates</p>
+						<p class="text-[11px] text-muted-foreground leading-snug">{isMobile.current ? 'Tap' : 'Click'} a heatmap point to view its temperature history</p>
+						{#if !isMobile.current}
+							<p class="text-[11px] text-muted-foreground leading-snug mt-0.5">Right-click anywhere to copy coordinates</p>
+						{/if}
 					</div>
 				{/if}
 

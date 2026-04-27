@@ -58,7 +58,7 @@
 
 <svelte:window onkeydown={handleGlobalKeydown} />
 
-<div class="absolute top-4 left-4 z-40 w-72 max-w-[calc(100%-2rem)]">
+<div class="absolute top-4 left-4 z-40 w-72 max-w-[calc(100%-8rem)]">
 	<Command.Root
 		shouldFilter={true}
 	>
