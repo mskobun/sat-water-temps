@@ -348,6 +348,8 @@
 			const featureId =
 				loc === 'lake' ? feature.properties?.name : `${feature.properties?.name}/${loc}`;
 
+			// Dismiss stage-1 hint when user successfully clicks a water body
+			if (showHint1) dismissHint1();
 			// Navigate to feature (URL change will trigger state updates)
 			goto(`/feature/${encodeURIComponent(featureId)}`, {
 				replaceState: false,
@@ -546,6 +548,68 @@
 			handleSidebarClose();
 		}
 	}
+
+	// Onboarding hints
+	let onboardingSeen = $state(false);
+	let onboardingPointSeen = $state(false);
+	let showHint1 = $state(false);
+	let hint1Visible = $state(false);
+	let showHint2 = $state(false);
+
+	onMount(() => {
+		onboardingSeen = !!localStorage.getItem('onboarding-seen');
+		onboardingPointSeen = !!localStorage.getItem('onboarding-point-seen');
+		if (!onboardingSeen) {
+			setTimeout(() => {
+				showHint1 = true;
+				requestAnimationFrame(() => { hint1Visible = true; });
+			}, 800);
+		}
+	});
+
+	function dismissHint1() {
+		hint1Visible = false;
+		onboardingSeen = true;
+		localStorage.setItem('onboarding-seen', '1');
+		setTimeout(() => { showHint1 = false; }, 300);
+	}
+
+	function dismissHint2() {
+		showHint2 = false;
+		onboardingPointSeen = true;
+		localStorage.setItem('onboarding-point-seen', '1');
+	}
+
+	// Stage 2: show once heatmap fully loaded (parquet done), dismiss when point history opens
+	$effect(() => {
+		if (deckHasData && !onboardingPointSeen && selectedFeature) showHint2 = true;
+		if (!deckHasData) showHint2 = false;
+	});
+	$effect(() => {
+		if (pointHistoryOpen && showHint2) dismissHint2();
+	});
+
+	// Pulse polygon outlines indefinitely until hint1 is dismissed
+	$effect(() => {
+		if (!showHint1 || !mapReady || !map) return;
+		let raf: number;
+		const start = performance.now();
+		const cycle = 2000;
+
+		function tick(now: number) {
+			if (map?.getLayer('polygons-line') && !selectedFeature) {
+				const t = ((now - start) % cycle) / cycle;
+				const opacity = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(t * Math.PI * 2 - Math.PI / 2));
+				map.setPaintProperty('polygons-line', 'line-opacity', opacity);
+			}
+			raf = requestAnimationFrame(tick);
+		}
+		raf = requestAnimationFrame(tick);
+		return () => {
+			cancelAnimationFrame(raf);
+			map?.getLayer('polygons-line') && map.setPaintProperty('polygons-line', 'line-opacity', 1);
+		};
+	});
 
 	// Right-click context menu state
 	let contextMenuOpen = $state(false);
@@ -961,6 +1025,31 @@
 							onclose={closePointHistory}
 							ondatechange={switchToDate}
 						/>
+					</div>
+				{/if}
+
+				<!-- Stage 1: first-visit hint — what this is and what to click -->
+				{#if showHint1}
+					<div
+						class="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] max-w-xs
+							   rounded-md bg-background/80 backdrop-blur-sm px-4 py-2.5 shadow-sm border border-border/50
+							   transition-opacity duration-300"
+						style="opacity: {hint1Visible ? 1 : 0};"
+					>
+						<p class="text-xs text-muted-foreground leading-snug">Satellite surface water temperatures for lakes and reservoirs across Southeast Asia.</p>
+						<p class="text-xs font-medium leading-snug mt-0.5">Click any highlighted water body to explore.</p>
+					</div>
+				{/if}
+
+				<!-- Stage 2: heatmap loaded — hint to click a pixel for point history -->
+				{#if showHint2 && !isMobile.current}
+					<div
+						class="absolute bottom-14 left-1/2 -translate-x-1/2 z-30
+							   rounded-md bg-background/80 backdrop-blur-sm px-4 py-2.5 shadow-sm border border-border/50
+							   animate-in fade-in-0 slide-in-from-bottom-2 duration-300"
+					>
+						<p class="text-[11px] text-muted-foreground leading-snug">Click a heatmap point to view its temperature history</p>
+						<p class="text-[11px] text-muted-foreground leading-snug mt-0.5">Right-click anywhere to copy coordinates</p>
 					</div>
 				{/if}
 
