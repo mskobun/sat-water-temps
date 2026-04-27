@@ -138,33 +138,31 @@
 	<title>Dashboard - Satellite Water Temps</title>
 </svelte:head>
 
-<div class="min-h-screen bg-background text-foreground relative">
-	<UserMenu />
-	<!-- Header -->
-	<header class="border-b px-6 py-5 pr-20 flex items-center justify-between">
-		<div>
-			<h1 class="text-2xl font-bold">Water Body Dashboard</h1>
-			<p class="text-sm text-muted-foreground mt-1">
-				Overview of all monitored water bodies
-			</p>
-		</div>
-		<div class="flex items-center gap-1 rounded-lg border p-1 bg-muted/50">
-			<button
-				class="px-2 py-0.5 text-sm rounded-md transition-colors {unit === 'C'
-					? 'bg-background shadow-sm font-medium'
-					: 'text-muted-foreground hover:text-foreground'}"
-				onclick={() => (unit = 'C')}
-			>
-				&deg;C
-			</button>
-			<button
-				class="px-2 py-0.5 text-sm rounded-md transition-colors {unit === 'F'
-					? 'bg-background shadow-sm font-medium'
-					: 'text-muted-foreground hover:text-foreground'}"
-				onclick={() => (unit = 'F')}
-			>
-				&deg;F
-			</button>
+<div class="min-h-screen bg-background text-foreground">
+	<header class="border-b bg-card">
+		<div class="container mx-auto px-6 py-4 flex justify-between items-center max-w-7xl">
+			<span class="font-semibold text-foreground">Dashboard</span>
+			<div class="flex items-center gap-3">
+				<div class="flex items-center gap-1 rounded-lg border p-1 bg-muted/50">
+					<button
+						class="px-2 py-0.5 text-sm rounded-md transition-colors {unit === 'C'
+							? 'bg-background shadow-sm font-medium'
+							: 'text-muted-foreground hover:text-foreground'}"
+						onclick={() => (unit = 'C')}
+					>
+						&deg;C
+					</button>
+					<button
+						class="px-2 py-0.5 text-sm rounded-md transition-colors {unit === 'F'
+							? 'bg-background shadow-sm font-medium'
+							: 'text-muted-foreground hover:text-foreground'}"
+						onclick={() => (unit = 'F')}
+					>
+						&deg;F
+					</button>
+				</div>
+				<UserMenu inline />
+			</div>
 		</div>
 	</header>
 

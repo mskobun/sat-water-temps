@@ -61,7 +61,7 @@ Satellite water temperature monitoring platform.
 
 **Frontend (Cloudflare):** SvelteKit on Cloudflare Pages, D1 (SQLite) for metadata, R2 for data files (CSVs, TIFs, PNGs). API routes access bindings via `platform.env.DB` and `platform.env.R2_DATA`.
 
-**Backend (AWS):** Python Lambda functions in `lambda_functions/` (Docker → ECR). Scheduled task_poller Lambda orchestrates NASA AppEEARS API polling. Processor Lambda downloads ECOSTRESS data, processes rasters, uploads to R2/D1.
+**Backend (AWS):** Python Lambda functions in `lambda_functions/` (Docker → ECR). Source-specific initiator Lambdas query ECOSTRESS and Landsat catalogs, enqueue work on SQS, and the processor Lambda routes each message to the matching pipeline before writing outputs to R2/D1.
 
 ## Key Files
 

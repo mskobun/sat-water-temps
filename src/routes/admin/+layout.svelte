@@ -1,14 +1,9 @@
 <script lang="ts">
 	import { page } from '$app/stores';
-	import { signOut } from '@auth/sveltekit/client';
-	import { Button } from '$lib/components/ui/button';
+	import UserMenu from '$lib/components/UserMenu.svelte';
 	import type { LayoutData } from './$types';
 
 	export let data: LayoutData;
-
-	function handleSignOut() {
-		signOut({ callbackUrl: '/admin/login' });
-	}
 </script>
 
 <div class="min-h-screen bg-background">
@@ -46,12 +41,7 @@
 						</a>
 					</nav>
 				</div>
-				<div class="flex items-center gap-4">
-					{#if data.session.user.email}
-						<span class="text-sm text-muted-foreground">{data.session.user.email}</span>
-					{/if}
-					<Button variant="outline" size="sm" onclick={handleSignOut}>Sign Out</Button>
-				</div>
+				<UserMenu inline />
 			</div>
 		</header>
 	{/if}
