@@ -71,7 +71,7 @@
 	let tooltipY = $state(0);
 
 	// Temperature data (fetched here so map can use it for heatmap)
-	let deckOverlay: DeckTemperatureOverlay | null = null;
+	let deckOverlay: DeckTemperatureOverlay | null = $state(null);
 	let deckHasData = $state(false);
 	let desktopTriplets: Float64Array | null = null;
 	let desktopRowCol: Int32Array | null = null;
@@ -79,8 +79,8 @@
 	let landsatTransform: AffineTransform | null = null;
 	let desktopCellSizeXM = 0;
 	let desktopCellSizeYM = 0;
-	let desktopHalfPixelX = 0;
-	let desktopHalfPixelY = 0;
+	let desktopHalfPixelX = $state(0);
+	let desktopHalfPixelY = $state(0);
 	let relativeMin = $state(0);
 	let relativeMax = $state(0);
 	let avgTemp = $state(0);

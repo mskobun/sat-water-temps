@@ -105,7 +105,7 @@
 						{#if job.status === 'success' && job.feature_id && job.date}
 							<ThumbnailPreview
 								src="/api/feature/{job.feature_id}/tif/{job.date}/relative"
-								alt="{job.date}"
+								alt={job.date}
 								href="/feature/{job.feature_id}?date={job.date}"
 								class="block w-12 h-12"
 							/>

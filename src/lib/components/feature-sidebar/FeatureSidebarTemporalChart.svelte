@@ -22,7 +22,7 @@
 
 	export let entries: FeatureStatsHistoryEntry[] = [];
 	export let currentUnit: 'Kelvin' | 'Celsius' | 'Fahrenheit' = 'Celsius';
-	export let selectedDate: string = '';
+	export const selectedDate: string = '';
 	export let dataSource: string = '';
 	const dispatch = createEventDispatcher<{ dateChange: string }>();
 

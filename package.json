@@ -9,8 +9,8 @@
     "preview": "vite preview",
     "deploy": "npm run build && wrangler pages deploy .svelte-kit/cloudflare",
     "lint": "svelte-check --threshold error",
-    "wrangler:dev": "npm run build && wrangler pages dev .svelte-kit/cloudflare --compatibility-date=2025-12-11",
-    "wrangler:dev:remote": "npm run build && wrangler pages dev .svelte-kit/cloudflare --remote --compatibility-date=2025-12-11",
+    "wrangler:dev": "npm run build && wrangler dev .svelte-kit/cloudflare/_worker.js",
+    "wrangler:dev:remote": "npm run build && wrangler dev .svelte-kit/cloudflare/_worker.js --remote",
     "db:export": "wrangler d1 export sat-water-temps-db --remote --output=seed.sql",
     "db:reset": "rm -rf .wrangler/state/v3/d1",
     "db:seed": "npm run db:reset && wrangler d1 execute sat-water-temps-db --local --file=seed.sql",
@@ -33,8 +33,8 @@
     "clsx": "^2.1.1",
     "concurrently": "^9.1.2",
     "layerchart": "^2.0.0-next.43",
-    "postcss": "^8.5.6",
-    "svelte": "^5.45.8",
+    "postcss": "^8.5.12",
+    "svelte": "^5.55.5",
     "svelte-check": "^4.3.6",
     "tailwind-merge": "^3.4.0",
     "tailwind-variants": "^3.2.2",
@@ -42,8 +42,8 @@
     "tw-animate-css": "^1.4.0",
     "typescript": "^5.3.3",
     "vaul-svelte": "^1.0.0-next.7",
-    "vite": "^7.2.7",
-    "wrangler": "^4.53.0"
+    "vite": "^7.3.2",
+    "wrangler": "^4.85.0"
   },
   "dependencies": {
     "@auth/core": "^0.41.1",
