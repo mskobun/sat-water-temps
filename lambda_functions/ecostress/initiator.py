@@ -9,11 +9,19 @@ import json
 import os
 import time
 from datetime import datetime, timedelta
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List
 
 import boto3
 import earthaccess
 
+from common.catchup import (
+    calculate_catchup_window,
+    combined_bbox,
+    filter_uncompleted_bodies,
+    get_catchup_settings,
+    latest_ecostress_cmr_day,
+    latest_processed_day,
+)
 from common.polygons import load_polygons, filter_polygons_for_feature
 from d1 import log_job_to_d1, get_setting, log_data_request
 
@@ -162,28 +170,8 @@ def handler(event, context):
     # Use task_id from trigger endpoint if provided, otherwise generate one
     task_id = event.get("task_id") or f"eco-{request_id or int(time.time() * 1000)}"
 
-    # Date range — default: look back 2 days for ECOSTRESS latency
-    delay_days = int(get_setting("data_delay_days", default=2))
-    end_date = datetime.utcnow() - timedelta(days=delay_days)
-    start_date = end_date - timedelta(days=1)
-
-    if "start_date" in event:
-        sd = event["start_date"]
-        ed = event.get("end_date", sd)
-    else:
-        sd = start_date.strftime("%Y-%m-%d")
-        ed = end_date.strftime("%Y-%m-%d")
-
     # Optional feature filter — accepts a name (str) or AID (int)
     feature_filter = event.get("feature")  # e.g. "Magat" or 1
-
-    if not description:
-        feature_label = f" [{feature_filter}]" if feature_filter else ""
-        description = f"{'Manual' if trigger_type == 'manual' else 'Daily'} ECOSTRESS scan for {sd}" + (
-            f" to {ed}" if sd != ed else ""
-        ) + feature_label
-
-    print(f"ECOSTRESS initiator: searching {sd} to {ed}" + (f" (feature={feature_filter})" if feature_filter else ""))
 
     polygons = load_polygons()
     polygons = filter_polygons_for_feature(polygons, feature_filter)
@@ -193,6 +181,52 @@ def handler(event, context):
             "statusCode": 400,
             "body": json.dumps({"error": f"feature {feature_filter!r} not found"}),
         }
+
+    explicit_dates = "start_date" in event
+
+    # Manual/admin requests stay exact. Scheduled runs use source-aware catch-up.
+    if explicit_dates:
+        sd = event["start_date"]
+        ed = event.get("end_date", sd)
+        window_metadata = {"mode": "explicit", "start_date": sd, "end_date": ed}
+    else:
+        delay_days = int(get_setting("data_delay_days", default=2))
+        fallback_end = datetime.utcnow() - timedelta(days=delay_days)
+        fallback_start = fallback_end - timedelta(days=1)
+        settings = get_catchup_settings()
+        bbox = combined_bbox(polygons)
+        latest_catalog = latest_ecostress_cmr_day(
+            bbox=bbox,
+            short_name=SHORT_NAME,
+            version=VERSION,
+        )
+        window = calculate_catchup_window(
+            latest_processed=latest_processed_day("ecostress"),
+            latest_catalog=latest_catalog,
+            settings=settings,
+            fallback_start=fallback_start.strftime("%Y-%m-%d"),
+            fallback_end=fallback_end.strftime("%Y-%m-%d"),
+        )
+        sd = window.start_date
+        ed = window.end_date
+        window_metadata = {
+            "mode": window.reason,
+            "start_date": sd,
+            "end_date": ed,
+            "latest_processed_day": window.latest_processed_day,
+            "latest_catalog_day": window.latest_catalog_day,
+            "overlap_days": window.overlap_days,
+            "max_days": window.max_days,
+            "catchup_enabled": window.enabled,
+        }
+
+    if not description:
+        feature_label = f" [{feature_filter}]" if feature_filter else ""
+        description = f"{'Manual' if trigger_type == 'manual' else 'Daily'} ECOSTRESS scan for {sd}" + (
+            f" to {ed}" if sd != ed else ""
+        ) + feature_label
+
+    print(f"ECOSTRESS initiator: searching {sd} to {ed}" + (f" (feature={feature_filter})" if feature_filter else ""))
 
     prefer_http = bool(
         event.get("prefer_http_hrefs")
@@ -206,20 +240,30 @@ def handler(event, context):
         job_type="ecostress_submit",
         task_id=task_id,
         status="started",
-        metadata_json=json.dumps({"start_date": sd, "end_date": ed}),
+        metadata_json=json.dumps(window_metadata),
         fatal=False,
     )
 
     total_messages = 0
 
     try:
-        for message_body in iter_ecostress_processor_bodies(
+        bodies = iter_ecostress_processor_bodies(
             sd,
             ed,
             task_id=task_id,
             polygons=polygons,
             prefer_http_hrefs=prefer_http,
-        ):
+        )
+        if not explicit_dates:
+            bodies = filter_uncompleted_bodies(
+                bodies,
+                source="ecostress",
+                job_type="ecostress_process",
+                start_day=sd,
+                end_day=ed,
+            )
+
+        for message_body in bodies:
             sqs.send_message(
                 QueueUrl=sqs_queue_url,
                 MessageBody=json.dumps(message_body),
