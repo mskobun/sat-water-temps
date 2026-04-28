@@ -7,7 +7,7 @@ npm install
 npm run dev                    # Frontend only at http://localhost:5173
 npm run wrangler:dev           # Full stack (local D1 + remote R2) at http://localhost:8788
 npm run wrangler:dev:remote    # Full stack (prod D1 + prod R2) at http://localhost:8788
-npm run lint                   # tsc --noEmit on functions/
+npm run lint                   # Svelte + TypeScript checks (svelte-check --threshold error)
 uv run pytest tests/ -v        # Run Lambda unit tests
 cd lambda_functions && uv run python -m local_fill --help   # In-process fill: one feature + date range; add --runtime local for Wrangler D1+R2 (repo root found from cwd)
 npm run deploy                 # Deploy frontend to Cloudflare Pages
