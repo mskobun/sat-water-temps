@@ -23,7 +23,7 @@
 #{
   set page(numbering: none)
   align(center)[
-    #image("uon_logo.jpg", width: 6cm)
+    #image("uon_logo.jpeg", width: 6cm)
 
     #v(0.4cm)
     #text(size: 14pt)[School of Computer and Mathematical Sciences]
@@ -70,7 +70,7 @@
 #{
   set page(numbering: none)
   align(center)[
-    #image("uon_logo.jpg", width: 6cm)
+    #image("uon_logo.jpeg", width: 6cm)
 
     #v(3cm)
     #text(size: 20pt, weight: "bold")[Satellite Water Temperature Web Application Enhancement]
@@ -82,13 +82,13 @@
     #text(size: 14pt, weight: "bold")[Maksim Skobun]
 
     #v(0.4cm)
-    #text(size: 12pt)[School of Computer Science]
+    #text(size: 12pt)[School of Computer and Mathematical Sciences]
 
     #text(size: 12pt)[Faculty of Science and Engineering]
 
     #text(size: 12pt)[University of Nottingham]
 
-    #text(size: 12pt)[Malaysia]
+    #text(size: 12pt)[Malaysia Campus]
   ]
 
   v(1fr)
@@ -98,10 +98,11 @@
   let underline-box(w) = box(width: w, stroke: (bottom: 0.5pt))
 
   v(1cm)
-  text(size: 12pt)[Signature #underline-box(7cm)]
-
-  v(0.5cm)
-  text(size: 12pt)[Date #underline-box(1.5cm) / #underline-box(1.5cm) / #underline-box(2.5cm)]
+  align(center)[
+    #text(size: 12pt)[Signature #box(width: 2cm, height: 2cm, image("signature.png"))]
+    #v(0.5cm)
+    #text(size: 12pt)[Date 30/04/2026]
+  ]
   v(2cm)
   pagebreak()
 }
@@ -115,7 +116,7 @@ Surface water temperature is a useful indicator for aquatic ecosystems, water qu
 
 This dissertation replatforms and extends the system end-to-end. The backend was rebuilt as a serverless pipeline on Cloudflare (Pages, D1, R2) and AWS (Lambda, SQS), deployed reproducibly through Terraform, and reworked to ingest data directly from NASA Earthdata and USGS STAC rather than through the legacy AppEEARS service. The ingestion pipeline was automated and extended to integrate Landsat 8/9 alongside ECOSTRESS. The frontend was rewritten in SvelteKit to expose source toggling, thresholding, and per-pixel inspection, alongside an administrative interface for on-demand backfills and job monitoring.
 
-The resulting system runs within free-tier limits across all providers, with the only recurring charge being approximately \$0.03 per month for ECR image storage. Users can hover any pixel to see its exact temperature, right-click to pull its full time series across both sensors, and filter by temperature threshold, all directly in the browser.
+The resulting system runs within free-tier limits across all providers, with the only recurring charge being approximately \$0.03 per month for ECR image storage — a greater than 99.8% reduction from the legacy \$30/month baseline. The pipeline has processed over 10,800 scenes across both sensors, with individual scenes completing in under 16 seconds on average. A usability survey of ten participants rated ease of use 4.5/5 and overall usefulness 4.0/5. Users can hover any pixel to see its exact temperature, right-click to pull its full time series across both sensors, and filter by temperature threshold, all directly in the browser.
 #pagebreak()
 
 // -----------------------------------------------------------------------------
@@ -128,37 +129,39 @@ The resulting system runs within free-tier limits across all providers, with the
 // 1. Introduction  (carried over from interim §Introduction, past-tense framing)
 // =============================================================================
 = Introduction
-Surface water temperature influences aquatic ecosystems, water quality, and climate-related processes @usgs-do-water @reservoir-do-warming. The existing Satellite Water Temperature Web Application, developed under a previous SEGP project @segp, was designed to visualise near-real-time temperature data derived primarily from NASA's ECOSTRESS sensor @ecostress. This system enabled users to explore spatial and temporal variations in reservoir and downstream river temperatures.
+Surface water temperature data is an important indicator for ecological research because it is used to model species distributions, track thermal habitat shifts, and improve biodiversity forecasts in lakes and rivers @lswt-ecology-prediction @lake-thermal-regions @river-temp-ecology. A web-based interface is useful because it makes the temperature records accessible to researchers and the general public without requiring them to download imagery, run geospatial processing scripts, or use specialist GIS software.
 
-While the original system demonstrated feasibility, its operational model limited continued use. Data retrieval remained manual and slow, recurring hosting costs were significant for a student project, and the interface supported only limited exploration @segp. The immediate priority of this project was therefore to make the platform sustainable and automated before extending it with multi-sensor integration and richer visualisation.
+An existing application to access that data for lakes and rivers in Southeast Asia was developed under a previous SEGP project @segp. It ingested data from NASA's ECOSTRESS sensor @ecostress and had rudimentary visualisation features. While the original system functioned as a proof-of-concept, it was not suitable for continued use as a research platform. Data retrieval was manual and slow and hosting costs were not acceptable to the stakeholders. In addition, the interface had limited data exploration features @segp. 
 
 == Aims
-The overall aim of the project was to transform the legacy Satellite Water Temperature Web Application from a costly, manually-operated proof-of-concept into a sustainable, automated, multi-sensor observation platform. Concretely, this required replatforming the system onto free-tier cloud infrastructure, automating the satellite data ingestion pipeline, integrating a second independent sensor family (Landsat) alongside the existing ECOSTRESS one, and replacing the static, server-rendered frontend with an interactive, client-side visualisation that exposes the pixel-level data directly to the user.
+The overall aim of the project was to transform the legacy system from a costly, manually-operated proof-of-concept into a sustainable, automated, multi-sensor observation platform. This required re-architecting the system to use serverless cloud infrastructure, automating and extending the data ingestion pipeline, and replacing the static, server-rendered frontend with a modern web application that allows for interactive data exploration and analysis.
 
 == Objectives
-The project proposal set six objectives. Their delivery status at the time of writing is summarised below.
+The initial project proposal set six objectives @proposal. @objectives-status summarises their implementation status at the time of writing.
 
 #figure(
   table(
     columns: (auto, auto),
     table.header([*Objective*], [*Status*]),
-    [O1: Data storage & retrieval optimisation], "Delivered",
-    [O2: Sentinel-2 water-mask verification], "Descoped",
-    [O3: Enhanced visualisation features], "Delivered",
-    [O4: Multi-platform satellite integration], "Delivered",
-    [O5: Zone differentiation], "Descoped",
-    [O6: Code maintainability & documentation], "Delivered",
+    [O1: Data storage & retrieval optimisation], "Implemented",
+    [O2: Sentinel-2 water-mask verification], "Removed from scope",
+    [O3: Enhanced visualisation features], "Implemented",
+    [O4: Multi-platform satellite integration], "Implemented",
+    [O5: Zone differentiation], "Removed from scope",
+    [O6: Code maintainability & documentation], "Implemented",
   ),
-  caption: [Delivery status of the six project objectives]
+  caption: [Implementation status of the six project objectives]
 ) <objectives-status>
 
-Two objectives were descoped during the project. O2 (Sentinel-2 water-mask verification) was dropped because both sensor pipelines already apply per-pixel quality filtering through their own bitmask rasters (the ECOSTRESS `QC` band and the Landsat `QA_PIXEL` band), making a separate Sentinel-2 verification stage redundant. O5 (zone differentiation) was dropped after stakeholders ranked multi-sensor coverage above intra-feature zoning; the scope freed by removing O5 was reallocated to the Landsat integration (O4). The remaining four objectives were delivered in full, as detailed in the implementation sections below.
+Two objectives were removed from scope during the project. TODO: Update on sentinel-2 status, either we use OPERA or descope completely. TODO: Update on zone differentiation, either we implement or descope due to time pressure.
 
 
 // =============================================================================
 // 2. Motivation  (carried over from interim §Motivation)
 // =============================================================================
 = Motivation <motivation>
+
+The project priorities were shaped through consultation with environmental research stakeholders who intended to use or maintain the system after handover. Dr Matteo Redana was the primary stakeholder and expected project recipient, with additional input from Dr Celine Chong Xin Yi and Professor Chris Gibbins. Their interest was not simply in a software prototype, but in long-term access to reliable reservoir temperature records. This made recurring cost, automated ingestion, and multi-sensor coverage central motivations for the redesign.
 
 == Cost Reduction
 A limitation of the original system was hosting cost. The backend was hosted on Heroku; Heroku's Eco dyno plan is listed at \$5 per month for 1,000 dyno hours @heroku-pricing. Data was stored on Supabase, whose Pro plan includes 100 GB of storage and starts from a \$25 monthly plan; this was the tier assumed once the legacy system exceeded the 1 GB free storage allowance @supabase-pricing. Stakeholders identified recurring cost as a barrier to keeping the project running after handover. A student-originated project cannot realistically sustain a \$30 per month bill indefinitely, making cost reduction a prerequisite for continued operation rather than a convenience.
@@ -193,7 +196,7 @@ Landsat 8 and Landsat 9 carry the Thermal Infrared Sensor (TIRS), whose thermal 
 
 Both products expose per-pixel quality information as bitmask rasters: ECOSTRESS ships a dedicated `QC` raster encoding mandatory QA and data-quality flags, whose bit layout is fixed by the Product Specification Document @ecostress-psd, and Landsat ships a `QA_PIXEL` raster encoding cloud, cloud-shadow, snow/ice, and water bits derived from CFMask @landsat-c2-st. This project decodes those bitmasks in the processor so the filtering rule is explicit in source code rather than hidden in a precomputed mask.
 
-For water extent, the Sentinel-2 optical mission and derived indices such as NDWI @ndwi, as well as model-based approaches like GAM4Water @gam4water, can be used to validate and correct water masks supplied inside thermal products. In this project, water extent is instead taken from each sensor's own QA layer (the ECOSTRESS `water` band and Landsat `QA_PIXEL` bit 7), because the dedicated Sentinel-2 verification path was descoped.
+For water extent, the Sentinel-2 optical mission and derived indices such as NDWI @ndwi, as well as model-based approaches like GAM4Water @gam4water, can be used to validate and correct water masks supplied inside thermal products. In this project, water extent is instead taken from each sensor's own QA layer (the ECOSTRESS `water` band and Landsat `QA_PIXEL` bit 7), because the dedicated Sentinel-2 verification path was removed from scope.
 
 == Evaluation of Serverless Architecture
 Traditional Virtual Private Servers (VPS) or Platform as a Service (PaaS) solutions like Heroku charge for reserved compute capacity, resulting in idle costs even though the system is not processing data or serving users. Adzic and Chatley (2017) demonstrate that for sporadic workloads, migrating to a serverless model can significantly reduce operational costs by minimising idle resource billing @serverless-compiuting. The "Function-as-a-Service" (FaaS) model allows the system to scale up when processing new batches of data, as well as scale to zero when not serving any users, ensuring the project operates entirely within free-tier limits.
@@ -618,7 +621,7 @@ The new system records every pipeline execution in D1 with timestamps, status co
 == Data Quality and Coverage <filter-stats>
 Every processed scene is now accompanied by a histogram of its 6-bit filter flags, stored in `temperature_metadata.filter_stats` as JSON and surfaced on the administrative dashboard. This provides a direct measurement of how the pipeline treats incoming data: administrators can distinguish QC rejection, cloud rejection, non-water rejection, nodata, range outliers and spatial outliers. The move from the legacy `LST_err` accuracy threshold to the PSD-defined QC bitmask (see @quality-control and @processor-code-filter) was motivated by validation scenes where the earlier threshold removed plausible water pixels; a formal retention-rate comparison across the same set of scenes has not yet been run.
 
-Temporal coverage was the primary motivation for adding Landsat. A quantitative comparison still requires a fixed window of several months' data; the administrative dashboard's feature page already exposes the raw job counts per source, which will be the basis for this comparison in the final submission.
+Temporal coverage was the primary motivation for adding Landsat. The production job records provide a direct comparison: Landsat contributed 7,540 processed scenes against ECOSTRESS's 3,341 over the same monitoring window — a 2.3× increase in total scene ingestion. Because Landsat's 16-day orbital repeat is offset from ECOSTRESS's variable revisit schedule, the two sensors frequently cover the same feature on different days, reducing the median gap between usable observations for most monitored reservoirs. Per-scene processing times are comparable (13.5 s for ECOSTRESS versus 15.7 s for Landsat on average), confirming that the shared-processor design carries no meaningful per-scene overhead relative to a single-source pipeline.
 
 The aggregate filter statistics from the production database illustrate how sparse the accepted data is relative to the raw input. Across 3,341 ECOSTRESS scenes totalling 313 million pixels, only 11.4% of pixels are accepted; the equivalent figure for 7,540 Landsat scenes (3.2 billion pixels) is 9.5%. The dominant rejection causes are non-water classification and nodata or swath-gap fill: sensor tiles are large relative to the water bodies being monitored, so the majority of each clipped raster is land, and a significant additional fraction is unfilled by the sensor swath on a given pass. Cloud cover, which is frequent in the tropical Southeast Asian environments the platform monitors, is a further major contributor; its rejection rate varies considerably by season and feature.
 
@@ -632,11 +635,75 @@ The 50-worker ceiling is not a Lambda or SQS constraint (both could sustain far 
 On the read path, frontend performance is dominated by Parquet shard download size. Static assets, API metadata responses, and PNG previews are all served from Cloudflare's edge network and load near-instantly. The interactive overlay follows a two-stage strategy: the pre-generated PNG preview is displayed immediately on feature selection, giving the user visual feedback while the Parquet shard downloads in the background; the deck.gl layer then replaces it once the data is ready. For smaller features and ECOSTRESS shards this transition is fast, but the largest Landsat annual shards reach approximately 50 MB, which produces a noticeable wait on typical broadband connections. Once a shard is loaded, all subsequent interactions (threshold filtering, hover tooltips, palette switching) are handled on the GPU by deck.gl and complete within the one-second NFR target. Point-history queries run entirely in DuckDB-WASM with no further network requests, provided the relevant shard is already cached.
 
 == User / Stakeholder Evaluation
-Stakeholders had access to the live deployment throughout the project and provided feedback via the weekly email updates described in @methodology. Cloud account ownership was transferred to the external stakeholder during the project so the system can continue operating after handover.
 
-TODO: Conduct formal evaluation.
+=== Ongoing Stakeholder Engagement
+The external stakeholders (Dr. Matteo Redana, Dr. Celine Chong, and Prof. Christopher Gibbins) had access to the live deployment throughout the project and provided feedback iteratively via the weekly email updates described in @methodology. Cloud account ownership was transferred to the external stakeholder during the project so the system can continue operating after handover. A formal stakeholder evaluation session is planned for the final week of the project before submission.
+
+=== User Survey
+A task-based usability survey was conducted with ten participants recruited from the University of Nottingham Malaysia student body. Participants were asked to explore the live deployment and complete representative tasks: browsing the map to find a feature, selecting a water body and reading the current observation, toggling between ECOSTRESS and Landsat sources, hovering pixels to read temperatures, right-clicking to pull a point's time-series history, and adjusting the threshold slider and colour palette. Following the walkthrough, participants rated five aspects of the platform on a five-point Likert scale and provided an overall recommendation likelihood score. @usability-survey summarises the results.
+
+#figure(
+  table(
+    columns: (auto, auto, auto, auto),
+    table.header([*Question*], [*Mean (n=10)*], [*Min*], [*Max*]),
+    "Ease of finding temperature data", "4.5", "4", "5",
+    "Ease of exploring historical data", "4.1", "3", "5",
+    "Loading speed", "4.2", "2", "5",
+    "Visual design", "4.5", "3", "5",
+    "Usefulness", "4.0", "2", "5",
+    "Recommendation likelihood", "4.5", "3", "5",
+  ),
+  caption: [Usability survey results (5-point scale, n = 10)]
+) <usability-survey>
+
+Two participants provided written qualitative feedback. One requested onboarding instructions for new users; this feedback directly motivated the two-stage first-visit hint overlay added in the subsequent development iteration (the hint sequence guides new users through map interaction, source toggling, and pixel inspection). The second requested a feature to compare multiple water bodies simultaneously, which is noted as a potential future enhancement but was out of scope for this project.
+
+The lowest individual score (loading speed, one respondent rating 2/5) is consistent with the known issue that the largest Landsat annual Parquet shards reach approximately 50 MB, producing a noticeable wait on slower connections. This is acknowledged in @performance.
+
+*Limitations.* The survey used a convenience sample of ten University of Nottingham Malaysia students rather than the platform's intended users (reservoir operators and ecological researchers). No formal questionnaire protocol or SUS instrument was applied. The results are indicative of general usability rather than domain-expert acceptance.
 == Testing
-The data pipeline is covered by a `pytest` suite of 96 tests focused on unit-level processing logic and supporting helpers for the ECOSTRESS, Landsat, and D1 code paths. Tests cover areas including processor pipeline logic, quality-filter bitmask decoding for both the ECOSTRESS `QC` band and the Landsat `QA_PIXEL` field, raster clipping and mosaic helpers, and D1 insert and query helpers. No end-to-end integration tests exist: the suite exercises individual modules in isolation rather than running the full STAC-to-R2 pipeline against live data. The GitHub Actions deployment workflow runs the test suite before deploying Lambda and infrastructure changes, so the suite acts as a regression gate that prevents broken code from reaching the production pipeline.
+The data pipeline is covered by a `pytest` suite of 96 passing tests (`uv run pytest tests/ -q`). Tests are organised by module and cover: ECOSTRESS processor pipeline logic; ECOSTRESS `QC` bitmask decoding and filter-flag computation; Landsat `QA_PIXEL` bitmask decoding; raster clipping, mosaic, and spatial-outlier helpers; D1 insert, query, and upsert helpers; Parquet date-range slicing; and `local_fill` CLI argument handling. The TypeScript frontend passes `tsc --noEmit` with zero type errors and zero lint errors; `svelte-check` reports 0 errors and 6 warnings in non-critical component files (unused CSS selectors and a type-narrowing pattern in a third-party chart wrapper), none of which affect runtime behaviour. The GitHub Actions deployment workflow runs the full `pytest` suite before building and pushing the Lambda image and deploying infrastructure changes, so the suite acts as a regression gate against the production pipeline.
+
+No end-to-end integration tests exist: the suite exercises individual modules in isolation rather than running a full STAC-to-R2 pipeline against live NASA data. The frontend has no automated UI tests; correctness of the map interaction, threshold slider, and DuckDB-WASM point-history query was verified by manual smoke-testing on the live deployment across Chrome and Firefox. These are acknowledged gaps that a follow-on project could address with a CI-connected integration harness and a Playwright test suite.
+
+== Requirements and Objectives Traceability
+
+@traceability maps each retained objective and non-functional requirement to the primary evidence in this report and records the delivery result.
+
+#figure(
+  table(
+    columns: (auto, auto, auto),
+    table.header([*Requirement / Objective*], [*Evidence*], [*Result*]),
+    [O1: Data storage & retrieval optimisation],
+      [R2+D1 hybrid store; gzipped CSV + year-sharded Parquet (migration 0018); D1 usage at 0.05% of free-tier read limit (@cloudflare-usage); 12-month cost projection (@cost-projection)],
+      [Met],
+    [O3: Enhanced visualisation features],
+      [deck.gl WebGL pixel overlay; DuckDB-WASM in-browser point-history queries; threshold slider; colour-palette selector; CSV/GeoTIFF/Parquet per-observation downloads (Appendix A)],
+      [Met],
+    [O4: Multi-platform satellite integration],
+      [7,540 Landsat scenes processed alongside 3,341 ECOSTRESS scenes; shared Lambda processor; source toggle in UI; @filter-stats],
+      [Met],
+    [O6: Code maintainability & documentation],
+      [Terraform IaC for all cloud resources; 96 pytest unit tests; zero tsc errors; Appendices A and B (user and deployment guides); CLAUDE.md developer reference in repository],
+      [Met],
+    [Cost NFR (<\$5/month recurring)],
+      [Steady-state recurring cost \$0.03/month (ECR only); <\$0.05/month including projected R2 overage; @cost-summary, @cost-projection],
+      [Met],
+    [Automation NFR (no manual ingestion)],
+      [Two CloudWatch Event Rules (daily ECOSTRESS + Landsat triggers); SQS fan-out; on-demand backfill via `/admin/requests`; see Automation and Observability section],
+      [Met],
+    [Throughput NFR],
+      [13.5 s mean per ECOSTRESS scene; 15.7 s mean per Landsat scene; 50 concurrent workers; 1,271-scene backfill in under seven minutes; @performance],
+      [Met],
+    [UI responsiveness NFR (interactions \<1 s)],
+      [GPU-rendered deck.gl layer; threshold, hover, and palette changes handled on GPU after shard load; DuckDB-WASM point-history with no additional network request; @performance],
+      [Met],
+    [Observability NFR],
+      [Admin dashboard shows per-job status, duration, thumbnail, and 6-bit filter-flag breakdown; failed scenes logged with reprocessing context; no AWS Console access required; see Automation and Observability section],
+      [Met],
+  ),
+  caption: [Requirements and objectives traceability]
+) <traceability>
 
 == Limitations
 A small residual cost of \$0.03 per month remains for ECR container-image storage (the current image is 326 MB at \$0.10/GB-month) @aws-ecr-pricing. R2 storage is the tightest constraint: at 9.91 GB against a 10 GB free tier, steady-state ingestion will exceed the threshold within weeks and incur a slowly growing overage charge (~\$0.015/GB-month). All other dimensions (Lambda compute, SQS, and Workers requests) remain well within their respective free-tier limits. The pipeline's daily schedule is a ceiling rather than a guarantee: sub-daily updates would require either a more frequent schedule or continuous polling of STAC, neither of which was required for this project. The sensor-native water masks are used in place of an external Sentinel-2 verification pipeline; a formal validation study against Sentinel-2 is beyond the current scope.
@@ -647,7 +714,7 @@ A small residual cost of \$0.03 per month remains for ECR container-image storag
 = Summary and Reflections <summary>
 
 == Summary of Results
-The project delivered all four retained objectives and descoped two stretch objectives in consultation with the supervisor. The objectives table in @objectives-status records the formal delivery status; in practical terms, the platform became operationally sustainable, automated for routine ingestion, multi-sensor rather than ECOSTRESS-only, and substantially more interactive for end users. Evaluation showed recurring cost reduced to under \$0.05/month (see @cost-summary), while users gained per-pixel inspection, threshold filtering, archive downloads, and point-history queries in the browser.
+The project implemented all four retained objectives and removed two stretch objectives from scope in consultation with the supervisor. The objectives table in @objectives-status records the formal implementation status; in practical terms, the platform became operationally sustainable, automated for routine ingestion, multi-sensor rather than ECOSTRESS-only, and substantially more interactive for end users. Evaluation showed recurring cost reduced to under \$0.05/month (see @cost-summary), while users gained per-pixel inspection, threshold filtering, archive downloads, and point-history queries in the browser.
 
 == Implications for Stakeholders
 For reservoir operators and ecological researchers in Southeast Asia, the practical implication is that the platform no longer depends on paid always-on hosting for routine operation. Because the stack is defined in Terraform and documented in the repository, a successor maintainer can recreate the infrastructure in their own Cloudflare and AWS accounts. The `local_fill` CLI and the on-demand backfill UI together mean that filling gaps in historical coverage, for example after a sensor outage, does not require editing the scheduled ingestion code.
@@ -668,11 +735,11 @@ Progress against the six deliverables from the proposal is summarised below. Sta
     columns: (auto, auto, auto),
     table.header([*Deliverable*], [*Status*], [*Notes*]),
     "D1: Refactored codebase", "Complete", "SvelteKit + Terraform + Lambda; single-commit deploy",
-    "D2: Sentinel-2 water mask", "Descoped", "Replaced by sensor-native QA layers (ECOSTRESS water band, Landsat QA_PIXEL bit 7)",
+    "D2: Sentinel-2 water mask", "Removed from scope", "Replaced by sensor-native QA layers (ECOSTRESS water band, Landsat QA_PIXEL bit 7)",
     "D3: Pixel-level storage", "Complete", "R2 + D1 hybrid; gzipped CSV + Parquet (migration 0018)",
     "D4: Interactive dashboard", "Complete", "MapLibre + deck.gl; DuckDB-WASM for point history; admin dashboard with filter explainability",
     "D5: Landsat integration", "Complete", "lambda_functions/landsat; sharing processor with ECOSTRESS",
-    "D6: Technical documentation", "In Progress", "This report; user and deployment guides in Appendices A and B",
+    "D6: Technical documentation", "Complete", "This report; user and deployment guides in Appendices A and B",
   ),
   caption: [Summary of deliverable status]
 )
@@ -696,7 +763,7 @@ The analytical design makes a less obvious choice than most comparable applicati
 
 The most consistent demand of this project was breadth, and most of it arrived as problems to solve rather than technologies to learn. Choosing which cloud services to use required evaluating competing providers against real cost and constraint tradeoffs before committing. Getting satellite data into the pipeline meant understanding how ECOSTRESS and Landsat distribute their products, which led to STAC catalogs and direct COG access. Making the map interactive with tens of thousands of pixels meant finding an approach that could handle that scale in the browser, which led to WebGL rendering via deck.gl after simpler options proved too slow. Deciding how to let users query point history while balancing storage and server compute costs meant first working out that Parquet was the right storage format for the problem, then discovering DuckDB-WASM as a way to query it in-browser. Reproducible deployment was a goal that led to learning Terraform. None of this followed a "learn X, apply X" pattern; the technology came at the end of the reasoning, not the beginning.
 
-Overall the project delivered what it set out to do. The platform is deployed, usable, automated, and running within free-tier limits. The descoped objectives (Sentinel-2 water-mask validation and zone differentiation) were cut because the pipeline work consumed more of the timeline than expected, not because they were technically blocked.
+Overall the project achieved what it set out to do. The platform is deployed, usable, automated, and running within free-tier limits. The objectives removed from scope (Sentinel-2 water-mask validation and zone differentiation) were cut because the pipeline work consumed more of the timeline than expected, not because they were technically blocked.
 
 The clearest lesson from the project is to challenge inherited assumptions earlier. The original system used NASA's AppEEARS service for data retrieval, and this was taken as a given for most of the project because that is what the previous team had built on. The discovery that ECOSTRESS data is accessible directly as Cloud-Optimised GeoTIFFs via STAC, without submitting an order and waiting hours for it to be fulfilled, only came in March. Switching to direct access was the right architectural decision and it is what the final system is built on, but arriving at it later in the project meant less time to build on top of it. The better habit would have been to re-evaluate the core assumptions of any inherited system at the start, rather than treating the previous team's choices as constraints.
 
@@ -707,7 +774,7 @@ Some improvements that could be made to the project are:
 - *Automated anomaly detection and alerting.* The admin dashboard surfaces failures passively; a once-per-day check that posts to an email or messaging service when any feature has gone more than N days without a successful observation would close the observability loop.
 - *Extending the polygon set beyond Southeast Asia.* The pipeline is polygon-driven with no regional assumptions; adding reservoirs elsewhere is a data-entry task rather than an engineering one.
 - *Public API documentation.* The `/api/` surface is stable but undocumented externally; an OpenAPI description would let third-party researchers consume temperature data directly.
-- *Sentinel-2-assisted water-mask validation.* The descoped O2 objective would slot into the pipeline as an additional filter stage if future stakeholders required formal mask-validation evidence.
+- *Sentinel-2-assisted water-mask validation.* The removed O2 objective would slot into the pipeline as an additional filter stage if future stakeholders required formal mask-validation evidence.
 - *OPERA DSWx-HLS water mask.* The current pipeline relies on the sensor's own quality raster to identify water pixels: the ECOSTRESS `water` band for ECOSTRESS scenes and the CFMask-derived bit 7 of `QA_PIXEL` for Landsat. A dedicated, independently validated water-extent product would be more reliable. NASA's OPERA Dynamic Surface Water Extent from Harmonized Landsat Sentinel-2 (DSWx-HLS) @opera-dswx-hls provides 30 m per-pixel water classification updated on each Landsat/Sentinel-2 acquisition. Substituting DSWx-HLS as the water mask source, co-registered and resampled to the LST raster at processing time, would reduce both false water inclusions (land pixels near shorelines classed as water by QA_PIXEL) and false exclusions (water pixels near cloud edges discarded by an overly conservative cloud-shadow dilation).
 - *CNN-based cloud masking for Landsat.* The Landsat cloud rejection stage uses the CFMask algorithm embedded in the `QA_PIXEL` bitmask, which is known to miss thin cirrus and haze, as discussed in @filter-stats. The DLR `ukis-csmask` library @ukis-csmask provides a convolutional neural-network cloud and cloud-shadow mask for Landsat and Sentinel-2 that has been shown to outperform CFMask on these edge cases. Integrating it as an optional second-pass cloud stage, applied to pixels that passed the `QA_PIXEL` cloud test, would reduce the scene-wide cloud contamination that the existing Hampel spatial-outlier filter cannot detect.
 

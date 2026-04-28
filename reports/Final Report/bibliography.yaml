@@ -401,3 +401,27 @@ ukis-csmask:
   url:
     value: "https://github.com/dlr-eoc/ukis-csmask"
     date: 2026-04-23
+lswt-ecology-prediction:
+  title: "Global maps of lake surface water temperatures reveal pitfalls of air-for-water substitutions in ecological prediction"
+  author: "M. Mammola"
+  type: "article"
+  date: 2023
+  url:
+    value: "https://doi.org/10.1111/ecog.06595"
+    date: 2026-04-28
+lake-thermal-regions:
+  title: "Global lake thermal regions shift under climate change"
+  author: ["R. I. Woolway", "C. J. Merchant"]
+  type: "article"
+  date: 2020
+  url:
+    value: "https://doi.org/10.1038/s41467-020-15108-z"
+    date: 2026-04-28
+river-temp-ecology:
+  title: "Rising water temperature in rivers: Ecological impacts and future resilience"
+  author: ["M. F. Johnson", "L. K. Albertson", "A. C. Algar", "S. J. Dugdale", "P. Edwards", "J. England", "C. Gibbins", "S. Kazama", "D. Komori", "A. Maccoll", "E. A. Scholl", "R. Wilby", "F. de Oliveira Roque", "P. Wood"]
+  type: "article"
+  date: 2024
+  url:
+    value: "https://doi.org/10.1002/wat2.1724"
+    date: 2026-04-28
