@@ -33,8 +33,7 @@ from rasterio.merge import merge
 from rasterio.warp import reproject, Resampling
 
 
-OPERA_SHORT_NAME = "OPERA_L3_DSWX-HLS"
-OPERA_VERSION = "1"
+OPERA_SHORT_NAME = "OPERA_L3_DSWX-HLS_V1"
 
 # B01_WTR values that represent surface water
 WATER_VALUES = {1, 2}  # Open Water, Partial Surface Water
@@ -67,7 +66,6 @@ def search_opera_dswx(bbox: tuple, date: str, tolerance_days: int = 0) -> list:
     try:
         results = earthaccess.search_data(
             short_name=OPERA_SHORT_NAME,
-            version=OPERA_VERSION,
             bounding_box=(min_lon, min_lat, max_lon, max_lat),
             temporal=(f"{start}T00:00:00Z", f"{end}T23:59:59Z"),
         )
@@ -125,7 +123,7 @@ def fetch_opera_water_mask(
     Callers should fall back to sensor-native water masks when None is returned.
     """
     try:
-        earthaccess.login()
+        earthaccess.login(strategy="environment")
     except Exception as e:
         print(f"[OPERA] earthaccess login failed: {e}")
         return None
