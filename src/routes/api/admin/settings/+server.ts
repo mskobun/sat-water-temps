@@ -5,7 +5,9 @@ const settingValidators: Record<string, (value: unknown) => string | null> = {
 	data_delay_days: (value) => validateIntSetting(value, 0, 30),
 	catchup_enabled: (value) => validateBooleanSetting(value),
 	catchup_overlap_days: (value) => validateIntSetting(value, 0, 30),
-	catchup_max_days: (value) => validateIntSetting(value, 1, 90)
+	catchup_max_days: (value) => validateIntSetting(value, 1, 90),
+	landsat_water_mask: (value) =>
+		['native', 'opera_dswx'].includes(String(value)) ? String(value) : null
 };
 
 function validateIntSetting(value: unknown, min: number, max: number): string | null {

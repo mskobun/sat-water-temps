@@ -68,9 +68,13 @@ def _get_s3_hrefs(item) -> dict:
 
 
 def iter_landsat_processor_bodies(
-    sd: str, ed: str, *, polygons: list
+    sd: str, ed: str, *, polygons: list, processing_settings: Dict[str, Any] | None = None
 ) -> Iterator[Dict[str, Any]]:
-    """Yield Landsat processor message bodies for the given date range and polygons."""
+    """Yield Landsat processor message bodies for the given date range and polygons.
+
+    processing_settings is included in each yielded body so the processor can
+    apply the correct water mask and other per-run options without reading env vars.
+    """
     for poly in polygons:
         items = _search_stac(sd, ed, poly["bbox"])
         if not items:
@@ -97,7 +101,7 @@ def iter_landsat_processor_bodies(
             )
         for scene_date, scenes in scenes_by_date.items():
             scene_datetime = min(s["datetime"] for s in scenes)
-            yield {
+            body: Dict[str, Any] = {
                 "source": "landsat",
                 "aid": poly["aid"],
                 "date": scene_datetime,
@@ -105,6 +109,9 @@ def iter_landsat_processor_bodies(
                 "location": poly["location"],
                 "scenes": scenes,
             }
+            if processing_settings is not None:
+                body["processing_settings"] = processing_settings
+            yield body
             print(
                 f"  Yield: AID={poly['aid']} ({poly['name']}) date={scene_date} ({len(scenes)} scene(s))"
             )
@@ -137,6 +144,13 @@ def handler(event, context):
             "statusCode": 400,
             "body": json.dumps({"error": f"feature {feature_filter!r} not found"}),
         }
+
+    # Processing settings: prefer explicit payload (manual triggers / per-run overrides),
+    # fall back to D1 app_settings for scheduled runs.
+    processing_settings: Dict[str, Any] = event.get("processing_settings") or {
+        "water_mask": get_setting("landsat_water_mask", default="native")
+    }
+    print(f"Landsat initiator: processing_settings={processing_settings}")
 
     explicit_dates = "start_date" in event
     if explicit_dates:
@@ -195,7 +209,7 @@ def handler(event, context):
     total_messages = 0
 
     try:
-        bodies = iter_landsat_processor_bodies(sd, ed, polygons=polygons)
+        bodies = iter_landsat_processor_bodies(sd, ed, polygons=polygons, processing_settings=processing_settings)
         if not explicit_dates:
             bodies = filter_uncompleted_bodies(
                 bodies,

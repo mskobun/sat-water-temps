@@ -115,11 +115,12 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	}
 
 	const body = await request.json();
-	const { startDate, endDate, description, source } = body as {
+	const { startDate, endDate, description, source, processingSettings } = body as {
 		startDate?: string;
 		endDate?: string;
 		description?: string;
 		source?: 'ecostress' | 'landsat';
+		processingSettings?: Record<string, string> | null;
 	};
 
 	if (!startDate || !endDate) {
@@ -209,7 +210,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		}, { status: 202 });
 	}
 
-	const payload = {
+	const payload: Record<string, unknown> = {
 		start_date: result.startDate,
 		end_date: result.endDate,
 		trigger_type: 'manual',
@@ -217,6 +218,9 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		description: result.description,
 		run_id: result.runId
 	};
+	if (processingSettings) {
+		payload.processing_settings = processingSettings;
+	}
 	const invokeResult = await invokeInitiator(aws, lambdaUrl, payload);
 	const invokeError = getInvokeError(invokeResult);
 

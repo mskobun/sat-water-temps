@@ -12,10 +12,14 @@ B01_WTR classification values:
   254 = Ocean Masked
   255 = Fill
 
-When enabled (OPERA_WATER_MASK_ENABLED=1), fetch_opera_water_mask() returns
-a boolean water mask (True = water pixel) reprojected to match the target LST
-raster grid. Returns None on any failure or when no OPERA granule is found,
-allowing callers to fall back to sensor-native masks.
+fetch_opera_water_mask() returns a boolean water mask (True = water pixel)
+reprojected to match the target LST raster grid. Returns None on any failure
+or when no OPERA granule is found, allowing callers to fall back to
+sensor-native masks.
+
+Whether to use OPERA is controlled by processing_settings["water_mask"] in
+the SQS message body (set by the Landsat initiator from D1 app_settings or
+an explicit per-run override in the Lambda event payload).
 """
 
 from __future__ import annotations
@@ -37,11 +41,6 @@ OPERA_SHORT_NAME = "OPERA_L3_DSWX-HLS_V1"
 
 # B01_WTR values that represent surface water
 WATER_VALUES = {1, 2}  # Open Water, Partial Surface Water
-
-
-def is_opera_enabled() -> bool:
-    """Return True if OPERA water mask is enabled via env var."""
-    return os.environ.get("OPERA_WATER_MASK_ENABLED", "").strip() in ("1", "true", "yes")
 
 
 def search_opera_dswx(bbox: tuple, date: str, tolerance_days: int = 0) -> list:
@@ -133,6 +132,19 @@ def fetch_opera_water_mask(
         print(f"[OPERA] No granules found for bbox={bbox} date={date} ±{tolerance_days}d")
         return None
 
+    # Log granule acquisition dates so temporal matching can be verified
+    for g in granules:
+        try:
+            links = g.data_links(access="external")
+            b01 = next((l for l in links if "B01_WTR" in l), None)
+            # Filename contains acquisition datetime, e.g. _T51QUU_20260330T021623Z_
+            if b01:
+                import re as _re
+                m = _re.search(r'_(\d{8}T\d{6}Z)_', b01)
+                acq = m.group(1) if m else "?"
+                print(f"[OPERA]   granule acq={acq} (target={date})")
+        except Exception:
+            pass
     print(f"[OPERA] Found {len(granules)} granule(s) for {date}")
 
     # Collect B01_WTR hrefs

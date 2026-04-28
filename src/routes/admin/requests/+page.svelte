@@ -64,9 +64,23 @@
 	let dialogOpen = $state(false);
 	let triggerSource = $state<Source>('ecostress');
 
+	// Processing overrides — null means "use the global default from settings"
+	let triggerWaterMask = $state<'native' | 'opera_dswx' | null>(null);
+	let globalWaterMask = $state<'native' | 'opera_dswx'>('native');
+
 	$effect(() => {
 		if (dialogOpen) {
 			triggerSource = source;
+			triggerWaterMask = null; // reset to global default on each open
+			// Load the current global default so we can pre-label the selector
+			fetch('/api/admin/settings')
+				.then((r) => r.json())
+				.then((s: Record<string, string>) => {
+					if (s.landsat_water_mask === 'opera_dswx' || s.landsat_water_mask === 'native') {
+						globalWaterMask = s.landsat_water_mask;
+					}
+				})
+				.catch(() => {});
 		}
 	});
 	let triggerDateRange = $state<DateRange>({ start: undefined, end: undefined });
@@ -75,6 +89,7 @@
 	let triggerError = $state('');
 	let triggerSuccess = $state('');
 	let calendarOpen = $state(false);
+	let overridesOpen = $state(false);
 
 	const dayCount = $derived(() => {
 		const { start, end } = triggerDateRange;
@@ -144,15 +159,21 @@
 		triggerSuccess = '';
 
 		try {
+			const requestBody: Record<string, unknown> = {
+				startDate: triggerDateRange.start!.toString(),
+				endDate: triggerDateRange.end!.toString(),
+				description: triggerDescription || undefined,
+				source: triggerSource
+			};
+			// Only send processingSettings for Landsat, and only when the user has
+			// explicitly selected an override (null = use global default).
+			if (triggerSource === 'landsat' && triggerWaterMask !== null) {
+				requestBody.processingSettings = { water_mask: triggerWaterMask };
+			}
 			const response = await fetch('/api/admin/trigger', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					startDate: triggerDateRange.start!.toString(),
-					endDate: triggerDateRange.end!.toString(),
-					description: triggerDescription || undefined,
-					source: triggerSource
-				})
+				body: JSON.stringify(requestBody)
 			});
 
 			const data = await response.json() as { count?: number; error?: string; warning?: string; message?: string };
@@ -293,6 +314,38 @@
 								bind:value={triggerDescription}
 							/>
 						</div>
+						{#if triggerSource === 'landsat'}
+							<div class="border rounded-md">
+								<button
+									class="w-full flex items-center justify-between px-3 py-2 text-sm font-medium hover:bg-muted/50 transition-colors"
+									onclick={() => { overridesOpen = !overridesOpen; }}
+								>
+									<span>Processing overrides</span>
+									<span class="text-muted-foreground text-xs">{overridesOpen ? '▲' : '▼'}</span>
+								</button>
+								{#if overridesOpen}
+									<div class="px-3 pb-3 pt-1 flex flex-col gap-2 border-t">
+										<div class="flex flex-col gap-1.5">
+											<Label class="text-xs text-muted-foreground">Water mask</Label>
+											<div class="flex gap-1 rounded-md border p-1 w-fit">
+												<button
+													class="rounded px-2.5 py-1 text-xs font-medium transition-colors {triggerWaterMask === null ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+													onclick={() => { triggerWaterMask = null; }}
+												>Default ({globalWaterMask === 'opera_dswx' ? 'OPERA' : 'Native'})</button>
+												<button
+													class="rounded px-2.5 py-1 text-xs font-medium transition-colors {triggerWaterMask === 'native' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+													onclick={() => { triggerWaterMask = 'native'; }}
+												>Native</button>
+												<button
+													class="rounded px-2.5 py-1 text-xs font-medium transition-colors {triggerWaterMask === 'opera_dswx' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+													onclick={() => { triggerWaterMask = 'opera_dswx'; }}
+												>OPERA DSWx-HLS</button>
+											</div>
+										</div>
+									</div>
+								{/if}
+							</div>
+						{/if}
 						{#if triggerError}
 							<Alert variant="destructive">
 								<AlertDescription>{triggerError}</AlertDescription>

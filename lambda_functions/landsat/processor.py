@@ -29,7 +29,7 @@ from common.visualization import tif_to_png, GLOBAL_MIN, GLOBAL_MAX
 from common.parquet import upload_parquet_to_r2
 from common.statistics import compute_filter_stats, summarize_temperature_series
 from common.exceptions import NoDataError
-from common.opera_dswx import fetch_opera_water_mask, is_opera_enabled
+from common.opera_dswx import fetch_opera_water_mask
 from landsat.filters import apply_landsat_filters
 from d1 import log_job_to_d1
 
@@ -65,6 +65,7 @@ def process_one_record(body):
     name = body["name"]
     location = body.get("location", "lake")
     scenes = body["scenes"]
+    processing_settings = body.get("processing_settings", {})
     feature_id = f"{name}/{location}" if location != "lake" else name
 
     print(f"[Landsat][{feature_id}] Processing {len(scenes)} scene(s) for date={date_str}")
@@ -168,7 +169,7 @@ def process_one_record(body):
 
         # Optionally fetch OPERA DSWx-HLS water mask
         opera_water = None
-        if is_opera_enabled():
+        if processing_settings.get("water_mask") == "opera_dswx":
             bbox = polygon_geom.bounds  # (min_lon, min_lat, max_lon, max_lat)
             opera_water = fetch_opera_water_mask(
                 bbox=bbox,
