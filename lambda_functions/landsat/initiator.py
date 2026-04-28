@@ -12,8 +12,16 @@ from typing import Any, Dict, Iterator
 
 import boto3
 from pystac_client import Client as STACClient
-from shapely.geometry import shape, mapping
+from shapely.geometry import shape
 
+from common.catchup import (
+    calculate_catchup_window,
+    combined_bbox,
+    filter_uncompleted_bodies,
+    get_catchup_settings,
+    latest_landsat_stac_day,
+    latest_processed_day,
+)
 from common.polygons import load_polygons, filter_polygons_for_feature
 from d1 import log_job_to_d1, get_setting, log_data_request
 
@@ -119,26 +127,7 @@ def handler(event, context):
     description = event.get("description")
     run_id = event.get("run_id")  # set by admin trigger API
 
-    # Date range — default: look back 2 days for Landsat latency
-    delay_days = int(get_setting("data_delay_days", default=2))
-    end_date = datetime.utcnow() - timedelta(days=delay_days)
-    start_date = end_date - timedelta(days=1)
-
-    if "start_date" in event:
-        sd = event["start_date"]  # YYYY-MM-DD format
-        ed = event.get("end_date", sd)
-    else:
-        sd = start_date.strftime("%Y-%m-%d")
-        ed = end_date.strftime("%Y-%m-%d")
-
     feature_filter = event.get("feature")
-    if not description:
-        feature_label = f" [{feature_filter}]" if feature_filter else ""
-        description = f"{'Manual' if trigger_type == 'manual' else 'Daily'} Landsat scan for {sd}" + (
-            f" to {ed}" if sd != ed else ""
-        ) + feature_label
-
-    print(f"Landsat initiator: searching {sd} to {ed}" + (f" (feature={feature_filter})" if feature_filter else ""))
 
     polygons = load_polygons()
     polygons = filter_polygons_for_feature(polygons, feature_filter)
@@ -148,6 +137,50 @@ def handler(event, context):
             "statusCode": 400,
             "body": json.dumps({"error": f"feature {feature_filter!r} not found"}),
         }
+
+    explicit_dates = "start_date" in event
+    if explicit_dates:
+        sd = event["start_date"]  # YYYY-MM-DD format
+        ed = event.get("end_date", sd)
+        window_metadata = {"mode": "explicit", "start_date": sd, "end_date": ed}
+    else:
+        delay_days = int(get_setting("data_delay_days", default=2))
+        fallback_end = datetime.utcnow() - timedelta(days=delay_days)
+        fallback_start = fallback_end - timedelta(days=1)
+        settings = get_catchup_settings()
+        bbox = combined_bbox(polygons)
+        latest_catalog = latest_landsat_stac_day(
+            bbox=bbox,
+            stac_url=STAC_URL,
+            collection=COLLECTION,
+        )
+        window = calculate_catchup_window(
+            latest_processed=latest_processed_day("landsat"),
+            latest_catalog=latest_catalog,
+            settings=settings,
+            fallback_start=fallback_start.strftime("%Y-%m-%d"),
+            fallback_end=fallback_end.strftime("%Y-%m-%d"),
+        )
+        sd = window.start_date
+        ed = window.end_date
+        window_metadata = {
+            "mode": window.reason,
+            "start_date": sd,
+            "end_date": ed,
+            "latest_processed_day": window.latest_processed_day,
+            "latest_catalog_day": window.latest_catalog_day,
+            "overlap_days": window.overlap_days,
+            "max_days": window.max_days,
+            "catchup_enabled": window.enabled,
+        }
+
+    if not description:
+        feature_label = f" [{feature_filter}]" if feature_filter else ""
+        description = f"{'Manual' if trigger_type == 'manual' else 'Daily'} Landsat scan for {sd}" + (
+            f" to {ed}" if sd != ed else ""
+        ) + feature_label
+
+    print(f"Landsat initiator: searching {sd} to {ed}" + (f" (feature={feature_filter})" if feature_filter else ""))
     sqs = boto3.client("sqs")
     start_time = time.time()
 
@@ -155,14 +188,24 @@ def handler(event, context):
     log_job_to_d1(
         job_type="landsat_submit",
         status="started",
-        metadata_json=json.dumps({"start_date": sd, "end_date": ed}),
+        metadata_json=json.dumps(window_metadata),
         fatal=False,
     )
 
     total_messages = 0
 
     try:
-        for message_body in iter_landsat_processor_bodies(sd, ed, polygons=polygons):
+        bodies = iter_landsat_processor_bodies(sd, ed, polygons=polygons)
+        if not explicit_dates:
+            bodies = filter_uncompleted_bodies(
+                bodies,
+                source="landsat",
+                job_type="landsat_process",
+                start_day=sd,
+                end_day=ed,
+            )
+
+        for message_body in bodies:
             sqs.send_message(
                 QueueUrl=sqs_queue_url,
                 MessageBody=json.dumps(message_body),
