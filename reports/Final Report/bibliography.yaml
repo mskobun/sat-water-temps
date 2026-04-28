@@ -15,6 +15,11 @@ proposal:
   author: "Maksim Skobun"
   type: "report"
   date: 2025
+interim-report:
+  title: "Interim Report: Satellite Water Temperature Web Application Enhancement"
+  author: "Maksim Skobun"
+  type: "report"
+  date: 2025
 heroku-pricing:
   title: "Heroku Pricing"  
   author: "Heroku"
@@ -29,7 +34,7 @@ supabase-pricing:
   url:
     value: "https://www.supabase.com/pricing"
     date: 2025-12-31
-serverless-compiuting:
+serverless-computing:
   title: "Serverless computing: economic and architectural impact"
   author: ["G. Adzic", "R. Chatley"]
   url: "https://www.doc.ic.ac.uk/~rbc/papers/fse-serverless-17.pdf"
@@ -190,6 +195,19 @@ parquet-spec:
   url:
     value: "https://parquet.apache.org/docs/file-format/"
     date: 2026-04-22
+geojson:
+  title: "RFC 7946: The GeoJSON Format"
+  author: ["H. Butler", "M. Daly", "A. Doyle", "S. Gillies", "S. Hagen", "T. Schaub"]
+  type: "article"
+  url: "https://www.rfc-editor.org/rfc/rfc7946"
+  date: 2016
+geoparquet:
+  title: "GeoParquet Specification"
+  author: "Open Geospatial Consortium"
+  type: "web"
+  url:
+    value: "https://geoparquet.org/"
+    date: 2026-04-30
 rasterio:
   title: "Rasterio: Geospatial Raster I/O for Python Programmers"
   author: ["S. Gillies"]
@@ -338,6 +356,27 @@ cloudflare-pages-limits:
   url:
     value: "https://developers.cloudflare.com/pages/platform/limits/"
     date: 2026-04-22
+cloudflare-network:
+  title: "Cloudflare Global Network"
+  author: "Cloudflare"
+  type: "web"
+  url:
+    value: "https://workers.cloudflare.com/network"
+    date: 2026-04-30
+cloudflare-ddos:
+  title: "Cloudflare DDoS Protection"
+  author: "Cloudflare"
+  type: "web"
+  url:
+    value: "https://developers.cloudflare.com/ddos-protection/"
+    date: 2026-04-30
+cloudflare-bot-management:
+  title: "Cloudflare Bot Management and Protection"
+  author: "Cloudflare"
+  type: "web"
+  url:
+    value: "https://developers.cloudflare.com/bots/"
+    date: 2026-04-30
 aws-lambda-quotas:
   title: "AWS Lambda Quotas"
   author: "Amazon Web Services"
@@ -394,6 +433,76 @@ opera-dswx-hls:
   url:
     value: "https://www.jpl.nasa.gov/go/opera/products/dswx-product-suite/"
     date: 2026-04-23
+opera-dswx-s1:
+  title: "OPERA Dynamic Surface Water Extent from Sentinel-1 (DSWx-S1)"
+  author: "NASA"
+  type: "web"
+  url:
+    value: "https://www.earthdata.nasa.gov/data/catalog/pocloud-opera-l3-dswx-s1-v1-1.0"
+    date: 2026-04-29
+opera-dswx-atbd:
+  title: "Algorithm Theoretical Basis Document: OPERA Dynamic Surface Water Extent from Harmonized Landsat Sentinel-2"
+  author: "NASA Jet Propulsion Laboratory"
+  type: "report"
+  url:
+    value: "https://archive.podaac.earthdata.nasa.gov/podaac-ops-cumulus-docs/web-misc/opera/atbd/DSWx-HLS_ATBD_V1_4_DAAC_Distribution.pdf"
+    date: 2026-04-29
+opera-dswx-validation:
+  title: "OPERA Dynamic Surface Water Extents for Harmonized Landsat Sentinel-2 (DSWx-HLS) Validation Activities"
+  author: ["Nicholas Arena", "Grace Bato", "David Bekaert", "Matthew Bonnema", "Steven Chan", "Bruce Chapman", "John W. Jones", "Alexander L. Handwerger", "Alex Lewandowski", "Charlie Marshak", "Simran Sangha", "Karthik Venkataramani"]
+  type: "article"
+  date: 2023
+  url:
+    value: "https://doi.org/10.1109/IGARSS52108.2023.10283397"
+    date: 2026-04-30
+foga-2017-cloud:
+  title: "Cloud detection algorithm comparison and validation for operational Landsat data products"
+  author: ["S. Foga", "P. L. Scaramuzza", "S. Guo", "Z. Zhu", "R. D. Dilley", "T. Beckmann", "G. L. Schmidt", "J. L. Dwyer", "M. J. Hughes", "B. Laue"]
+  type: "article"
+  date: 2017
+  url:
+    value: "https://doi.org/10.1016/j.rse.2017.03.026"
+    date: 2026-04-29
+jeppesen-2019-cnn-cloud:
+  title: "High-Quality Cloud Masking of Landsat 8 Imagery Using Convolutional Neural Networks"
+  author: ["J. H. Jeppesen", "R. H. Jacobsen", "F. Inceoglu", "T. S. Toftegaard"]
+  type: "article"
+  date: 2019
+  url:
+    value: "https://doi.org/10.3390/rs11212591"
+    date: 2026-04-29
+wieland-2019-cnn-cloud:
+  title: "Multi-sensor cloud and cloud shadow segmentation with a convolutional neural network"
+  author: ["M. Wieland", "Y. Li", "S. Martinis"]
+  type: "article"
+  date: 2019
+  url:
+    value: "https://doi.org/10.1016/j.rse.2019.05.022"
+    date: 2026-04-29
+fisher-2016-water-indices:
+  title: "Comparing Landsat water index methods for automated water classification in eastern Australia"
+  author: ["A. Fisher", "N. Flood", "T. Danaher"]
+  type: "article"
+  date: 2016
+  url:
+    value: "https://doi.org/10.1016/j.rse.2015.12.055"
+    date: 2026-04-29
+jrc-global-surface-water:
+  title: "High-resolution mapping of global surface water and its long-term changes"
+  author: ["J.-F. Pekel", "A. Cottam", "N. Gorelick", "A. S. Belward"]
+  type: "article"
+  date: 2016
+  url:
+    value: "https://doi.org/10.1038/nature20584"
+    date: 2026-04-29
+bangira-2019-complex-water:
+  title: "Comparing Thresholding with Machine Learning Classifiers for Mapping Complex Water"
+  author: ["T. Bangira", "S. M. Alfieri", "M. Menenti", "A. van Niekerk"]
+  type: "article"
+  date: 2019
+  url:
+    value: "https://doi.org/10.3390/rs11111351"
+    date: 2026-04-29
 ukis-csmask:
   title: "ukis-csmask: Multi-spectral cloud and cloud shadow mask for Landsat and Sentinel-2"
   author: "German Aerospace Center (DLR) Earth Observation Center"
@@ -401,3 +510,96 @@ ukis-csmask:
   url:
     value: "https://github.com/dlr-eoc/ukis-csmask"
     date: 2026-04-23
+lswt-ecology-prediction:
+  title: "Global maps of lake surface water temperatures reveal pitfalls of air-for-water substitutions in ecological prediction"
+  author: "M. Mammola"
+  type: "article"
+  date: 2023
+  url:
+    value: "https://doi.org/10.1111/ecog.06595"
+    date: 2026-04-28
+lake-thermal-regions:
+  title: "Global lake thermal regions shift under climate change"
+  author: ["R. I. Woolway", "C. J. Merchant"]
+  type: "article"
+  date: 2020
+  url:
+    value: "https://doi.org/10.1038/s41467-020-15108-z"
+    date: 2026-04-28
+river-temp-ecology:
+  title: "Rising water temperature in rivers: Ecological impacts and future resilience"
+  author: ["M. F. Johnson", "L. K. Albertson", "A. C. Algar", "S. J. Dugdale", "P. Edwards", "J. England", "C. Gibbins", "S. Kazama", "D. Komori", "A. Maccoll", "E. A. Scholl", "R. Wilby", "F. de Oliveira Roque", "P. Wood"]
+  type: "article"
+  date: 2024
+  url:
+    value: "https://doi.org/10.1002/wat2.1724"
+    date: 2026-04-28
+localstack:
+  title: "LocalStack Documentation"
+  author: "LocalStack"
+  type: "web"
+  url:
+    value: "https://docs.localstack.cloud/"
+    date: 2026-04-29
+testcontainers:
+  title: "Testcontainers Documentation"
+  author: "Testcontainers"
+  type: "web"
+  url:
+    value: "https://testcontainers.com/"
+    date: 2026-04-29
+cloudformation:
+  title: "AWS CloudFormation Documentation"
+  author: "Amazon Web Services"
+  type: "web"
+  url:
+    value: "https://docs.aws.amazon.com/cloudformation/"
+    date: 2026-04-30
+aws-cdk:
+  title: "AWS Cloud Development Kit (AWS CDK) Documentation"
+  author: "Amazon Web Services"
+  type: "web"
+  url:
+    value: "https://docs.aws.amazon.com/cdk/"
+    date: 2026-04-30
+pulumi:
+  title: "Pulumi Documentation"
+  author: "Pulumi"
+  type: "web"
+  url:
+    value: "https://www.pulumi.com/docs/"
+    date: 2026-04-30
+cloud-run:
+  title: "About instance autoscaling in Cloud Run services"
+  author: "Google Cloud"
+  type: "web"
+  url:
+    value: "https://docs.cloud.google.com/run/docs/about-instance-autoscaling"
+    date: 2026-04-30
+aws-fargate:
+  title: "AWS Fargate — Serverless Compute Engine"
+  author: "Amazon Web Services"
+  type: "web"
+  url:
+    value: "https://aws.amazon.com/fargate/"
+    date: 2026-04-30
+aws-fargate-pricing:
+  title: "AWS Fargate Pricing"
+  author: "Amazon Web Services"
+  type: "web"
+  url:
+    value: "https://aws.amazon.com/fargate/pricing/"
+    date: 2026-04-30
+ecs-scheduled-tasks:
+  title: "Scheduled tasks for Amazon ECS"
+  author: "Amazon Web Services"
+  type: "web"
+  url:
+    value: "https://docs.aws.amazon.com/AmazonECS/latest/developerguide/scheduled_tasks.html"
+    date: 2026-04-30
+faas-cold-start-survey:
+  title: "Cold Start Latency in Serverless Computing: A Systematic Review, Taxonomy, and Future Directions"
+  author: ["M. Golec", "G. K. Walia", "M. Kumar", "F. Cuadrado", "S. S. Gill", "S. Uhlig"]
+  type: "article"
+  url: "https://dl.acm.org/doi/abs/10.1145/3700875"
+  date: 2024
