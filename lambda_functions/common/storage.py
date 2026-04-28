@@ -1,4 +1,3 @@
-import gzip
 import os
 
 import boto3
@@ -76,19 +75,3 @@ def upload_to_r2(storage, bucket_name, key, file_path, content_type=None):
     print(f"Uploaded {file_path} to {key}")
 
 
-def upload_csv_to_r2(storage, bucket_name, key, csv_file_path):
-    """Upload CSV to R2 with gzip compression.
-
-    Stored with ContentEncoding: gzip so R2 transparently decompresses on
-    read -- the worker receives plain CSV without needing to decompress.
-    """
-    with open(csv_file_path, "rb") as f:
-        compressed = gzip.compress(f.read())
-    storage.put_object(
-        bucket_name,
-        key,
-        compressed,
-        content_type="text/csv",
-        content_encoding="gzip",
-    )
-    print(f"Uploaded {csv_file_path} to {key} (gzip, {len(compressed):,} bytes)")

@@ -10,6 +10,7 @@
 	import * as Table from '$lib/components/ui/table';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { formatDateTime } from '$lib/date-utils';
+	import type { CachedDuckDBFeature } from '$lib/duckdb-cache';
 	import DownloadIcon from '@lucide/svelte/icons/download';
 	import { toast } from 'svelte-sonner';
 	import type { ArchiveEntry } from '$lib/db';
@@ -66,33 +67,73 @@
 		selectedDates = new Set(selectedDates);
 	}
 
+	async function ensureDuckDBFeatures(): Promise<{
+		eco: CachedDuckDBFeature | null;
+		landsat: CachedDuckDBFeature | null;
+	}> {
+		const { fetchDuckDBFeature } = await import('$lib/duckdb-cache');
+		const [eco, landsat] = await Promise.all([
+			fetchDuckDBFeature(featureId, 'ecostress'),
+			fetchDuckDBFeature(featureId, 'landsat')
+		]);
+		return { eco, landsat };
+	}
+
+	function sourceForDate(date: string): 'ecostress' | 'landsat' {
+		const entry = entries.find((e) => e.date === date);
+		return (entry?.source as 'ecostress' | 'landsat') || 'ecostress';
+	}
+
+	async function downloadCsvForDate(date: string) {
+		const toastId = toast.loading('Generating CSV…');
+		try {
+			const { fetchDuckDBFeature, exportDateAsCsv } = await import('$lib/duckdb-cache');
+			const source = sourceForDate(date);
+			const feature = await fetchDuckDBFeature(featureId, source);
+			if (!feature) {
+				toast.error('No parquet data available', { id: toastId });
+				return;
+			}
+			const blob = await exportDateAsCsv(feature, date, source);
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `${featureId}_${date}.csv`;
+			a.click();
+			URL.revokeObjectURL(url);
+			toast.success('CSV downloaded', { id: toastId });
+		} catch (err) {
+			console.error('CSV download error:', err);
+			toast.error('Failed to generate CSV', { id: toastId });
+		}
+	}
+
 	async function downloadSelectedZip() {
 		if (selectedDates.size === 0) return;
 		zipDownloading = true;
 		const dates = [...selectedDates];
-		const toastId = toast.loading(`Fetching ${dates.length} CSVs…`);
+		const toastId = toast.loading('Loading parquet data…');
 
 		try {
+			const [features, { exportDateAsCsv }] = await Promise.all([
+				ensureDuckDBFeatures(),
+				import('$lib/duckdb-cache')
+			]);
 			const JSZip = (await import('jszip')).default;
 			const zip = new JSZip();
-			let fetched = 0;
+			let generated = 0;
 
-			const results = await Promise.all(
-				dates.map(async (date) => {
-					const res = await fetch(`/api/download_csv/${featureId}/${date}`);
-					if (!res.ok) throw new Error(`Failed to fetch CSV for ${date}`);
-					const blob = await res.blob();
-					fetched++;
-					toast.loading(`Fetching ${fetched}/${dates.length} CSVs…`, { id: toastId });
-					return { date, blob };
-				})
-			);
-
-			toast.loading('Creating ZIP…', { id: toastId });
-			for (const { date, blob } of results) {
+			for (const date of dates) {
+				const source = sourceForDate(date);
+				const feature = source === 'landsat' ? features.landsat : features.eco;
+				if (!feature) continue;
+				const blob = await exportDateAsCsv(feature, date, source);
 				zip.file(`${featureId}_${date}.csv`, blob);
+				generated++;
+				toast.loading(`Generating ${generated}/${dates.length} CSVs…`, { id: toastId });
 			}
 
+			toast.loading('Creating ZIP…', { id: toastId });
 			const zipBlob = await zip.generateAsync({ type: 'blob' });
 			const url = URL.createObjectURL(zipBlob);
 			const a = document.createElement('a');
@@ -100,7 +141,7 @@
 			a.download = `${featureId}_archive.zip`;
 			a.click();
 			URL.revokeObjectURL(url);
-			toast.success(`Downloaded ${dates.length} CSVs as ZIP`, { id: toastId });
+			toast.success(`Downloaded ${generated} CSVs as ZIP`, { id: toastId });
 		} catch (err) {
 			console.error('ZIP download error:', err);
 			toast.error('Failed to create ZIP download', { id: toastId });
@@ -359,13 +400,12 @@
 										>
 											TIF
 										</a>
-										<a
-											href={`/api/download_csv/${featureId}/${entry.date}`}
-											download
-											class="text-sm text-muted-foreground hover:text-foreground transition-colors"
+										<button
+											onclick={() => downloadCsvForDate(entry.date)}
+											class="text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
 										>
 											CSV
-										</a>
+										</button>
 									</div>
 								</Table.Cell>
 							</Table.Row>

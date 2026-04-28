@@ -4,7 +4,7 @@ For each (AID, date) message:
 1. Open COGs from NASA Earthdata Cloud via earthaccess
 2. Clip to polygon using rasterio.mask
 3. Apply ECOSTRESS-specific QC/cloud/water filtering
-4. Output TIF/CSV/PNGs + Parquet
+4. Output TIF/PNGs + Parquet
 5. Upload to R2 and insert metadata into D1
 """
 
@@ -22,7 +22,7 @@ from rasterio.warp import transform_geom
 from shapely.geometry import shape, mapping, box
 
 from common.raster_inputs import open_ecostress_granule_rasters
-from common.storage import get_r2_backend, upload_to_r2, upload_csv_to_r2
+from common.storage import get_r2_backend, upload_to_r2
 from common.metadata import affine_transform_to_dict, insert_metadata_to_d1
 from common.visualization import tif_to_png
 from common.parquet import upload_parquet_to_r2
@@ -265,18 +265,12 @@ def process_one_record(body):
         if len(df_valid) == 0:
             raise NoDataError(filter_stats)
 
-        filter_csv_path = os.path.join(work_dir, f"{base_name}.csv")
-        df_valid.to_csv(filter_csv_path, index=False)
-
         # Upload to R2
         storage = get_r2_backend()
         bucket_name = os.environ.get("R2_BUCKET_NAME", "multitifs")
 
         tif_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.tif"
         upload_to_r2(storage, bucket_name, tif_key, filter_tif_path, "image/tiff")
-
-        csv_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.csv.gz"
-        upload_csv_to_r2(storage, bucket_name, csv_key, filter_csv_path)
 
         # Parquet (per-year sorted file)
         parquet_base_key = f"{R2_PREFIX}/{name}/{location}/{name}_{location}.parquet"
@@ -338,7 +332,7 @@ def process_one_record(body):
         upload_to_r2(storage, bucket_name, meta_key, metadata_path, "application/json")
 
         # Insert into D1 with source='ecostress'
-        insert_metadata_to_d1(feature_id, date_str, metadata, csv_key, tif_key, png_r2_keys,
+        insert_metadata_to_d1(feature_id, date_str, metadata, "", tif_key, png_r2_keys,
                               source="ecostress", parquet_path=parquet_key)
 
         duration_ms = int((time.time() - start_time) * 1000)

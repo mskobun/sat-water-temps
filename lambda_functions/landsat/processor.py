@@ -23,7 +23,7 @@ from shapely.geometry import shape, mapping
 
 from common.polygons import get_aid_folder_mapping
 from common.raster_inputs import landsat_rasterio_env, open_landsat_band
-from common.storage import get_r2_backend, upload_to_r2, upload_csv_to_r2
+from common.storage import get_r2_backend, upload_to_r2
 from common.metadata import affine_transform_to_dict, insert_metadata_to_d1
 from common.visualization import tif_to_png, GLOBAL_MIN, GLOBAL_MAX
 from common.parquet import upload_parquet_to_r2
@@ -214,18 +214,12 @@ def process_one_record(body):
         if len(df_valid) == 0:
             raise NoDataError(filter_stats)
 
-        filter_csv_path = os.path.join(work_dir, f"{base_name}.csv")
-        df_valid.to_csv(filter_csv_path, index=False)
-
         # Upload to R2
         storage = get_r2_backend()
         bucket_name = os.environ.get("R2_BUCKET_NAME", "multitifs")
 
         tif_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.tif"
         upload_to_r2(storage, bucket_name, tif_key, filter_tif_path, "image/tiff")
-
-        csv_key = f"{R2_PREFIX}/{name}/{location}/{base_name}.csv.gz"
-        upload_csv_to_r2(storage, bucket_name, csv_key, filter_csv_path)
 
         # Parquet (per-year sorted file)
         parquet_base_key = f"{R2_PREFIX}/{name}/{location}/{name}_{location}.parquet"
@@ -281,7 +275,7 @@ def process_one_record(body):
         upload_to_r2(storage, bucket_name, meta_key, metadata_path, "application/json")
 
         # Insert into D1 with source='landsat'
-        insert_metadata_to_d1(feature_id, date_str, metadata, csv_key, tif_key, png_r2_keys,
+        insert_metadata_to_d1(feature_id, date_str, metadata, "", tif_key, png_r2_keys,
                               source="landsat", parquet_path=parquet_key)
 
         duration_ms = int((time.time() - start_time) * 1000)

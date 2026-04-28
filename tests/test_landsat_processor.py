@@ -325,18 +325,9 @@ class TestLandsatProcessOneRecordFixture:
                 }
             )
 
-        def capture_upload(s3_client, bucket, key, local_path, content_type=None):
-            if ".csv" in key:
-                uploaded_csvs[key] = local_path
-
-        def capture_csv_upload(s3_client, bucket, key, csv_file_path):
-            capture_upload(s3_client, bucket, key, csv_file_path)
-
         mock_s3 = MagicMock()
 
-        with patch("landsat.processor.upload_to_r2", side_effect=capture_upload) as _upload, patch(
-            "landsat.processor.upload_csv_to_r2", side_effect=capture_csv_upload
-        ), patch(
+        with patch("landsat.processor.upload_to_r2") as _upload, patch(
             "landsat.processor.upload_parquet_to_r2"
         ), patch(
             "landsat.processor.insert_metadata_to_d1", side_effect=capture_insert
@@ -359,34 +350,26 @@ class TestLandsatProcessOneRecordFixture:
         assert row["metadata"]["mean_temp"] is not None
         assert row["metadata"]["median_temp"] is not None
         assert row["metadata"]["std_dev"] is not None
-        assert "LANDSAT/Magat/lake/" in row["csv_r2_key"]
+        assert row["csv_r2_key"] == ""
         assert "filter_stats" in row["metadata"]
         assert row["metadata"].get("source_crs")
         tf = row["metadata"].get("transform")
         assert tf and "a" in tf and abs(tf["a"]) > 1e-6
 
     @pytest.mark.filterwarnings("ignore:All-NaN slice encountered:RuntimeWarning")
-    def test_csv_coordinates_are_wgs84(self, magat_landsat_body, monkeypatch, tmp_path):
-        """CSV longitude/latitude must be in WGS84 (degrees), not projected UTM (meters)."""
+    def test_parquet_coordinates_are_wgs84(self, magat_landsat_body, monkeypatch, tmp_path):
+        """Parquet longitude/latitude must be in WGS84 (degrees), not projected UTM (meters)."""
         repo_root = Path(__file__).resolve().parent.parent
         monkeypatch.chdir(repo_root)
 
-        saved_csv = [None]
+        captured_df = [None]
 
-        def capture_upload(s3_client, bucket, key, local_path, content_type=None):
-            if ".csv" in key:
-                import shutil
-                dest = tmp_path / "output.csv"
-                shutil.copy2(local_path, dest)
-                saved_csv[0] = dest
+        def capture_parquet(s3_client, bucket, base_key, df_valid, date_str):
+            captured_df[0] = df_valid
+            return f"{base_key.replace('.parquet', '_2024.parquet')}"
 
-        def capture_csv_upload(s3_client, bucket, key, csv_file_path):
-            capture_upload(s3_client, bucket, key, csv_file_path)
-
-        with patch("landsat.processor.upload_to_r2", side_effect=capture_upload), patch(
-            "landsat.processor.upload_csv_to_r2", side_effect=capture_csv_upload
-        ), patch(
-            "landsat.processor.upload_parquet_to_r2"
+        with patch("landsat.processor.upload_to_r2"), patch(
+            "landsat.processor.upload_parquet_to_r2", side_effect=capture_parquet
         ), patch(
             "landsat.processor.insert_metadata_to_d1"
         ), patch("landsat.processor.log_job_to_d1"), patch(
@@ -395,8 +378,8 @@ class TestLandsatProcessOneRecordFixture:
             from landsat.processor import process_one_record
             process_one_record(magat_landsat_body)
 
-        assert saved_csv[0] is not None, "No CSV was uploaded"
-        df = pd.read_csv(saved_csv[0])
+        df = captured_df[0]
+        assert df is not None, "No DataFrame was passed to parquet upload"
         assert len(df) > 0
 
         # WGS84 coordinates: longitude ~98-99, latitude ~8-9 for Magat

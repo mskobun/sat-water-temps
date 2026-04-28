@@ -24,9 +24,9 @@ def insert_metadata_to_d1(
     feature_id: str,
     date: str,
     metadata: Dict,
-    csv_r2_key: str,
-    tif_r2_key: str,
-    png_r2_keys: Dict[str, str],
+    csv_r2_key: str = "",
+    tif_r2_key: str = "",
+    png_r2_keys: Dict[str, str] | None = None,
     source: str = "ecostress",
     parquet_path: str = None,
 ):
@@ -38,6 +38,7 @@ def insert_metadata_to_d1(
     csv_path = csv_r2_key
     tif_path = tif_r2_key
     # Store base path (without scale suffix) so API can append _${scale}.png
+    png_r2_keys = png_r2_keys or {}
     full_png_path = png_r2_keys.get("relative", png_r2_keys.get("fixed", ""))
     png_path = full_png_path.replace("_relative.png", "").replace("_fixed.png", "")
 

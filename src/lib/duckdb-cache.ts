@@ -600,6 +600,39 @@ export async function getPointHistory(
 }
 
 /**
+ * Export a single date's data as a CSV blob from Parquet via DuckDB.
+ * Uses DuckDB's built-in COPY ... TO for proper CSV serialization.
+ */
+export async function exportDateAsCsv(
+	feature: CachedDuckDBFeature,
+	date: string,
+	source: SourceType
+): Promise<Blob> {
+	await ensureFilesRegistered(source, feature.files);
+
+	const fileList = feature.files.map((f) => quoteSqlLiteral(f.name)).join(', ');
+	const csvFileName = 'export.csv';
+
+	const db = await getDb(source);
+	const connection = await db.connect();
+	try {
+		await connection.query(`
+			COPY (
+				SELECT longitude, latitude, temperature
+				FROM read_parquet([${fileList}])
+				WHERE ${sqlDateEqualsUiDate(date)}
+			) TO ${quoteSqlLiteral(csvFileName)} WITH (HEADER, DELIMITER ',')
+		`);
+	} finally {
+		await connection.close();
+	}
+
+	const buffer = await db.copyFileToBuffer(csvFileName);
+	await db.dropFile(csvFileName);
+	return new Blob([buffer.buffer as ArrayBuffer], { type: 'text/csv' });
+}
+
+/**
  * Prefetch the DuckDB WASM binary into the browser cache so that the first
  * real `getDb()` call doesn't pay the network cost. Does NOT spin up a
  * worker or instantiate a database.
