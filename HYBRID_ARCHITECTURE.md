@@ -2,155 +2,134 @@
 
 ## Overview
 
-This project uses a **hybrid storage architecture** to optimize costs and performance:
+The project uses a hybrid storage model:
 
-- **D1**: Small, frequently-queried metadata and job tracking
-- **R2**: Large, static temperature data files
+- **D1** — small, frequently-queried metadata and job/request state
+- **R2** — large per-observation data files (CSV, Parquet, TIF, PNG)
 
-## Why Hybrid?
+## Why
 
-### The Problem
-Initially, we attempted to store all temperature data in D1. However:
-- Large features like "Bay" have **207,800+ temperature points per date**
-- 49 features × 2 dates × ~50k avg points = **~5 million rows**
-- D1 free tier: **100,000 rows written/day**
-- **Migration would take 50+ days and blow through quotas immediately**
+Large features can have 200 000+ temperature points per observation. Storing those in D1 would hit the free-tier write quota within a day. R2 is designed for bulk file storage and scales without issue. D1 stays thin (a few hundred rows per day) and fast for metadata queries.
 
-### The Solution
-Keep temperature CSVs in R2, use D1 only for metadata:
-- ✅ Stays well within D1 free tier (few hundred rows per day)
-- ✅ R2 is designed for large static files
-- ✅ CSVs are already optimized for the data structure
-- ✅ Faster queries (no need to reconstruct large datasets)
+## D1 tables
 
-## Architecture
+### `features`
+One row per monitored water body.
 
-### D1 Tables
+| column | type | notes |
+|--------|------|-------|
+| id | TEXT PK | feature name slug |
+| name | TEXT | display name |
+| location | TEXT | default `lake` |
+| latest_date | TEXT | most recent observation date |
+| last_updated | INTEGER | unix timestamp |
 
-#### `features`
-- Basic feature information
-- Latest available date
-- ~49 rows total
+### `temperature_metadata`
+One row per (feature, date, source) observation.
 
-#### `temperature_metadata`
-- Statistics per date (min/max/mean temps)
-- Water/land pixel counts
-- **R2 file paths** (csv_path, tif_path, png_path)
-- ~100 rows per feature (49 features × ~10 dates = ~500 rows)
+| column | type | notes |
+|--------|------|-------|
+| feature_id | TEXT | FK → features.id |
+| date | TEXT | ISO 8601 |
+| source | TEXT | `ecostress` or `landsat` |
+| min_temp / max_temp / mean_temp / median_temp / std_dev | REAL | Kelvin |
+| data_points | INTEGER | valid water pixels |
+| water_pixel_count / land_pixel_count | INTEGER | |
+| filter_stats | TEXT | JSON histogram of QC/cloud/water/nodata flag counts |
+| csv_path | TEXT | R2 key for gzip-compressed CSV |
+| tif_path | TEXT | R2 key for GeoTIFF |
+| png_path | TEXT | R2 key base — append `_{scale}.png` |
+| parquet_path | TEXT | R2 key for Parquet file |
+| pixel_size | REAL | Y (latitude) pixel spacing in degrees |
+| pixel_size_x | REAL | X (longitude) pixel spacing in degrees |
+| source_crs | TEXT | WKT CRS string (Landsat: projected UTM; ECOSTRESS: WGS84) |
+| transform_a–f | REAL | Affine coefficients (rasterio order) for pixel-exact quad rendering |
+| created_at | INTEGER | unix timestamp |
 
-#### `processing_jobs`
-- Lambda job tracking
-- Success/failure status
-- Error messages for debugging
-- ~10-50 new rows per day
+### `processing_jobs`
+Lambda job tracking.
 
-**Total D1 usage**: ~1,000 rows + ~50 rows/day = **Well within free tier**
+| column | type | notes |
+|--------|------|-------|
+| id | INTEGER PK | |
+| job_type | TEXT | `scrape` or `process` |
+| task_id | TEXT | links to data_requests |
+| feature_id / date | TEXT | |
+| status | TEXT | `started`, `success`, `failed`, `nodata` |
+| started_at / completed_at / duration_ms | INTEGER | |
+| error_message | TEXT | |
+| metadata | TEXT | JSON for extra context |
 
-### R2 Storage Structure
+### `data_requests`
+One row per manual or scheduled ingest run.
+
+| column | type | notes |
+|--------|------|-------|
+| id | INTEGER PK | |
+| source | TEXT | `ecostress` or `landsat` |
+| trigger_type | TEXT | `timer` or `manual` |
+| triggered_by / description | TEXT | |
+| start_date / end_date | TEXT | requested date range |
+| scenes_count | INTEGER | scenes dispatched |
+| task_id | TEXT | ECOSTRESS AppEEARS task ID (if applicable) |
+| created_at / updated_at / dispatched_at | INTEGER | |
+| error_message | TEXT | |
+
+### `data_requests_with_status` (view)
+Joins `data_requests` with `processing_jobs` to compute a derived `status` field per request.
+
+### `app_settings`
+Key/value store for runtime config. Current keys: `data_delay_days`.
+
+## R2 storage structure
+
+All files live in the `multitifs` bucket. Keys follow source-specific prefixes:
 
 ```
-multitifs/
-├── {feature_id}/
-│   ├── csv/
-│   │   └── {date}.csv          # Temperature point data (can be 200k+ rows)
-│   ├── tif/
-│   │   └── {date}.tif          # Geospatial raster
-│   └── png/
-│       └── {date}.png          # Visualization
+ECO/{feature_name}/{location}/{feature_name}_{location}_{date}_filter.csv.gz
+ECO/{feature_name}/{location}/{feature_name}_{location}_{date}_filter.tif
+ECO/{feature_name}/{location}/{feature_name}_{location}_{date}_filter_{scale}.png
+ECO/{feature_name}/{location}/{feature_name}_{location}.parquet
+
+LANDSAT/{feature_name}/{location}/{feature_name}_{location}_{date}_filter.csv.gz
+LANDSAT/{feature_name}/{location}/{feature_name}_{location}_{date}_filter.tif
+LANDSAT/{feature_name}/{location}/{feature_name}_{location}_{date}_filter_{scale}.png
+LANDSAT/{feature_name}/{location}/{feature_name}_{location}.parquet
 ```
 
-## Data Flow
+`{scale}` is `relative`, `fixed`, or `gray` depending on which PNG variants were generated.
 
-### Processing (Lambda)
-1. Lambda downloads Landsat data
-2. Processes temperature raster → CSV
-3. **Uploads CSV to R2** (large file)
-4. Calculates statistics (min/max/mean)
-5. **Inserts metadata to D1** (small row with file paths)
-6. **Logs job status to D1**
+CSVs are gzip-compressed and uploaded with `ContentEncoding: gzip` so R2 transparently decompresses them on read. See [docs/R2_GZIP_BEHAVIOR.md](docs/R2_GZIP_BEHAVIOR.md) for details.
 
-### API Request (SvelteKit)
-1. Frontend requests temperature **metadata** (JSON) and **points** (binary) for feature + date in parallel
-2. **SvelteKit queries D1** for metadata and CSV path
-3. **SvelteKit fetches CSV from R2** using path (once per endpoint; each request may parse CSV separately)
-4. Metadata route returns sidebar/chart fields only; `/points` returns packed `Float32` triplets (`lng`, `lat`, `temperature`) with no JSON parse on the client for the large array
+## Data flow
 
-**Payload comparison:** binary points are **12 bytes per observation** (3× float32) vs. JSON triplets which are much larger on the wire and require `JSON.parse` plus nested array allocation. Use browser DevTools **Network** (transfer size and time) to compare before/after when tuning.
+### Ingestion (Lambda)
 
-## File Reference
+1. Initiator discovers scenes via CMR-STAC (ECOSTRESS) or USGS STAC (Landsat)
+2. Sends per-feature/per-date SQS messages
+3. Processor downloads raster, computes temperature stats, generates outputs
+4. Uploads CSV.gz, TIF, PNG, and Parquet to R2
+5. Inserts one `temperature_metadata` row to D1
+6. Logs job status to `processing_jobs`
 
-### Schema
-- `migrations/0001_init_schema.sql` - D1 tables (no temperature_data table)
+Key files: `lambda_functions/ecostress/processor.py`, `lambda_functions/landsat/processor.py`, `lambda_functions/common/metadata.py`
 
-### Lambda
-- `lambda_functions/processor.py`
-  - `insert_metadata_to_d1()` - Inserts metadata with R2 paths
-  - No longer inserts temperature points
+### API request (SvelteKit → client)
 
-### SvelteKit
-- `src/lib/db.ts`
-  - `queryTemperatureMetadata()` - Fetches metadata from D1, CSV from R2 (histogram/avg; no points in JSON)
-  - `queryTemperaturePointsBuffer()` - Same CSV path; returns packed float32 triplets for map tiling
-  - `parseCSV()` - Parses R2 CSV data
-- `src/routes/api/feature/[...id]/temperature/[date]/+server.ts` - Temperature metadata JSON
-- `src/routes/api/feature/[...id]/temperature/[date]/points/+server.ts` - Binary temperature points (`application/octet-stream`)
-- `src/routes/api/feature/[...id]/temperature/+server.ts` - Latest date metadata JSON (no points)
+1. API routes query D1 for metadata (fast, indexed)
+2. For point data, the API lists available Parquet file keys from D1
+3. The browser fetches Parquet files directly and queries them with DuckDB WASM (`src/lib/duckdb-cache.ts`)
+4. The map overlay renders pixel quads using the affine transform and CRS stored in D1
 
-## Benefits
+Key files: `src/lib/db.ts`, `src/routes/api/feature/[...id]/parquet/+server.ts`, `src/lib/duckdb-cache.ts`, `src/lib/deck-temperature-overlay.ts`
 
-1. **Cost Efficient**
-   - D1: ~1,000 rows (free tier: 5M rows)
-   - R2: ~10GB files (free tier: 10GB)
+## Key files
 
-2. **Performance**
-   - Metadata queries are instant (D1 indexes)
-   - CSV files are already in optimal format
-   - No need to reconstruct large datasets from DB
-
-3. **Scalability**
-   - Adding new features doesn't explode D1 usage
-   - R2 scales to petabytes
-
-4. **Maintainability**
-   - CSV format is human-readable for debugging
-   - Easy to re-process or migrate data
-   - D1 schema remains simple
-
-## Migration Steps
-
-1. **Apply new schema** (drops temperature_data table):
-   ```bash
-   wrangler d1 migrations apply sat-water-temps-db
-   ```
-
-2. **Seed local data** when needed:
-   ```bash
-   npm run db:export && npm run db:seed
-   ```
-
-3. **Deploy updated Lambda** (inserts metadata only)
-
-4. **Deploy SvelteKit** (reads from R2)
-
-## Future Considerations
-
-### If we need faster queries
-- Consider caching frequent queries in Cloudflare Workers KV
-- Pre-aggregate data for common visualizations
-
-### If CSVs become too large
-- Use compression (gzip CSVs in R2)
-- Consider columnar formats (Parquet) for analytics
-
-### If we need real-time updates
-- Keep recent data in D1 (last 7 days)
-- Archive older data to R2
-- Best of both worlds for hot/cold data
-
-## Conclusion
-
-This hybrid architecture leverages the strengths of each service:
-- **D1**: Fast, queryable metadata
-- **R2**: Unlimited, cheap file storage
-
-It's the right tool for the right job! 🎯
+| file | purpose |
+|------|---------|
+| `src/lib/db.ts` | D1 query helpers used by API routes |
+| `src/lib/duckdb-cache.ts` | Client-side DuckDB WASM Parquet loader and query cache |
+| `src/lib/deck-temperature-overlay.ts` | Map pixel quad rendering with affine transforms |
+| `lambda_functions/common/metadata.py` | `insert_metadata_to_d1()` — writes D1 row after processing |
+| `lambda_functions/common/storage.py` | R2 upload/download via boto3 S3 API |
+| `migrations/` | Full D1 schema history |
