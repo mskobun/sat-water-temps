@@ -3,13 +3,18 @@
 filter_flags bit positions written by apply_landsat_filters:
   Bit 0 = reserved (unused on Landsat path today)
   Bit 1 = cloud / dilated cloud / cloud shadow
-  Bit 2 = non-water reject (when a water mask is active)
+  Bit 2 = non-water reject via sensor-native mask (QA_PIXEL bit 7, CFMask)
   Bit 3 = nodata / fill
   Bit 4 = out-of-physical-range (Kelvin bounds, see common.outliers)
   Bit 5 = spatial outlier (local median-MAD / Hampel test, see common.outliers)
+  Bit 6 = non-water reject via OPERA DSWx-HLS mask (mutually exclusive with Bit 2)
+
+Bits 2 and 6 are mutually exclusive: Bit 6 is set when an OPERA water mask was
+available (opera_water_mask is not None), Bit 2 is set otherwise.
 """
 
 import numpy as np
+from typing import Optional
 
 from common.outliers import hampel_outlier_mask, range_outlier_mask
 
@@ -26,13 +31,22 @@ def _check_bit(array, bit):
     return (array & (1 << bit)) != 0
 
 
-def apply_landsat_filters(lst_kelvin, qa_pixel):
+def apply_landsat_filters(
+    lst_kelvin, qa_pixel, opera_water_mask: Optional[np.ndarray] = None
+):
     """Apply QA_PIXEL bitmask filtering to Landsat data.
+
+    Args:
+        lst_kelvin: 2D float32 array of LST in Kelvin
+        qa_pixel: 2D uint16 array of QA_PIXEL bitmask
+        opera_water_mask: Optional boolean 2D array from OPERA DSWx-HLS where
+            True = water pixel. When provided, replaces QA_PIXEL bit 7 for
+            water detection and sets Bit 6 (not Bit 2) in filter_flags.
 
     Returns:
         filtered_lst: LST array with rejected pixels set to NaN
-        filter_flags: 4-bit flags per pixel (bit 0=fill/cloud/shadow, bit 2=non-water, bit 3=nodata)
-        water_mask_active: whether water filtering was applied
+        filter_flags: uint8 flags per pixel (see module docstring)
+        has_water: whether any water pixels were detected
     """
     filter_flags = np.zeros(lst_kelvin.shape, dtype=np.uint8)
 
@@ -49,15 +63,20 @@ def apply_landsat_filters(lst_kelvin, qa_pixel):
     )
     filter_flags = np.where(cloud_mask, filter_flags | 2, filter_flags)
 
-    # Bit 2: Water mask — keep only water pixels
-    water_mask = _check_bit(qa_pixel, QA_BIT_WATER)
-    has_water = bool(np.any(water_mask))
-    if has_water:
-        non_water_mask = ~water_mask
-        filter_flags = np.where(non_water_mask, filter_flags | 4, filter_flags)
+    # Water mask — keep only water pixels
+    if opera_water_mask is not None:
+        # Bit 6: OPERA DSWx-HLS water mask
+        has_water = bool(np.any(opera_water_mask))
+        if has_water:
+            non_water_mask = ~opera_water_mask
+            filter_flags = np.where(non_water_mask, filter_flags | 64, filter_flags)
     else:
-        # No water detected — don't apply water filter
-        pass
+        # Bit 2: Native QA_PIXEL bit 7 (CFMask water flag)
+        water_mask = _check_bit(qa_pixel, QA_BIT_WATER)
+        has_water = bool(np.any(water_mask))
+        if has_water:
+            non_water_mask = ~water_mask
+            filter_flags = np.where(non_water_mask, filter_flags | 4, filter_flags)
 
     # Bit 4: Out-of-physical-range LST (hard Kelvin bounds)
     range_mask = range_outlier_mask(lst_kelvin)

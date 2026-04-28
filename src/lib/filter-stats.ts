@@ -10,14 +10,17 @@ export interface ParsedFilterStats {
 	filtered_by_qc: number;
 	filtered_by_cloud: number;
 	filtered_by_water: number;
+	filtered_by_opera_water: number;
 	filtered_by_nodata: number;
 }
 
-const BIT_NAMES = ['QC', 'Cloud', 'Water', 'NoData'];
+// Bit 0=QC, Bit 1=Cloud, Bit 2=Water (native), Bit 3=NoData,
+// Bit 4=Range outlier, Bit 5=Spatial outlier, Bit 6=Water (OPERA)
+const BIT_NAMES = ['QC', 'Cloud', 'Water (native)', 'NoData', 'Range outlier', 'Spatial outlier', 'Water (OPERA)'];
 
 function bucketLabel(bucket: number): string {
 	const names: string[] = [];
-	for (let b = 0; b < 4; b++) {
+	for (let b = 0; b < BIT_NAMES.length; b++) {
 		if (bucket & (1 << b)) names.push(BIT_NAMES[b]);
 	}
 	return names.join(' + ');
@@ -58,7 +61,8 @@ export function getFilterCombinations(stats: FilterStats): CombinationRow[] {
 	if (total === 0) return [];
 
 	const rows: CombinationRow[] = [];
-	for (let i = 1; i < 16; i++) {
+	// 7 bits → max bucket value 127
+	for (let i = 1; i < 128; i++) {
 		const count = hist[i.toString()] || 0;
 		if (count > 0) {
 			rows.push({
@@ -74,30 +78,35 @@ export function getFilterCombinations(stats: FilterStats): CombinationRow[] {
 
 /**
  * Parse a bit-flag histogram into named filter statistics.
- * Bit 0 = QC, Bit 1 = Cloud, Bit 2 = Water, Bit 3 = NoData
+ * Bit 0 = QC, Bit 1 = Cloud, Bit 2 = Water (native), Bit 3 = NoData
+ * Bit 4 = Range outlier, Bit 5 = Spatial outlier, Bit 6 = Water (OPERA DSWx)
  *
- * QC/cloud/water counts exclude nodata pixels (only buckets 0-7).
- * NoData count includes all buckets 8-15 regardless of other flags.
+ * QC/cloud/water counts exclude nodata pixels.
+ * NoData count includes all buckets with bit 3 set regardless of other flags.
  */
 export function parseFilterStats(stats: FilterStats): ParsedFilterStats {
 	const hist = getHistogram(stats);
 	const total = getTotalPixels(stats, hist);
 	const valid = hist['0'] || 0;
 
-	// QC/cloud/water counts exclude nodata pixels (only i < 8)
 	let filtered_by_qc = 0;
 	let filtered_by_cloud = 0;
 	let filtered_by_water = 0;
+	let filtered_by_opera_water = 0;
 	let filtered_by_nodata = 0;
 
-	for (let i = 0; i < 8; i++) {
+	for (let i = 1; i < 128; i++) {
 		const count = hist[i.toString()] || 0;
+		if (!count) continue;
+		if (i & 8) {
+			// Bit 3 set: nodata — count towards nodata, skip other categories
+			filtered_by_nodata += count;
+			continue;
+		}
 		if (i & 1) filtered_by_qc += count;
 		if (i & 2) filtered_by_cloud += count;
 		if (i & 4) filtered_by_water += count;
-	}
-	for (let i = 8; i < 16; i++) {
-		filtered_by_nodata += hist[i.toString()] || 0;
+		if (i & 64) filtered_by_opera_water += count;
 	}
 
 	return {
@@ -107,6 +116,7 @@ export function parseFilterStats(stats: FilterStats): ParsedFilterStats {
 		filtered_by_qc,
 		filtered_by_cloud,
 		filtered_by_water,
+		filtered_by_opera_water,
 		filtered_by_nodata,
 	};
 }

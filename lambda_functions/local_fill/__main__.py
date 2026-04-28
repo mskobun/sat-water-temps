@@ -73,6 +73,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="ECOSTRESS: use s3:// links even with --runtime local (Lambda-style; needs Earthdata S3 creds)",
     )
+    parser.add_argument(
+        "--opera-water-mask",
+        action="store_true",
+        help="Use OPERA DSWx-HLS water mask instead of sensor-native masks (sets OPERA_WATER_MASK_ENABLED=1)",
+    )
     args = parser.parse_args(argv)
 
     if args.project_dir:
@@ -94,6 +99,8 @@ def main(argv: list[str] | None = None) -> int:
     os.chdir(repo_root)
     os.environ["PROCESSOR_RUNTIME"] = args.runtime
     os.environ["WRANGLER_PROJECT_DIR"] = str(repo_root)
+    if args.opera_water_mask:
+        os.environ["OPERA_WATER_MASK_ENABLED"] = "1"
 
     sd = args.start_date
     ed = args.end_date or sd

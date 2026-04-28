@@ -28,6 +28,7 @@ from common.visualization import tif_to_png
 from common.parquet import upload_parquet_to_r2
 from common.statistics import compute_filter_stats, summarize_temperature_series
 from common.exceptions import NoDataError
+from common.opera_dswx import fetch_opera_water_mask, is_opera_enabled
 from ecostress.filters import apply_ecostress_filters, summarize_qc_bits
 from d1 import log_job_to_d1
 
@@ -213,9 +214,23 @@ def process_one_record(body):
         water_data = water_clipped[0]
         cloud_data = cloud_clipped[0]
 
-        # Apply ECOSTRESS-specific filters
+        # Optionally fetch OPERA DSWx-HLS water mask
+        opera_water = None
+        if is_opera_enabled():
+            opera_water = fetch_opera_water_mask(
+                bbox=polygon_geom.bounds,
+                date=date_day,
+                target_shape=lst_data.shape,
+                target_transform=lst_transform,
+                target_crs=lst_meta["crs"],
+                tolerance_days=5,
+            )
+            if opera_water is not None:
+                print(f"[ECOSTRESS][{feature_id}] Using OPERA DSWx-HLS water mask")
+
+        # Apply ECOSTRESS-specific filters (passes OPERA mask when available)
         filtered_lst, filter_flags, has_water = apply_ecostress_filters(
-            lst_data, qc_data, water_data, cloud_data
+            lst_data, qc_data, water_data, cloud_data, opera_water_mask=opera_water
         )
 
         # Compute filter statistics
@@ -296,7 +311,12 @@ def process_one_record(body):
         # Metadata
         hist = filter_stats["histogram"]
         valid_pixels = hist.get("0", 0)
-        land_pixels = sum(hist.get(str(i), 0) for i in range(16) if i & 4) if has_water else 0
+        # Count land pixels: flagged by native water (bit 2=4) or OPERA water (bit 6=64)
+        land_pixels = (
+            sum(hist.get(str(i), 0) for i in range(256) if i & 4) +
+            sum(hist.get(str(i), 0) for i in range(256) if i & 64)
+        ) if has_water else 0
+        water_mask_source = "opera_dswx" if opera_water is not None else "native"
 
         # Pixel size in WGS84 degrees.
         # L2T v002 COGs are UTM-projected (meters) — convert to approximate degrees.
@@ -318,6 +338,7 @@ def process_one_record(body):
             "water_pixel_count": valid_pixels,
             "land_pixel_count": land_pixels,
             "filter_stats": filter_stats,
+            "water_mask_source": water_mask_source,
             "pixel_size": float(pixel_size_deg_y),
             "pixel_size_x": float(pixel_size_deg_x),
             "source_crs": lst_meta["crs"].to_string() if lst_meta.get("crs") else None,

@@ -15,16 +15,21 @@ QC is a uint16 bitmask defined in PSD Table 3-5:
 filter_flags bit positions written by apply_ecostress_filters:
   Bit 0 = QC reject (mandatory QA + data quality bitmask)
   Bit 1 = cloud reject
-  Bit 2 = non-water reject (when a water mask is active)
+  Bit 2 = non-water reject via sensor-native mask (ECOSTRESS water band)
   Bit 3 = nodata / swath gap
   Bit 4 = out-of-physical-range (Kelvin bounds, see common.outliers)
   Bit 5 = spatial outlier (local median-MAD / Hampel test, see common.outliers)
+  Bit 6 = non-water reject via OPERA DSWx-HLS mask (mutually exclusive with Bit 2)
+
+Bits 2 and 6 are mutually exclusive: Bit 6 is set when an OPERA water mask was
+available (opera_water_mask is not None), Bit 2 is set otherwise.
 
 LST accuracy (bits 15&14) is tracked for diagnostics only and is not used as
 a reject criterion.
 """
 
 import numpy as np
+from typing import Optional
 
 from common.outliers import hampel_outlier_mask, range_outlier_mask
 
@@ -68,14 +73,25 @@ def summarize_qc_bits(qc):
     }
 
 
-def apply_ecostress_filters(lst, qc, water, cloud):
+def apply_ecostress_filters(
+    lst, qc, water, cloud, opera_water_mask: Optional[np.ndarray] = None
+):
     """Apply ECOSTRESS-specific filtering to clipped raster arrays.
 
     All inputs are 2D numpy arrays of the same shape.
 
+    Args:
+        lst: float32 LST array
+        qc: uint16 QC bitmask array
+        water: uint8 water band (non-zero = water)
+        cloud: uint8 cloud band (1 = cloud)
+        opera_water_mask: Optional boolean 2D array from OPERA DSWx-HLS where
+            True = water pixel. When provided, replaces the native water band
+            for water detection and sets Bit 6 (not Bit 2) in filter_flags.
+
     Returns:
         filtered_lst: LST array with rejected pixels set to NaN
-        filter_flags: 4-bit flags per pixel
+        filter_flags: uint8 flags per pixel (see module docstring)
         has_water: whether water filtering was applied
     """
     filter_flags = np.zeros(lst.shape, dtype=np.uint8)
@@ -92,11 +108,19 @@ def apply_ecostress_filters(lst, qc, water, cloud):
     cloud_mask = cloud == 1
     filter_flags = np.where(cloud_mask, filter_flags | 2, filter_flags)
 
-    # Bit 2: Water mask — keep only water pixels
-    has_water = bool(np.any(water != 0))
-    if has_water:
-        non_water_mask = water == 0
-        filter_flags = np.where(non_water_mask, filter_flags | 4, filter_flags)
+    # Water mask — keep only water pixels
+    if opera_water_mask is not None:
+        # Bit 6: OPERA DSWx-HLS water mask
+        has_water = bool(np.any(opera_water_mask))
+        if has_water:
+            non_water_mask = ~opera_water_mask
+            filter_flags = np.where(non_water_mask, filter_flags | 64, filter_flags)
+    else:
+        # Bit 2: Native ECOSTRESS water band (non-zero = water)
+        has_water = bool(np.any(water != 0))
+        if has_water:
+            non_water_mask = water == 0
+            filter_flags = np.where(non_water_mask, filter_flags | 4, filter_flags)
 
     # Bit 4: Out-of-physical-range LST (hard Kelvin bounds)
     range_mask = range_outlier_mask(lst)
