@@ -213,7 +213,12 @@ def process_one_record(body):
         water_data = water_clipped[0]
         cloud_data = cloud_clipped[0]
 
-        # Apply ECOSTRESS-specific filters
+        # Apply ECOSTRESS-specific filters using the native co-acquired water band.
+        # OPERA DSWx-HLS is not used for ECOSTRESS: the native water band is co-acquired
+        # on the same overpass (perfect temporal match), and the ±days tolerance needed
+        # to find an HLS granule risks cloud-contaminated masks that silently zero out
+        # the water extent. DSWx-S1 (SAR) would penetrate cloud but introduces temporal
+        # mismatch on managed reservoirs where water level changes matter.
         filtered_lst, filter_flags, has_water = apply_ecostress_filters(
             lst_data, qc_data, water_data, cloud_data
         )
@@ -296,7 +301,8 @@ def process_one_record(body):
         # Metadata
         hist = filter_stats["histogram"]
         valid_pixels = hist.get("0", 0)
-        land_pixels = sum(hist.get(str(i), 0) for i in range(16) if i & 4) if has_water else 0
+        land_pixels = sum(hist.get(str(i), 0) for i in range(128) if i & 4) if has_water else 0
+        water_mask_source = "native"
 
         # Pixel size in WGS84 degrees.
         # L2T v002 COGs are UTM-projected (meters) — convert to approximate degrees.
@@ -318,6 +324,7 @@ def process_one_record(body):
             "water_pixel_count": valid_pixels,
             "land_pixel_count": land_pixels,
             "filter_stats": filter_stats,
+            "water_mask_source": water_mask_source,
             "pixel_size": float(pixel_size_deg_y),
             "pixel_size_x": float(pixel_size_deg_x),
             "source_crs": lst_meta["crs"].to_string() if lst_meta.get("crs") else None,

@@ -29,6 +29,7 @@ from common.visualization import tif_to_png, GLOBAL_MIN, GLOBAL_MAX
 from common.parquet import upload_parquet_to_r2
 from common.statistics import compute_filter_stats, summarize_temperature_series
 from common.exceptions import NoDataError
+from common.opera_dswx import fetch_opera_water_mask
 from landsat.filters import apply_landsat_filters
 from d1 import log_job_to_d1
 
@@ -64,6 +65,7 @@ def process_one_record(body):
     name = body["name"]
     location = body.get("location", "lake")
     scenes = body["scenes"]
+    processing_settings = body.get("processing_settings", {})
     feature_id = f"{name}/{location}" if location != "lake" else name
 
     print(f"[Landsat][{feature_id}] Processing {len(scenes)} scene(s) for date={date_str}")
@@ -165,8 +167,25 @@ def process_one_record(body):
         lst_kelvin = np.full_like(st_data, np.nan, dtype=np.float32)
         lst_kelvin[valid_mask] = st_data[valid_mask] * SCALE_FACTOR + ADD_OFFSET
 
-        # Apply QA filters
-        filtered_lst, filter_flags, has_water = apply_landsat_filters(lst_kelvin, qa_data)
+        # Optionally fetch OPERA DSWx-HLS water mask
+        opera_water = None
+        if processing_settings.get("water_mask") == "opera_dswx":
+            bbox = polygon_geom.bounds  # (min_lon, min_lat, max_lon, max_lat)
+            opera_water = fetch_opera_water_mask(
+                bbox=bbox,
+                date=date_day,
+                target_shape=lst_kelvin.shape,
+                target_transform=st_transform,
+                target_crs=st_meta["crs"],
+                tolerance_days=0,
+            )
+            if opera_water is not None:
+                print(f"[Landsat][{feature_id}] Using OPERA DSWx-HLS water mask")
+
+        # Apply QA filters (passes OPERA mask when available)
+        filtered_lst, filter_flags, has_water = apply_landsat_filters(
+            lst_kelvin, qa_data, opera_water_mask=opera_water
+        )
 
         # Compute filter statistics
         # Flatten for stats (exclude padding from mask operation)
@@ -245,7 +264,12 @@ def process_one_record(body):
         # Metadata
         hist = filter_stats["histogram"]
         valid_pixels = hist.get("0", 0)
-        land_pixels = sum(hist.get(str(i), 0) for i in range(16) if i & 4) if has_water else 0
+        # Count land pixels: flagged by native water (bit 2=4) or OPERA water (bit 6=64)
+        land_pixels = (
+            sum(hist.get(str(i), 0) for i in range(256) if i & 4) +
+            sum(hist.get(str(i), 0) for i in range(256) if i & 64)
+        ) if has_water else 0
+        water_mask_source = "opera_dswx" if opera_water is not None else "native"
 
         # Approximate WGS84 pixel size (degrees) from UTM cell size (meters)
         mid_lat = polygon_geom.centroid.y
@@ -261,6 +285,7 @@ def process_one_record(body):
             "water_pixel_count": valid_pixels,
             "land_pixel_count": land_pixels,
             "filter_stats": filter_stats,
+            "water_mask_source": water_mask_source,
             "pixel_size": float(pixel_deg_y),
             "pixel_size_x": float(pixel_deg_x),
             "source_crs": st_meta["crs"].to_string() if st_meta.get("crs") else None,

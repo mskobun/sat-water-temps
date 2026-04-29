@@ -10,6 +10,7 @@
 	let catchupEnabled = $state(true);
 	let catchupOverlapDays = $state('3');
 	let catchupMaxDays = $state('21');
+	let landsatWaterMask = $state<'native' | 'opera_dswx'>('native');
 	let loading = $state(true);
 	let saving = $state(false);
 	let error = $state('');
@@ -31,6 +32,9 @@
 			}
 			if (settings.catchup_max_days !== undefined) {
 				catchupMaxDays = settings.catchup_max_days;
+			}
+			if (settings.landsat_water_mask !== undefined) {
+				landsatWaterMask = settings.landsat_water_mask;
 			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load settings';
@@ -75,7 +79,8 @@
 				saveSetting('data_delay_days', String(delayVal)),
 				saveSetting('catchup_enabled', String(catchupEnabled)),
 				saveSetting('catchup_overlap_days', String(overlapVal)),
-				saveSetting('catchup_max_days', String(maxVal))
+				saveSetting('catchup_max_days', String(maxVal)),
+				saveSetting('landsat_water_mask', landsatWaterMask)
 			]);
 			success = 'Settings saved';
 		} catch (e) {
@@ -100,6 +105,42 @@
 			<AlertDescription>{success}</AlertDescription>
 		</Alert>
 	{/if}
+
+	<Card.Root class="mb-6">
+		<Card.Header>
+			<Card.Title>Processing Settings</Card.Title>
+			<Card.Description>
+				Default settings applied to all scheduled processing runs. Individual manual triggers can
+				override these per run.
+			</Card.Description>
+		</Card.Header>
+		<Card.Content>
+			{#if loading}
+				<p class="text-sm text-muted-foreground">Loading...</p>
+			{:else}
+				<div class="space-y-4">
+					<div class="space-y-2">
+						<p class="text-sm font-medium">Landsat water mask</p>
+						<div class="flex gap-1 rounded-md border p-1 w-fit">
+							<button
+								class="rounded px-3 py-1.5 text-sm font-medium transition-colors {landsatWaterMask === 'native' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+								onclick={() => { landsatWaterMask = 'native'; }}
+							>Native (QA_PIXEL)</button>
+							<button
+								class="rounded px-3 py-1.5 text-sm font-medium transition-colors {landsatWaterMask === 'opera_dswx' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'}"
+								onclick={() => { landsatWaterMask = 'opera_dswx'; }}
+							>OPERA DSWx-HLS</button>
+						</div>
+						<p class="text-sm text-muted-foreground">
+							Native uses the QA_PIXEL bit 7 CFMask water flag co-derived with each scene.
+							OPERA DSWx-HLS is a purpose-built 30m water classification from Harmonized Landsat
+							Sentinel-2, which yields fewer but more confident water pixels.
+						</p>
+					</div>
+				</div>
+			{/if}
+		</Card.Content>
+	</Card.Root>
 
 	<Card.Root>
 		<Card.Header>

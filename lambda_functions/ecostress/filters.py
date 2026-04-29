@@ -15,7 +15,7 @@ QC is a uint16 bitmask defined in PSD Table 3-5:
 filter_flags bit positions written by apply_ecostress_filters:
   Bit 0 = QC reject (mandatory QA + data quality bitmask)
   Bit 1 = cloud reject
-  Bit 2 = non-water reject (when a water mask is active)
+  Bit 2 = non-water reject (ECOSTRESS native water band)
   Bit 3 = nodata / swath gap
   Bit 4 = out-of-physical-range (Kelvin bounds, see common.outliers)
   Bit 5 = spatial outlier (local median-MAD / Hampel test, see common.outliers)
@@ -75,7 +75,7 @@ def apply_ecostress_filters(lst, qc, water, cloud):
 
     Returns:
         filtered_lst: LST array with rejected pixels set to NaN
-        filter_flags: 4-bit flags per pixel
+        filter_flags: uint8 flags per pixel (see module docstring)
         has_water: whether water filtering was applied
     """
     filter_flags = np.zeros(lst.shape, dtype=np.uint8)
@@ -92,7 +92,7 @@ def apply_ecostress_filters(lst, qc, water, cloud):
     cloud_mask = cloud == 1
     filter_flags = np.where(cloud_mask, filter_flags | 2, filter_flags)
 
-    # Bit 2: Water mask — keep only water pixels
+    # Bit 2: Native ECOSTRESS water band (non-zero = water)
     has_water = bool(np.any(water != 0))
     if has_water:
         non_water_mask = water == 0

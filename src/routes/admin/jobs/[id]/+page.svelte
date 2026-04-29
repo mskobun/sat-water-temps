@@ -281,35 +281,66 @@
 							<Progress value={calcPercent(stats.filtered_by_cloud, stats.total)} class="h-2" />
 						</div>
 
-						<!-- Water Mask Filter -->
-						<div class="space-y-2">
-							<div class="flex justify-between text-sm">
-								<span class="text-muted-foreground inline-flex items-center gap-1">
-									Water Mask (Non-water pixels)
-									<Tooltip.Root>
-										<Tooltip.Trigger>
-											<CircleHelpIcon class="size-3.5 text-muted-foreground/60" />
-										</Tooltip.Trigger>
-										<Tooltip.Content side="right" class="max-w-xs text-xs">
-											{#if isLandsat}
-												Non-water pixels removed using the Landsat QA_PIXEL water bit (bit 7).
-												<a href="https://www.usgs.gov/landsat-missions/landsat-collection-2-quality-assessment-bands" target="_blank" rel="noopener" class="underline ml-1">Landsat QA docs</a>
-											{:else}
-												Non-water pixels removed using the ECOSTRESS water body detection layer (wt != 1).
-												<a href="https://www.earthdata.nasa.gov/data/catalog/lpcloud-eco-l2-lste-002" target="_blank" rel="noopener" class="underline ml-1">ECO_L2_LSTE product</a>
-											{/if}
-										</Tooltip.Content>
-									</Tooltip.Root>
-								</span>
-								<span class="font-medium">
-									{formatNumber(stats.filtered_by_water)} pixels ({calcPercent(
-										stats.filtered_by_water,
-										stats.total
-									).toFixed(1)}%)
-								</span>
+						<!-- Water Mask Filter (native) -->
+						{#if stats.filtered_by_water > 0}
+							<div class="space-y-2">
+								<div class="flex justify-between text-sm">
+									<span class="text-muted-foreground inline-flex items-center gap-1">
+										Water Mask — sensor-native
+										<Tooltip.Root>
+											<Tooltip.Trigger>
+												<CircleHelpIcon class="size-3.5 text-muted-foreground/60" />
+											</Tooltip.Trigger>
+											<Tooltip.Content side="right" class="max-w-xs text-xs">
+												{#if isLandsat}
+													Non-water pixels removed using the Landsat QA_PIXEL water bit (bit 7, CFMask).
+													<a href="https://www.usgs.gov/landsat-missions/landsat-collection-2-quality-assessment-bands" target="_blank" rel="noopener" class="underline ml-1">Landsat QA docs</a>
+												{:else}
+													Non-water pixels removed using the ECOSTRESS embedded water band (wt != 0).
+													<a href="https://www.earthdata.nasa.gov/data/catalog/lpcloud-eco-l2-lste-002" target="_blank" rel="noopener" class="underline ml-1">ECO_L2_LSTE product</a>
+												{/if}
+											</Tooltip.Content>
+										</Tooltip.Root>
+									</span>
+									<span class="font-medium">
+										{formatNumber(stats.filtered_by_water)} pixels ({calcPercent(
+											stats.filtered_by_water,
+											stats.total
+										).toFixed(1)}%)
+									</span>
+								</div>
+								<Progress value={calcPercent(stats.filtered_by_water, stats.total)} class="h-2" />
 							</div>
-							<Progress value={calcPercent(stats.filtered_by_water, stats.total)} class="h-2" />
-						</div>
+						{/if}
+
+						<!-- Water Mask Filter (OPERA DSWx-HLS) -->
+						{#if stats.filtered_by_opera_water > 0}
+							<div class="space-y-2">
+								<div class="flex justify-between text-sm">
+									<span class="text-muted-foreground inline-flex items-center gap-1">
+										Water Mask — OPERA DSWx-HLS
+										<Tooltip.Root>
+											<Tooltip.Trigger>
+												<CircleHelpIcon class="size-3.5 text-muted-foreground/60" />
+											</Tooltip.Trigger>
+											<Tooltip.Content side="right" class="max-w-xs text-xs">
+												Non-water pixels removed using NASA OPERA DSWx-HLS 30m water classification
+												(Open Water or Partial Surface Water). More accurate near shorelines than
+												sensor-native masks.
+												<a href="https://www.jpl.nasa.gov/go/opera/products/dswx-product-suite" target="_blank" rel="noopener" class="underline ml-1">OPERA DSWx docs</a>
+											</Tooltip.Content>
+										</Tooltip.Root>
+									</span>
+									<span class="font-medium">
+										{formatNumber(stats.filtered_by_opera_water)} pixels ({calcPercent(
+											stats.filtered_by_opera_water,
+											stats.total
+										).toFixed(1)}%)
+									</span>
+								</div>
+								<Progress value={calcPercent(stats.filtered_by_opera_water, stats.total)} class="h-2" />
+							</div>
+						{/if}
 
 						<!-- NoData / Swath Coverage -->
 						{#if stats.filtered_by_nodata > 0}

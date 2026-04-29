@@ -73,6 +73,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="ECOSTRESS: use s3:// links even with --runtime local (Lambda-style; needs Earthdata S3 creds)",
     )
+    parser.add_argument(
+        "--opera-water-mask",
+        action="store_true",
+        help="Use OPERA DSWx-HLS water mask instead of sensor-native masks (sets processing_settings.water_mask=opera_dswx)",
+    )
     args = parser.parse_args(argv)
 
     if args.project_dir:
@@ -94,6 +99,9 @@ def main(argv: list[str] | None = None) -> int:
     os.chdir(repo_root)
     os.environ["PROCESSOR_RUNTIME"] = args.runtime
     os.environ["WRANGLER_PROJECT_DIR"] = str(repo_root)
+    landsat_processing_settings = {
+        "water_mask": "opera_dswx" if args.opera_water_mask else "native"
+    }
 
     sd = args.start_date
     ed = args.end_date or sd
@@ -140,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"No feature match for {args.feature!r}", file=sys.stderr)
         return 1
     ok, nodata, failed = 0, 0, 0
-    for body in iter_landsat_processor_bodies(sd, ed, polygons=polys):
+    for body in iter_landsat_processor_bodies(sd, ed, polygons=polys, processing_settings=landsat_processing_settings):
         try:
             process_landsat(body)
             ok += 1
