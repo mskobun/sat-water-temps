@@ -234,22 +234,16 @@ export async function countJobsByFilter(db: D1Database, status?: string) {
   }
 }
 
-/**
- * Parse filter_stats JSON. Old 3-bit histograms (no buckets >= 8) pass through
- * as-is — nodata wasn't tracked so there's no reliable way to infer it.
- */
-function parseFilterStats(
-  raw: unknown,
-) {
-  if (!raw) return null;
-  return typeof raw === 'string' ? JSON.parse(raw) : raw;
-}
 
 function mapJobWithMetadata(job: any) {
   const metadata = job.metadata ? JSON.parse(job.metadata as string) : null;
-  const filterStats = metadata?.filter_stats
-    ? parseFilterStats(metadata.filter_stats)
-    : parseFilterStats(job.filter_stats);
+  // Prefer filter_stats from the job's metadata blob (nodata/failed jobs) over
+  // the temperature_metadata join. Return raw FilterStats so components can
+  // call parseFilterStats / getFilterCombinations themselves.
+  const rawFilterStats = metadata?.filter_stats ?? job.filter_stats;
+  const filterStats = typeof rawFilterStats === 'string'
+    ? JSON.parse(rawFilterStats)
+    : rawFilterStats ?? null;
   return { ...job, metadata, filter_stats: filterStats };
 }
 
@@ -264,10 +258,8 @@ export async function getProcessingJobs(
       SELECT
         j.id, j.job_type, j.task_id, j.feature_id, j.date, j.status,
         j.started_at, j.completed_at, j.duration_ms, j.error_message, j.metadata,
-        tm.filter_stats
+        j.filter_stats
       FROM processing_jobs j
-      LEFT JOIN temperature_metadata tm
-        ON j.feature_id = tm.feature_id AND j.date = tm.date
     `;
 
     if (status) {
@@ -298,10 +290,8 @@ export async function getJobWithFilterStats(
         SELECT
           j.id, j.job_type, j.task_id, j.feature_id, j.date, j.status,
           j.started_at, j.completed_at, j.duration_ms, j.error_message, j.metadata,
-          tm.filter_stats
+          j.filter_stats
         FROM processing_jobs j
-        LEFT JOIN temperature_metadata tm
-          ON j.feature_id = tm.feature_id AND j.date = tm.date
         WHERE j.id = ?
       `)
       .bind(jobId)
@@ -378,10 +368,8 @@ export async function getJobsByFeature(
       SELECT
         j.id, j.job_type, j.task_id, j.feature_id, j.date, j.status,
         j.started_at, j.completed_at, j.duration_ms, j.error_message, j.metadata,
-        tm.filter_stats
+        j.filter_stats
       FROM processing_jobs j
-      LEFT JOIN temperature_metadata tm
-        ON j.feature_id = tm.feature_id AND j.date = tm.date
       WHERE j.feature_id = ?
     `;
 
@@ -484,10 +472,8 @@ export async function getDataRequestDetail(
         .prepare(`
           SELECT j.id, j.job_type, j.task_id, j.feature_id, j.date, j.status,
                  j.started_at, j.completed_at, j.duration_ms, j.error_message, j.metadata,
-                 tm.filter_stats
+                 j.filter_stats
           FROM processing_jobs j
-          LEFT JOIN temperature_metadata tm
-            ON j.feature_id = tm.feature_id AND j.date = tm.date
           WHERE j.task_id = ?
             AND j.started_at >= ?
           ORDER BY j.started_at DESC
@@ -499,10 +485,8 @@ export async function getDataRequestDetail(
         .prepare(`
           SELECT j.id, j.job_type, j.task_id, j.feature_id, j.date, j.status,
                  j.started_at, j.completed_at, j.duration_ms, j.error_message, j.metadata,
-                 tm.filter_stats
+                 j.filter_stats
           FROM processing_jobs j
-          LEFT JOIN temperature_metadata tm
-            ON j.feature_id = tm.feature_id AND j.date = tm.date
           WHERE j.job_type = 'landsat_process'
             AND j.date >= ? || 'T00:00:00'
             AND j.date <= ? || 'T23:59:59'

@@ -350,6 +350,7 @@ def process_one_record(body):
             date=date_str,
             status="success",
             duration_ms=duration_ms,
+            filter_stats_json=json.dumps(filter_stats),
         )
         print(f"[ECOSTRESS][{feature_id}] ✓ Processed successfully in {duration_ms}ms")
 

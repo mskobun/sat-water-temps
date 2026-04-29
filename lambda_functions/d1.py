@@ -93,6 +93,7 @@ def log_job_to_d1(
     duration_ms: int = None,
     error_message: str = None,
     metadata_json: str = None,
+    filter_stats_json: str = None,
     fatal: bool = True,
 ):
     """Log a processing job to the processing_jobs table.
@@ -148,7 +149,8 @@ def log_job_to_d1(
             sql = f"""
             UPDATE processing_jobs
             SET status = ?, completed_at = ?, duration_ms = ?,
-                error_message = ?, metadata = COALESCE(?, metadata)
+                error_message = ?, metadata = COALESCE(?, metadata),
+                filter_stats = COALESCE(?, filter_stats)
             WHERE {where_clause}
             ORDER BY started_at DESC LIMIT 1
             """
@@ -158,6 +160,7 @@ def log_job_to_d1(
                 duration_ms,
                 error_message,
                 metadata_json,
+                filter_stats_json,
             ] + where_params
 
             query_d1(sql, params, fatal=fatal)
