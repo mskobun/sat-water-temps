@@ -12,6 +12,7 @@
 	import * as Select from '$lib/components/ui/select';
 	import * as Popover from '$lib/components/ui/popover';
 	import * as Dialog from '$lib/components/ui/dialog';
+	import * as Command from '$lib/components/ui/command';
 	import { RangeCalendar } from '$lib/components/ui/range-calendar';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
@@ -41,6 +42,12 @@
 		running_jobs: number;
 	}
 
+	interface Feature {
+		id: string;
+		name: string;
+		location: string;
+	}
+
 	const filterOptions = [
 		{ value: 'all', label: 'All Requests' },
 		{ value: 'pending', label: 'Pending' },
@@ -68,10 +75,19 @@
 	let triggerWaterMask = $state<'native' | 'opera_dswx' | null>(null);
 	let globalWaterMask = $state<'native' | 'opera_dswx'>('native');
 
+	// Feature multiselect
+	let availableFeatures = $state<Feature[]>([]);
+	let featuresLoading = $state(false);
+	let triggerFeatureIds = $state<string[]>([]);
+	let featurePopoverOpen = $state(false);
+
 	$effect(() => {
 		if (dialogOpen) {
 			triggerSource = source;
 			triggerWaterMask = null; // reset to global default on each open
+			triggerFeatureIds = [];
+			featurePopoverOpen = false;
+
 			// Load the current global default so we can pre-label the selector
 			fetch('/api/admin/settings')
 				.then((r) => r.json())
@@ -81,6 +97,18 @@
 					}
 				})
 				.catch(() => {});
+
+			// Load features for multiselect
+			featuresLoading = true;
+			fetch('/api/admin/features')
+				.then((r) => r.json())
+				.then((d: { features?: Feature[] }) => {
+					availableFeatures = d.features ?? [];
+				})
+				.catch(() => {})
+				.finally(() => {
+					featuresLoading = false;
+				});
 		}
 	});
 	let triggerDateRange = $state<DateRange>({ start: undefined, end: undefined });
@@ -97,6 +125,20 @@
 		const tz = getLocalTimeZone();
 		return Math.round((end.toDate(tz).getTime() - start.toDate(tz).getTime()) / 86400000) + 1;
 	});
+
+	function toggleFeature(id: string) {
+		if (triggerFeatureIds.includes(id)) {
+			triggerFeatureIds = triggerFeatureIds.filter((x) => x !== id);
+		} else {
+			triggerFeatureIds = [...triggerFeatureIds, id];
+		}
+	}
+
+	function featureLabel(f: Feature): string {
+		// Show location suffix only when there are multiple entries with the same name
+		const sameNameCount = availableFeatures.filter((x) => x.name === f.name).length;
+		return sameNameCount > 1 ? `${f.name} (${f.location})` : f.name;
+	}
 
 	async function fetchRequests() {
 		try {
@@ -170,6 +212,9 @@
 			if (triggerSource === 'landsat' && triggerWaterMask !== null) {
 				requestBody.processingSettings = { water_mask: triggerWaterMask };
 			}
+			if (triggerFeatureIds.length > 0) {
+				requestBody.featureIds = triggerFeatureIds;
+			}
 			const response = await fetch('/api/admin/trigger', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
@@ -186,6 +231,7 @@
 				triggerSuccess = data.message || `Created ${data.count} request(s)`;
 				triggerDateRange = { start: undefined, end: undefined };
 				triggerDescription = '';
+				triggerFeatureIds = [];
 				fetchRequests();
 				setTimeout(() => { dialogOpen = false; triggerSuccess = ''; }, 2000);
 			}
@@ -298,13 +344,70 @@
 						</div>
 						{#if triggerDateRange.start && triggerDateRange.end}
 							<p class="text-sm text-muted-foreground">
-								{#if triggerSource === 'ecostress'}
+								{#if triggerFeatureIds.length > 0}
+									{triggerFeatureIds.length} feature(s) will be scanned for {dayCount()} day(s)
+								{:else if triggerSource === 'ecostress'}
 									1 ECOSTRESS scan will be created for {dayCount()} day(s)
 								{:else}
 									1 Landsat scan will be created for {dayCount()} day(s)
 								{/if}
 							</p>
 						{/if}
+						<div class="flex flex-col gap-1.5">
+							<Label>Features</Label>
+							<p class="text-xs text-muted-foreground -mt-1">Leave empty to process all features</p>
+							{#if triggerFeatureIds.length > 0}
+								<div class="flex flex-wrap gap-1">
+									{#each triggerFeatureIds as fid}
+										{@const f = availableFeatures.find((x) => x.id === fid)}
+										<Badge variant="secondary" class="gap-1 pr-1">
+											{f ? featureLabel(f) : fid}
+											<button
+												class="ml-0.5 rounded-full hover:bg-muted-foreground/20 p-0.5 leading-none"
+												onclick={() => toggleFeature(fid)}
+												aria-label="Remove {f?.name ?? fid}"
+											>×</button>
+										</Badge>
+									{/each}
+								</div>
+							{/if}
+							<Popover.Root bind:open={featurePopoverOpen}>
+								<Popover.Trigger>
+									{#snippet children()}
+										<Button variant="outline" class="w-full justify-start font-normal" role="combobox" aria-expanded={featurePopoverOpen}>
+											{#if featuresLoading}
+												<Spinner class="size-3.5 mr-2" />Loading features…
+											{:else if triggerFeatureIds.length === 0}
+												<span class="text-muted-foreground">All features — click to filter</span>
+											{:else}
+												{triggerFeatureIds.length} feature{triggerFeatureIds.length === 1 ? '' : 's'} selected
+											{/if}
+										</Button>
+									{/snippet}
+								</Popover.Trigger>
+								<Popover.Content class="p-0 w-72" align="start">
+									<Command.Root>
+										<Command.Input placeholder="Search features…" />
+										<Command.Empty>No features found</Command.Empty>
+										<Command.List>
+											<Command.Group>
+												{#each availableFeatures as f (f.id)}
+													<Command.Item
+														value={featureLabel(f)}
+														onSelect={() => toggleFeature(f.id)}
+													>
+														<span class="mr-2 w-3.5 shrink-0">
+															{triggerFeatureIds.includes(f.id) ? '✓' : ''}
+														</span>
+														{featureLabel(f)}
+													</Command.Item>
+												{/each}
+											</Command.Group>
+										</Command.List>
+									</Command.Root>
+								</Popover.Content>
+							</Popover.Root>
+						</div>
 						<div class="flex flex-col gap-1.5">
 							<Label for="trigger-desc">Description (optional)</Label>
 							<Input

@@ -13,10 +13,12 @@ async function triggerProcessing(
 	startDate: string,
 	endDate: string,
 	description: string | undefined,
-	userEmail: string
+	userEmail: string,
+	featureName?: string | null
 ) {
 	if (source === 'ecostress') {
-		const desc = description || `Manual ECOSTRESS scan for ${startDate}${startDate !== endDate ? ` to ${endDate}` : ''}`;
+		const featureLabel = featureName ? ` [${featureName}]` : '';
+		const desc = description || `Manual ECOSTRESS scan for ${startDate}${startDate !== endDate ? ` to ${endDate}` : ''}${featureLabel}`;
 		const now = Date.now();
 
 		const result = await db
@@ -44,10 +46,12 @@ async function triggerProcessing(
 			source,
 			description: desc,
 			startDate,
-			endDate
+			endDate,
+			featureName: featureName ?? null
 		};
 	} else {
-		const desc = description || `Manual Landsat trigger for ${startDate} to ${endDate}`;
+		const featureLabel = featureName ? ` [${featureName}]` : '';
+		const desc = description || `Manual Landsat trigger for ${startDate} to ${endDate}${featureLabel}`;
 
 		const result = await db
 			.prepare(`
@@ -65,7 +69,8 @@ async function triggerProcessing(
 			source,
 			description: desc,
 			startDate,
-			endDate
+			endDate,
+			featureName: featureName ?? null
 		};
 	}
 }
@@ -115,12 +120,13 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	}
 
 	const body = await request.json();
-	const { startDate, endDate, description, source, processingSettings } = body as {
+	const { startDate, endDate, description, source, processingSettings, featureIds } = body as {
 		startDate?: string;
 		endDate?: string;
 		description?: string;
 		source?: 'ecostress' | 'landsat';
 		processingSettings?: Record<string, string> | null;
+		featureIds?: string[];
 	};
 
 	if (!startDate || !endDate) {
@@ -159,88 +165,115 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	}
 
 	const selectedSource = source || 'ecostress';
-	const result = await triggerProcessing(db, selectedSource, startDate, endDate, description, userEmail);
+	// Feature IDs from the frontend are "Name/location" (e.g. "Magat/lake").
+	// The Lambda initiator matches polygons by name only, so strip the /location suffix.
+	const featureNames: (string | null)[] =
+		featureIds && featureIds.length > 0
+			? featureIds.map((id) => id.split('/')[0])
+			: [null];
 
-	// If triggerProcessing returned a Response (validation error), pass through
-	if (result instanceof Response) return result;
+	const results = await Promise.all(
+		featureNames.map((name) =>
+			triggerProcessing(db, selectedSource, startDate, endDate, description, userEmail, name)
+		)
+	);
 
-	const { ids } = result;
-	const count = ids.length;
+	const allIds = results.flatMap((r) => r.ids);
+	const count = allIds.length;
 
 	if (!hasLambdaCreds || !aws || !lambdaUrl) {
-		const warning = selectedSource === 'ecostress'
-			? 'Lambda invocation credentials not configured. ECOSTRESS scan request recorded but Lambda not invoked.'
-			: 'Lambda invocation credentials not configured. Landsat scan request recorded but Lambda not invoked.';
-		return json({
-			count,
-			successful: 0,
-			failed: 0,
-			ids,
-			errors: [],
-			warning
-		}, { status: 202 });
+		const warning =
+			selectedSource === 'ecostress'
+				? 'Lambda invocation credentials not configured. ECOSTRESS scan request(s) recorded but Lambda not invoked.'
+				: 'Lambda invocation credentials not configured. Landsat scan request(s) recorded but Lambda not invoked.';
+		return json({ count, successful: 0, failed: 0, ids: allIds, errors: [], warning }, { status: 202 });
 	}
 
 	if (selectedSource === 'ecostress') {
-		const requestId = result.requestId;
-		const payload = {
+		for (const result of results) {
+			const payload: Record<string, unknown> = {
+				start_date: result.startDate,
+				end_date: result.endDate,
+				trigger_type: 'manual',
+				triggered_by: userEmail,
+				description: result.description,
+				request_id: result.requestId,
+				task_id: result.taskId
+			};
+			if (result.featureName) payload.feature = result.featureName;
+
+			const capturedResult = result;
+			platform?.context?.waitUntil(
+				(async () => {
+					const invokeResult = await invokeInitiator(aws, lambdaUrl, payload);
+					const invokeError = getInvokeError(invokeResult);
+					if (invokeError) {
+						await markRequestError(db, capturedResult.requestId!, invokeError);
+					}
+				})()
+			);
+		}
+
+		return json(
+			{
+				count,
+				successful: 0,
+				failed: 0,
+				ids: allIds,
+				message:
+					count === 1
+						? 'ECOSTRESS scan accepted and queued. It will continue in the background.'
+						: `${count} ECOSTRESS scans accepted and queued. They will continue in the background.`
+			},
+			{ status: 202 }
+		);
+	}
+
+	// Landsat — invoke synchronously per feature
+	const errors: string[] = [];
+	let successful = 0;
+	for (const result of results) {
+		const payload: Record<string, unknown> = {
 			start_date: result.startDate,
 			end_date: result.endDate,
 			trigger_type: 'manual',
 			triggered_by: userEmail,
 			description: result.description,
-			request_id: requestId,
-			task_id: result.taskId
+			run_id: result.runId
 		};
+		if (processingSettings) payload.processing_settings = processingSettings;
+		if (result.featureName) payload.feature = result.featureName;
 
-		platform?.context?.waitUntil((async () => {
-			const invokeResult = await invokeInitiator(aws, lambdaUrl, payload);
-			const invokeError = getInvokeError(invokeResult);
-			if (invokeError) {
-				await markRequestError(db, requestId, invokeError);
-			}
-		})());
+		const invokeResult = await invokeInitiator(aws, lambdaUrl, payload);
+		const invokeError = getInvokeError(invokeResult);
+		if (invokeError) {
+			await markRequestError(db, result.runId!, invokeError);
+			errors.push(invokeError);
+		} else {
+			successful++;
+		}
+	}
 
+	if (errors.length === count) {
 		return json({
 			count,
 			successful: 0,
-			failed: 0,
-			ids,
-			message: 'ECOSTRESS scan accepted and queued. It will continue in the background.'
-		}, { status: 202 });
-	}
-
-	const payload: Record<string, unknown> = {
-		start_date: result.startDate,
-		end_date: result.endDate,
-		trigger_type: 'manual',
-		triggered_by: userEmail,
-		description: result.description,
-		run_id: result.runId
-	};
-	if (processingSettings) {
-		payload.processing_settings = processingSettings;
-	}
-	const invokeResult = await invokeInitiator(aws, lambdaUrl, payload);
-	const invokeError = getInvokeError(invokeResult);
-
-	if (invokeError) {
-		await markRequestError(db, result.runId, invokeError);
-		return json({
-			count,
-			successful: 0,
-			failed: 1,
-			ids,
-			errors: [invokeError],
-			message: 'Created Landsat scan request, but Lambda invocation failed'
+			failed: errors.length,
+			ids: allIds,
+			errors,
+			message: 'Created Landsat scan request(s), but Lambda invocation failed'
 		});
 	}
 
 	return json({
 		count,
-		successful: 1,
-		failed: 0,
-		ids,
-		message: 'Created Landsat scan request successfully'
+		successful,
+		failed: errors.length,
+		ids: allIds,
+		...(errors.length ? { errors } : {}),
+		message:
+			count === 1
+				? 'Created Landsat scan request successfully'
+				: `Created ${count} Landsat scan requests${errors.length ? ` (${errors.length} failed)` : ' successfully'}`
 	});
 };
