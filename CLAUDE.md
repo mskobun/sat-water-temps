@@ -10,8 +10,18 @@ npm run wrangler:dev:remote    # Full stack (prod D1 + prod R2) at http://localh
 npm run lint                   # Svelte + TypeScript checks (svelte-check --threshold error)
 uv run pytest tests/ -v        # Run Lambda unit tests
 cd lambda_functions && uv run python -m local_fill --help   # In-process fill: one feature + date range; add --runtime local for Wrangler D1+R2 (repo root found from cwd)
-npm run deploy                 # Deploy frontend to Cloudflare Pages
-cd terraform && terraform apply  # Deploy Lambda functions (requires AWS creds)
+# Frontend and Lambda both deploy automatically via GitHub Actions on push to main
+```
+
+## Deployment
+
+Both frontend (Cloudflare Pages) and Lambda functions (Terraform) deploy automatically via GitHub Actions on every push to `main`. Do not run `terraform apply` or `npm run deploy` locally.
+
+To check whether a deployment has completed:
+
+```bash
+gh run list --limit 5
+gh run watch   # stream the latest run
 ```
 
 ## Git Worktrees
