@@ -14,6 +14,17 @@ npm run deploy                 # Deploy frontend to Cloudflare Pages
 cd terraform && terraform apply  # Deploy Lambda functions (requires AWS creds)
 ```
 
+## Git Worktrees
+
+When creating or testing from a git worktree, copy local secret/config files from the main checkout before running dev servers, Wrangler, auth setup, or processor tests:
+
+```bash
+cp /path/to/main-checkout/.env /path/to/worktree/.env
+cp /path/to/main-checkout/.dev.vars /path/to/worktree/.dev.vars
+```
+
+These files are intentionally untracked, so a fresh worktree will otherwise miss Cloudflare, Auth.js/Cognito, R2/D1, and local runtime configuration. Do not commit either file.
+
 ## Local Database
 
 Local D1 stored in `.wrangler/state/v3/d1/`. Remote R2 used for file access.
