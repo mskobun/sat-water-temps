@@ -211,24 +211,26 @@ def process_one_record(body):
         with rasterio.open(filter_tif_path, "w", **tif_meta) as dst:
             dst.write(filtered_lst, 1)
 
-        # Generate CSV — coordinates must be WGS84 (lon/lat) for the frontend.
-        # Landsat rasters are in a projected CRS (e.g. UTM), so we must reproject.
-        row_idx, col_idx = np.meshgrid(np.arange(rows), np.arange(cols), indexing="ij")
-        xs, ys = rasterio.transform.xy(st_transform, row_idx.flatten(), col_idx.flatten())
+        # Generate output rows only for valid pixels. Building coordinates for
+        # the full clipped grid is the peak-memory path for large reservoirs.
+        valid_pixels_mask = ~np.isnan(filtered_lst)
+        valid_rows, valid_cols = np.nonzero(valid_pixels_mask)
+
+        # Coordinates must be WGS84 (lon/lat) for the frontend. Landsat rasters
+        # are projected (e.g. UTM), so reproject only valid pixel centers.
+        xs, ys = rasterio.transform.xy(st_transform, valid_rows, valid_cols)
 
         from rasterio.warp import transform as warp_transform
         lons, lats = warp_transform(st_meta["crs"], "EPSG:4326", xs, ys)
 
-        df = pd.DataFrame({
+        df_valid = pd.DataFrame({
             "longitude": lons,
             "latitude": lats,
-            "row": row_idx.flatten(),
-            "col": col_idx.flatten(),
-            "LST_filter": filtered_lst.flatten(),
-            "QA_PIXEL": qa_data.flatten(),
+            "row": valid_rows,
+            "col": valid_cols,
+            "LST_filter": filtered_lst[valid_pixels_mask],
+            "QA_PIXEL": qa_data[valid_pixels_mask],
         })
-        # Drop NaN LST rows (filtered or nodata)
-        df_valid = df.dropna(subset=["LST_filter"])
 
         if len(df_valid) == 0:
             raise NoDataError(filter_stats)
