@@ -25,7 +25,6 @@ an explicit per-run override in the Lambda event payload).
 from __future__ import annotations
 
 import os
-import tempfile
 from typing import Optional
 
 import earthaccess
@@ -159,23 +158,14 @@ def fetch_opera_water_mask(
         return None
 
     try:
-        https_session = earthaccess.get_requests_https_session()
-
-        # Download and open each tile
-        tmp_paths = []
+        # Open COGs directly via range requests — no full download needed.
+        # earthaccess.open() returns file-like objects backed by authenticated
+        # HTTP range requests, so rasterio only fetches the windows it needs.
+        file_objs = earthaccess.open(hrefs)
         datasets = []
         try:
-            for href in hrefs:
-                r = https_session.get(href, timeout=120, stream=True)
-                r.raise_for_status()
-                fd, tmp_path = tempfile.mkstemp(suffix=".tif")
-                os.close(fd)
-                tmp_paths.append(tmp_path)
-                with open(tmp_path, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=1024 * 1024):
-                        if chunk:
-                            f.write(chunk)
-                datasets.append(rasterio.open(tmp_path))
+            for fobj in file_objs:
+                datasets.append(rasterio.open(fobj))
 
             # Merge multiple tiles if needed
             if len(datasets) == 1:
@@ -212,10 +202,10 @@ def fetch_opera_water_mask(
                     ds.close()
                 except Exception:
                     pass
-            for p in tmp_paths:
+            for fobj in file_objs:
                 try:
-                    os.unlink(p)
-                except OSError:
+                    fobj.close()
+                except Exception:
                     pass
 
     except Exception as e:
