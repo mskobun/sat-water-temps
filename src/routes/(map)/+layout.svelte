@@ -591,13 +591,18 @@
 		localStorage.setItem('onboarding-point-seen', '1');
 	}
 
-	// Stage 2: show once heatmap fully loaded (parquet done), dismiss when point history opens
+	// Stage 2: show once heatmap fully loaded (parquet done), dismiss when point history opens.
+	// On mobile, hide while the drawer is open (hint would be behind it).
 	$effect(() => {
-		if (deckHasData && !onboardingPointSeen && selectedFeature) showHint2 = true;
-		if (!deckHasData) showHint2 = false;
+		if (deckHasData && !onboardingPointSeen && selectedFeature && (!isMobile.current || !drawerOpen)) showHint2 = true;
+		if (!deckHasData || (isMobile.current && drawerOpen)) showHint2 = false;
 	});
 	$effect(() => {
 		if (pointHistoryOpen && showHint2) dismissHint2();
+	});
+	// Auto-dismiss hint 1 when user lands directly on a feature page (drawer opens immediately)
+	$effect(() => {
+		if (selectedFeature && showHint1) dismissHint1();
 	});
 
 	// Pulse polygon outlines indefinitely until hint1 is dismissed
@@ -1056,7 +1061,7 @@
 				<!-- Stage 2: heatmap loaded — hint to click a pixel for point history -->
 				{#if showHint2}
 					<div
-						class="absolute bottom-14 left-1/2 -translate-x-1/2 z-30
+						class="absolute {isMobile.current ? 'bottom-20' : 'bottom-14'} left-1/2 -translate-x-1/2 z-30
 							   rounded-md bg-background/80 backdrop-blur-sm px-4 py-2.5 shadow-sm border border-border/50
 							   animate-in fade-in-0 slide-in-from-bottom-2 duration-300 pointer-events-none"
 					>
@@ -1152,7 +1157,7 @@
 
 	{#if isMobile.current}
 		<Dialog.Root open={pointHistoryOpen} onOpenChange={(open) => { if (!open) closePointHistory(); }}>
-			<Dialog.Content class="max-w-[calc(100%-1.5rem)] p-0" showCloseButton={false}>
+			<Dialog.Content class="w-auto max-w-[calc(100%-1.5rem)] p-0 border-0 shadow-none bg-transparent" showCloseButton={false}>
 				<PointHistoryPanel
 					{selectedPoint}
 					featureId={selectedFeature?.id ?? null}
