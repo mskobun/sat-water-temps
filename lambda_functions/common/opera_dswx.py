@@ -74,14 +74,19 @@ def search_opera_dswx(bbox: tuple, date: str, tolerance_days: int = 0) -> list:
 
 
 def _get_wtr_href(granule) -> Optional[str]:
-    """Extract the B01_WTR band HTTPS link from an OPERA DSWx granule."""
+    """Extract the B01_WTR band S3 URI from an OPERA DSWx granule.
+
+    Prefers direct S3 access (s3://) over HTTPS — Lambda runs in us-west-2,
+    the same region as podaac-ops-cumulus-protected, so S3 direct access avoids
+    the PO.DAAC HTTP auth layer entirely.
+    """
     try:
-        links = granule.data_links(access="external")
+        links = granule.data_links(access="direct")
         for link in links:
             if "_B01_WTR.tif" in link:
                 return link
-        # Fallback: try all links
-        for link in granule.data_links():
+        # Fallback: HTTPS external links
+        for link in granule.data_links(access="external"):
             if "_B01_WTR.tif" in link:
                 return link
     except Exception as e:
@@ -120,11 +125,7 @@ def fetch_opera_water_mask(
 
     Callers should fall back to sensor-native water masks when None is returned.
     """
-    try:
-        earthaccess.login(strategy="environment")
-    except Exception as e:
-        print(f"[OPERA] earthaccess login failed: {e}")
-        return None
+    earthaccess.login()
 
     granules = search_opera_dswx(bbox, date, tolerance_days=tolerance_days)
     if not granules:
@@ -134,7 +135,7 @@ def fetch_opera_water_mask(
     # Log granule acquisition dates so temporal matching can be verified
     for g in granules:
         try:
-            links = g.data_links(access="external")
+            links = g.data_links(access="direct") or g.data_links(access="external")
             b01 = next((l for l in links if "B01_WTR" in l), None)
             # Filename contains acquisition datetime, e.g. _T51QUU_20260330T021623Z_
             if b01:
@@ -158,10 +159,14 @@ def fetch_opera_water_mask(
         return None
 
     try:
-        # Open COGs directly via range requests — no full download needed.
-        # earthaccess.open() returns file-like objects backed by authenticated
-        # HTTP range requests, so rasterio only fetches the windows it needs.
-        file_objs = earthaccess.open(hrefs)
+        # Open COGs via direct S3 access (Lambda runs in us-west-2, same region
+        # as podaac-ops-cumulus-protected). in_region=True + PO.DAAC credentials
+        # endpoint mirrors how ECOSTRESS opens LP DAAC COGs.
+        earthaccess.__store__.in_region = True
+        file_objs = earthaccess.open(
+            hrefs,
+            credentials_endpoint="https://archive.podaac.earthdata.nasa.gov/s3credentials",
+        )
         datasets = []
         try:
             for fobj in file_objs:
