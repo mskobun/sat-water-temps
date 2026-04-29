@@ -99,6 +99,8 @@ def main(argv: list[str] | None = None) -> int:
     os.chdir(repo_root)
     os.environ["PROCESSOR_RUNTIME"] = args.runtime
     os.environ["WRANGLER_PROJECT_DIR"] = str(repo_root)
+    if args.runtime == "local":
+        os.environ.setdefault("OPERA_DSWX_ACCESS", "external")
     landsat_processing_settings = {
         "water_mask": "opera_dswx" if args.opera_water_mask else "native"
     }

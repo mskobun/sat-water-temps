@@ -74,21 +74,23 @@ def search_opera_dswx(bbox: tuple, date: str, tolerance_days: int = 0) -> list:
 
 
 def _get_wtr_href(granule) -> Optional[str]:
-    """Extract the B01_WTR band S3 URI from an OPERA DSWx granule.
+    """Extract the B01_WTR band URI from an OPERA DSWx granule.
 
     Prefers direct S3 access (s3://) over HTTPS — Lambda runs in us-west-2,
     the same region as podaac-ops-cumulus-protected, so S3 direct access avoids
     the PO.DAAC HTTP auth layer entirely.
     """
     try:
-        links = granule.data_links(access="direct")
-        for link in links:
-            if "_B01_WTR.tif" in link:
-                return link
-        # Fallback: HTTPS external links
-        for link in granule.data_links(access="external"):
-            if "_B01_WTR.tif" in link:
-                return link
+        access_order = (
+            ("external", "direct")
+            if os.environ.get("OPERA_DSWX_ACCESS") == "external"
+            else ("direct", "external")
+        )
+        for access in access_order:
+            links = granule.data_links(access=access)
+            for link in links:
+                if "_B01_WTR.tif" in link:
+                    return link
     except Exception as e:
         print(f"[OPERA] Failed to get WTR href: {e}")
     return None
@@ -103,6 +105,84 @@ def opera_mask_to_water_bool(wtr_array: np.ndarray) -> np.ndarray:
     return np.isin(wtr_array, list(WATER_VALUES))
 
 
+def _dataset_nodata(ds) -> int:
+    """Return OPERA WTR nodata/fill value for merge/reproject masking."""
+    nodata = ds.nodata
+    if nodata is None:
+        return 255
+    return int(nodata)
+
+
+def _reproject_datasets_windowed(
+    datasets: list,
+    target_shape: tuple,
+    target_transform: Affine,
+    target_crs: CRS,
+) -> np.ndarray:
+    """Reproject OPERA WTR tiles directly to the target grid.
+
+    This avoids rasterio.merge() allocating one large source mosaic. It keeps
+    merge(method="first") semantics by only writing target pixels that have not
+    already received a valid value from an earlier dataset.
+    """
+    nodata = _dataset_nodata(datasets[0])
+    dst_array = np.full(target_shape, nodata, dtype=np.uint8)
+    written = np.zeros(target_shape, dtype=bool)
+
+    for ds in datasets:
+        tile = np.full(target_shape, nodata, dtype=np.uint8)
+        tile_nodata = _dataset_nodata(ds)
+        reproject(
+            source=rasterio.band(ds, 1),
+            destination=tile,
+            src_transform=ds.transform,
+            src_crs=ds.crs,
+            src_nodata=tile_nodata,
+            dst_transform=target_transform,
+            dst_crs=target_crs,
+            dst_nodata=tile_nodata,
+            resampling=Resampling.nearest,
+        )
+
+        valid = tile != tile_nodata
+        update = valid & ~written
+        dst_array[update] = tile[update]
+        written |= update
+
+    return dst_array
+
+
+def _reproject_datasets_via_merge(
+    datasets: list,
+    target_shape: tuple,
+    target_transform: Affine,
+    target_crs: CRS,
+) -> np.ndarray:
+    """Legacy full-mosaic path retained for local accuracy comparisons."""
+    if len(datasets) == 1:
+        src_ds = datasets[0]
+        wtr_data = src_ds.read(1)
+        src_transform = src_ds.transform
+        src_crs = src_ds.crs
+    else:
+        merged, merged_transform = merge(datasets)
+        wtr_data = merged[0]
+        src_transform = merged_transform
+        src_crs = datasets[0].crs
+
+    dst_array = np.zeros(target_shape, dtype=np.uint8)
+    reproject(
+        source=wtr_data,
+        destination=dst_array,
+        src_transform=src_transform,
+        src_crs=src_crs,
+        dst_transform=target_transform,
+        dst_crs=target_crs,
+        resampling=Resampling.nearest,
+    )
+    return dst_array
+
+
 def fetch_opera_water_mask(
     bbox: tuple,
     date: str,
@@ -114,9 +194,9 @@ def fetch_opera_water_mask(
     """Fetch an OPERA DSWx-HLS water mask co-registered to a target raster grid.
 
     Searches CMR for OPERA DSWx-HLS granules matching the bbox and date, opens
-    the B01_WTR band(s), merges if multiple tiles, reprojects to the target
-    grid using nearest-neighbour resampling, and returns a boolean mask where
-    True = water pixel.
+    the B01_WTR band(s), reprojects each tile to the target grid using
+    nearest-neighbour resampling, and returns a boolean mask where True =
+    water pixel.
 
     Returns None if:
     - No OPERA granule found for this date/location
@@ -159,10 +239,11 @@ def fetch_opera_water_mask(
         return None
 
     try:
-        # Open COGs via direct S3 access (Lambda runs in us-west-2, same region
-        # as podaac-ops-cumulus-protected). in_region=True + PO.DAAC credentials
-        # endpoint mirrors how ECOSTRESS opens LP DAAC COGs.
-        earthaccess.__store__.in_region = True
+        # Lambda uses direct S3 in us-west-2. Local runs can set
+        # OPERA_DSWX_ACCESS=external to use HTTPS links instead.
+        earthaccess.__store__.in_region = any(
+            href.startswith("s3://") for href in hrefs
+        )
         file_objs = earthaccess.open(
             hrefs,
             credentials_endpoint="https://archive.podaac.earthdata.nasa.gov/s3credentials",
@@ -172,29 +253,17 @@ def fetch_opera_water_mask(
             for fobj in file_objs:
                 datasets.append(rasterio.open(fobj))
 
-            # Merge multiple tiles if needed
-            if len(datasets) == 1:
-                src_ds = datasets[0]
-                wtr_data = src_ds.read(1)
-                src_transform = src_ds.transform
-                src_crs = src_ds.crs
+            mode = os.environ.get("OPERA_DSWX_REPROJECT_MODE", "windowed").lower()
+            if mode == "merge":
+                print("[OPERA] Using legacy full-merge reprojection")
+                dst_array = _reproject_datasets_via_merge(
+                    datasets, target_shape, target_transform, target_crs
+                )
             else:
-                merged, merged_transform = merge(datasets)
-                wtr_data = merged[0]
-                src_transform = merged_transform
-                src_crs = datasets[0].crs
-
-            # Reproject to target grid (nearest neighbour — categorical data)
-            dst_array = np.zeros(target_shape, dtype=np.uint8)
-            reproject(
-                source=wtr_data,
-                destination=dst_array,
-                src_transform=src_transform,
-                src_crs=src_crs,
-                dst_transform=target_transform,
-                dst_crs=target_crs,
-                resampling=Resampling.nearest,
-            )
+                print("[OPERA] Using windowed per-tile reprojection")
+                dst_array = _reproject_datasets_windowed(
+                    datasets, target_shape, target_transform, target_crs
+                )
 
             water_bool = opera_mask_to_water_bool(dst_array)
             n_water = int(np.sum(water_bool))
