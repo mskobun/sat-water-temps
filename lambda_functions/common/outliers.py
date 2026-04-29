@@ -53,7 +53,7 @@ def range_outlier_mask(lst):
         return np.where(numeric, (arr < LST_MIN_K) | (arr > LST_MAX_K), False)
 
 
-def hampel_outlier_mask(lst, valid_mask):
+def hampel_outlier_mask(lst, valid_mask, chunk_rows=512):
     """Boolean mask of pixels failing a local 5x5 median-MAD (Hampel) test.
 
     Only ``valid_mask`` pixels participate in the local statistics, so clouds,
@@ -79,28 +79,54 @@ def hampel_outlier_mask(lst, valid_mask):
 
     working = np.where(valid_mask, lst, np.nan).astype(np.float32)
     pad = LOCAL_WINDOW // 2
-    padded = np.pad(working, pad, mode="constant", constant_values=np.nan)
-    windows = np.lib.stride_tricks.sliding_window_view(
-        padded, (LOCAL_WINDOW, LOCAL_WINDOW)
-    )
-    flat = windows.reshape(lst.shape[0], lst.shape[1], -1)
+    rows, cols = lst.shape
+    chunk_rows = max(1, int(chunk_rows))
 
-    with np.errstate(invalid="ignore", all="ignore"), warnings.catch_warnings():
-        # All-NaN windows are expected for isolated valid pixels — suppress the
-        # numpy RuntimeWarning and let the guards below handle those pixels.
-        warnings.filterwarnings("ignore", r"All-NaN slice encountered", RuntimeWarning)
-        valid_count = np.sum(~np.isnan(flat), axis=-1)
-        local_median = np.nanmedian(flat, axis=-1)
-        local_mad = np.nanmedian(np.abs(flat - local_median[..., None]), axis=-1)
-        deviation = np.abs(lst - local_median)
-        threshold = np.maximum(HAMPEL_K * MAD_SCALE * local_mad, MIN_OUTLIER_DELTA_K)
-        reject = deviation > threshold
+    for row_start in range(0, rows, chunk_rows):
+        row_end = min(rows, row_start + chunk_rows)
+        src_start = max(0, row_start - pad)
+        src_end = min(rows, row_end + pad)
+        pad_top = pad - (row_start - src_start)
+        pad_bottom = pad - (src_end - row_end)
 
-    skip = (
-        ~valid_mask
-        | np.isnan(lst)
-        | np.isnan(local_median)
-        | np.isnan(local_mad)
-        | (valid_count < MIN_WINDOW_VALID)
-    )
-    return np.where(skip, False, reject)
+        chunk = working[src_start:src_end]
+        padded = np.pad(
+            chunk,
+            ((pad_top, pad_bottom), (pad, pad)),
+            mode="constant",
+            constant_values=np.nan,
+        )
+        windows = np.lib.stride_tricks.sliding_window_view(
+            padded, (LOCAL_WINDOW, LOCAL_WINDOW)
+        )
+        flat = windows.reshape(row_end - row_start, cols, -1)
+
+        with np.errstate(invalid="ignore", all="ignore"), warnings.catch_warnings():
+            # All-NaN windows are expected for isolated valid pixels — suppress
+            # the numpy RuntimeWarning and let the guards below handle them.
+            warnings.filterwarnings(
+                "ignore", r"All-NaN slice encountered", RuntimeWarning
+            )
+            valid_count = np.sum(~np.isnan(flat), axis=-1)
+            local_median = np.nanmedian(flat, axis=-1)
+            local_mad = np.nanmedian(
+                np.abs(flat - local_median[..., None]), axis=-1
+            )
+            lst_chunk = lst[row_start:row_end]
+            valid_chunk = valid_mask[row_start:row_end]
+            deviation = np.abs(lst_chunk - local_median)
+            threshold = np.maximum(
+                HAMPEL_K * MAD_SCALE * local_mad, MIN_OUTLIER_DELTA_K
+            )
+            reject = deviation > threshold
+
+        skip = (
+            ~valid_chunk
+            | np.isnan(lst_chunk)
+            | np.isnan(local_median)
+            | np.isnan(local_mad)
+            | (valid_count < MIN_WINDOW_VALID)
+        )
+        result[row_start:row_end] = np.where(skip, False, reject)
+
+    return result

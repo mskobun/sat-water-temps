@@ -423,6 +423,21 @@ class TestHampelOutlierMask:
         # flag pixels outside the valid region.
         assert not np.any(mask[~valid])
 
+    def test_chunk_boundaries_match_full_chunk(self):
+        """Chunked Hampel processing must not change boundary-row decisions."""
+        frame = self._checkerboard(17, 13, 295.0, 0.2)
+        frame[3, 3] = 310.0
+        frame[8, 6] = 285.0
+        frame[13, 9] = 309.0
+        valid = np.ones_like(frame, dtype=bool)
+        valid[1:4, 10] = False
+        valid[10, 1:5] = False
+
+        full_chunk = hampel_outlier_mask(frame, valid, chunk_rows=100)
+        small_chunks = hampel_outlier_mask(frame, valid, chunk_rows=3)
+
+        np.testing.assert_array_equal(small_chunks, full_chunk)
+
     def test_1d_input_returns_all_false(self):
         """1D inputs are not supported for spatial filtering — must not crash."""
         frame = np.full(30, 295.0, dtype=np.float32)
