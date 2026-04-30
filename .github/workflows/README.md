@@ -1,30 +1,23 @@
-# GitHub Actions Setup
+# GitHub Actions
 
-## Required Secrets
+The `deploy.yml` workflow deploys the project on relevant pushes to `main`.
 
-To use the deployment workflow, add these secrets to your GitHub repository:
+It runs Python tests for Lambda changes, builds and pushes the Lambda Docker image to ECR, applies Terraform, applies D1 migrations, builds the SvelteKit app, and deploys it to Cloudflare Pages.
 
-1. Go to **Settings** → **Secrets and variables** → **Actions**
-2. Add the following repository secrets:
+## Setup
 
-| Secret Name | Value |
-|-------------|-------|
-| `AWS_ACCESS_KEY_ID` | Your AWS access key |
-| `AWS_SECRET_ACCESS_KEY` | Your AWS secret key |
+Add these repository secrets under **Settings -> Secrets and variables -> Actions**:
 
-## How It Works
-
-The `deploy.yml` workflow:
-1. **Triggers** on:
-   - Push to `main` branch (when Lambda code or Dockerfile changes)
-   - Manual trigger via "Actions" tab
-2. **Builds** the Docker image for `linux/amd64`
-3. **Pushes** to ECR with both a commit SHA tag and `latest` tag
-4. **Updates** all three Lambda functions to use the new image
-
-## Manual Trigger
-
-To manually trigger a deployment:
-1. Go to **Actions** tab
-2. Select **Build and Deploy Lambda**
-3. Click **Run workflow**
+| Secret | Purpose |
+| --- | --- |
+| `AWS_ACCESS_KEY_ID` | AWS access for ECR and Terraform |
+| `AWS_SECRET_ACCESS_KEY` | AWS access for ECR and Terraform |
+| `EARTHDATA_USERNAME` | NASA Earthdata access for Lambda processors |
+| `EARTHDATA_PASSWORD` | NASA Earthdata access for Lambda processors |
+| `CLOUDFLARE_API_TOKEN` | Terraform, D1 migrations, and Pages deployment |
+| `CLOUDFLARE_ACCOUNT_ID` | Terraform, D1 migrations, and Pages deployment |
+| `R2_BUCKET_NAME` | R2 bucket configuration |
+| `R2_ACCESS_KEY_ID` | R2 access for Lambda processors |
+| `R2_SECRET_ACCESS_KEY` | R2 access for Lambda processors |
+| `R2_ENDPOINT` | R2 S3-compatible endpoint |
+| `PAGES_DOMAIN` | Cloudflare Pages production domain |

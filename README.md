@@ -1,140 +1,225 @@
 # Satellite Water Temperatures
 
-Satellite water temperature monitoring platform with:
+Satellite water temperature monitoring platform for reservoir and lake observations from ECOSTRESS and Landsat.
 
-- a SvelteKit app on Cloudflare Pages
-- D1 for metadata and job/request state
-- R2 for rasters and derived data files
-- Python Lambda pipelines for ECOSTRESS and Landsat ingestion
+The system has two main parts:
 
-## What is in the repo
+- SvelteKit app deployed to Cloudflare Pages
+- Cloudflare D1 for metadata, requests, jobs, features, and settings
+- Cloudflare R2 for polygons, GeoTIFFs, PNG previews, metadata JSON, and Parquet data
+- Python Lambda ingestion pipelines for ECOSTRESS and Landsat
+- Terraform-managed AWS infrastructure for Lambda, ECR, SQS, EventBridge Scheduler, and Cognito
 
-- `src/` — SvelteKit map UI, admin UI, and API routes
-- `lambda_functions/` — ECOSTRESS/Landsat initiators, processors, shared helpers, and local CLIs
-- `migrations/` — D1 schema migrations
-- `terraform/` — AWS infrastructure for Lambda, ECR, scheduler, SQS, and Cognito
-- `scripts/` — utility scripts for local seeding and data maintenance
+## Repository Layout
 
-## Current architecture
+- `src/` - SvelteKit UI, admin pages, and API routes
+- `lambda_functions/` - ECOSTRESS/Landsat initiators, processors, shared helpers, and local CLIs
+- `migrations/` - Cloudflare D1 schema migrations
+- `terraform/` - AWS and Cloudflare infrastructure
+- `scripts/` - local setup and data maintenance helpers
+- `.github/workflows/deploy.yml` - CI/CD for tests, Lambda image deployment, Terraform, D1 migrations, and Pages
+- `pyproject.toml` / `uv.lock` - Python dependencies managed by `uv`
+- `package.json` / `package-lock.json` - Node dependencies managed by npm
 
-The Cloudflare side serves the user-facing app and admin dashboard. It reads feature metadata from D1 and data assets from R2.
+## Prerequisites
 
-The AWS side runs the ingestion pipeline. Manual or scheduled requests create `data_requests` rows, initiators fan work out, processors pull remote raster inputs, compute stats and outputs, then write metadata to D1 and files to R2.
+- Node.js 20+
+- npm
+- `uv` for Python dependency and environment management
+- Terraform, for infrastructure operations and local auth setup
+- Cloudflare account access for Pages, D1, and R2
+- AWS account access for Lambda, ECR, SQS, Scheduler, and Cognito
+- NASA Earthdata credentials for processor runs
 
-Supported sources in the current codebase:
+Install `uv` on macOS/Linux:
 
-- `ecostress`
-- `landsat`
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+uv --version
+```
 
-## Main app surfaces
+Windows and alternative install methods are documented by Astral: <https://docs.astral.sh/uv/getting-started/installation/>.
 
-- `/` — map view
-- `/feature/[id]` — per-feature detail page
-- `/archive/[id]` — feature archive page
-- `/admin/*` — protected admin pages for requests, jobs, features, and settings
+## Install
 
-## Main API routes
-
-- `/api/polygons`
-- `/api/feature/[id]/get_dates`
-- `/api/feature/[id]/stats`
-- `/api/feature/[id]/archive`
-- `/api/feature/[id]/temperature`
-- `/api/feature/[id]/temperature/[date]`
-- `/api/feature/[id]/parquet`
-- `/api/feature/[id]/tif/[date]/[scale]`
-- `/api/feature/[id]/tif/[date]/file`
-- `/api/admin/requests`
-- `/api/admin/jobs`
-- `/api/admin/features`
-- `/api/admin/settings`
-- `/api/admin/trigger`
-
-## Development commands
+Install frontend dependencies:
 
 ```bash
 npm install
-npm run dev                    # Frontend only at http://localhost:5173
-npm run wrangler:dev           # Full stack with local D1 + remote R2 at http://localhost:8788
-npm run wrangler:dev:remote    # Full stack against remote D1 + remote R2 at http://localhost:8788
-npm run lint                   # Svelte + TypeScript checks
-uv run pytest tests/ -v        # Lambda unit tests
 ```
 
-## Local data and migrations
+Install/sync Python dependencies from `pyproject.toml` and `uv.lock`:
 
-Local D1 lives in `.wrangler/state/v3/d1/`.
+```bash
+uv sync
+```
+
+The project targets Python `3.12` via `.python-version`. `uv run ...` will also create and sync the virtual environment automatically when needed.
+
+## Local App Development
+
+Frontend-only Vite development server:
+
+```bash
+npm run dev
+```
+
+Runs at `http://localhost:5173`. Use this for UI work that does not need Cloudflare bindings.
+
+Full SvelteKit/Cloudflare worker runtime:
+
+```bash
+npm run wrangler:dev
+```
+
+Runs at `http://localhost:8788` with local D1 and the R2 binding from `wrangler.toml`.
+
+Remote Cloudflare resources:
+
+```bash
+npm run wrangler:dev:remote
+```
+
+Runs locally but talks to remote D1/R2. Use carefully because it can affect production data.
+
+## Local Data Setup
+
+Local D1 is stored under `.wrangler/state/v3/d1/`.
 
 ```bash
 npm run db:export              # Export remote D1 to seed.sql
 npm run db:seed                # Reset local D1 and apply seed.sql
-npm run db:migrate:local       # Apply migrations locally
-npm run db:migrate:remote      # Apply migrations remotely
-npm run r2:seed:local          # Seed local R2 with static assets
+npm run db:migrate:local       # Apply migrations to local D1
+npm run db:migrate:remote      # Apply migrations to remote D1
+npm run r2:seed:local          # Upload static assets to local R2
 ```
 
-Typical local setup:
+Typical fresh local setup:
 
 ```bash
 npm install
+uv sync
 npm run db:export
 npm run db:seed
 npm run r2:seed:local
 npm run wrangler:dev
 ```
 
-## Running processors locally
+`static/` contains local polygon and favicon assets used by `npm run r2:seed:local` and local processor runs.
 
-`local_fill` runs the ingestion pipeline in-process for a single feature and date range without SQS.
+## Configuration
 
-Prerequisites:
-
-- NASA Earthdata credentials in `~/.netrc` or env vars
-- for cloud runtime, the required R2/D1 credentials in `lambda_functions/.env`
-
-Examples:
+The SvelteKit app reads Cloudflare bindings and runtime variables from Wrangler. For local admin authentication, generate the required Cognito and Lambda invocation values from Terraform outputs:
 
 ```bash
-cd lambda_functions
-
-# Write to cloud resources
-uv run python -m local_fill --source ecostress --feature NamTheun2 --start-date 2026-03-15
-
-# Write to local Wrangler D1 + R2
-uv run python -m local_fill --runtime local --source ecostress --feature NamTheun2 --start-date 2026-03-15
-uv run python -m local_fill --runtime local --source landsat --feature Magat --start-date 2024-12-27
+./scripts/setup-dev-auth.sh
 ```
 
-Help:
+Python processor and maintenance scripts that write to cloud resources use these environment variables:
+
+```bash
+EARTHDATA_USERNAME=...
+EARTHDATA_PASSWORD=...
+CLOUDFLARE_ACCOUNT_ID=...
+CLOUDFLARE_API_TOKEN=...
+D1_DATABASE_ID=...
+R2_ENDPOINT=...
+R2_BUCKET_NAME=multitifs
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+```
+
+NASA Earthdata credentials may also be provided through `~/.netrc`.
+
+## Running Processors Locally
+
+`local_fill` runs one source, feature, and date range in-process without SQS.
+
+Show help:
 
 ```bash
 cd lambda_functions
 uv run python -m local_fill --help
 ```
 
+Write to configured cloud D1/R2:
+
+```bash
+cd lambda_functions
+uv run python -m local_fill --source ecostress --feature NamTheun2 --start-date 2026-03-15
+```
+
+Write to local Wrangler D1/R2:
+
+```bash
+cd lambda_functions
+uv run python -m local_fill --runtime local --source ecostress --feature NamTheun2 --start-date 2026-03-15
+uv run python -m local_fill --runtime local --source landsat --feature Magat --start-date 2024-12-27
+```
+
+With `--runtime local`, the CLI finds the repo root by walking up from the current directory for `wrangler.toml` and `static/`. Override with `--project-dir /path/to/repo` or `WRANGLER_PROJECT_DIR`.
+
+## Tests And Checks
+
+```bash
+npm run lint                   # Svelte + TypeScript checks
+npm run build                  # Production SvelteKit build
+uv run pytest tests/ -v        # Lambda and shared Python tests
+```
+
+Regenerate Lambda `requirements.txt` from the locked Python project when dependencies change:
+
+```bash
+uv export --no-dev --format requirements-txt --output-file requirements.txt
+```
+
+## Main App Areas
+
+- Public map and feature pages for browsing latest observations and historical archives
+- Public dashboard for cross-feature processing status
+- Protected admin area for submitting ingestion requests, reviewing jobs, managing features, and changing processing settings
+- API routes under `src/routes/api/` for D1 metadata, R2 assets, admin actions, and Lambda trigger calls
+
 ## Authentication
 
 Admin routes use Auth.js with AWS Cognito.
 
-- Route protection lives in `src/hooks.server.ts`
-- Auth configuration lives in `src/auth.ts`
-- Local setup helper: `./scripts/setup-dev-auth.sh`
+- Route protection: `src/hooks.server.ts`
+- Auth configuration: `src/auth.ts`
+- Local auth setup: `./scripts/setup-dev-auth.sh`
+- Cognito infrastructure: `terraform/cognito.tf`
 
-## Deploy
+## Deployment
 
-```bash
-npm run deploy
-cd terraform && terraform apply
-```
+Deployment is automated through GitHub Actions on pushes to `main`.
 
-`npm run deploy` publishes the Cloudflare Pages app. Terraform manages the AWS Lambda infrastructure and Cognito resources.
+The workflow:
 
-## Key files
+- detects whether Lambda/backend or frontend files changed
+- runs `uv run pytest tests/ -v` for Lambda/backend changes
+- builds and pushes the Lambda Docker image to ECR
+- runs `terraform apply -auto-approve` for infrastructure and Lambda updates
+- runs `npm ci` and `npm run build` for frontend changes
+- applies remote D1 migrations
+- deploys `.svelte-kit/cloudflare` to Cloudflare Pages
 
-- `src/lib/db.ts` — D1 query helpers used by API routes
-- `src/routes/api/` — SvelteKit server routes
-- `lambda_functions/ecostress/` — ECOSTRESS initiator and processor
-- `lambda_functions/landsat/` — Landsat initiator and processor
-- `lambda_functions/common/` — shared storage, raster, metadata, and parquet helpers
-- `lambda_functions/local_fill/` — local CLI entrypoint
-- `wrangler.toml` — Cloudflare bindings and Pages config
+Manual local deployment commands exist in `package.json` and Terraform, but normal deployment should happen through GitHub Actions.
+
+GitHub Actions setup instructions are documented in `.github/workflows/README.md`.
+
+## GitHub Actions
+
+Workflow file: `.github/workflows/deploy.yml`.
+
+Triggers:
+
+- `push` to `main` when application, Lambda, migration, Terraform, or workflow files change
+- manual `workflow_dispatch`, with `force_lambda_deploy` available
+
+The workflow uses:
+
+- `astral-sh/setup-uv` for Python tests and `requirements.txt` export
+- `actions/setup-node` with Node 20 and npm cache
+- AWS credentials from repository secrets
+- Cloudflare credentials from repository secrets
+- Terraform S3 backend configured in `terraform/backend.tf`
