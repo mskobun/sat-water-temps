@@ -405,11 +405,73 @@ export async function countJobsByFeature(db: D1Database, featureId: string, stat
   }
 }
 
+export async function countDataRequestsByStatus(
+  db: D1Database,
+  source: 'ecostress' | 'landsat'
+) {
+  try {
+    const result = await db
+      .prepare(`
+        SELECT
+          COUNT(*) as total,
+          SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+          SUM(CASE WHEN status = 'submitted' THEN 1 ELSE 0 END) as submitted,
+          SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) as processing,
+          SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+          SUM(CASE WHEN status = 'completed_with_errors' THEN 1 ELSE 0 END) as completed_with_errors,
+          SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
+        FROM data_requests_with_status
+        WHERE source = ?
+      `)
+      .bind(source)
+      .first();
+    return {
+      total: Number(result?.total || 0),
+      pending: Number(result?.pending || 0),
+      submitted: Number(result?.submitted || 0),
+      processing: Number(result?.processing || 0),
+      completed: Number(result?.completed || 0),
+      completed_with_errors: Number(result?.completed_with_errors || 0),
+      failed: Number(result?.failed || 0),
+    };
+  } catch (err) {
+    console.error("D1 query error:", err);
+    return {
+      total: 0,
+      pending: 0,
+      submitted: 0,
+      processing: 0,
+      completed: 0,
+      completed_with_errors: 0,
+      failed: 0,
+    };
+  }
+}
+
+export async function countDataRequestsByFilter(
+  db: D1Database,
+  source: 'ecostress' | 'landsat',
+  status?: string
+) {
+  try {
+    let query = `SELECT COUNT(*) as total FROM data_requests_with_status WHERE source = ?`;
+    if (status) query += ` AND status = ?`;
+    const result = status
+      ? await db.prepare(query).bind(source, status).first()
+      : await db.prepare(query).bind(source).first();
+    return Number(result?.total || 0);
+  } catch (err) {
+    console.error("D1 query error:", err);
+    return 0;
+  }
+}
+
 export async function getDataRequests(
   db: D1Database,
   source: 'ecostress' | 'landsat',
   limit: number = 50,
-  status?: string
+  status?: string,
+  offset: number = 0
 ) {
   try {
     const jobType = source === 'ecostress' ? 'ecostress_process' : 'landsat_process';
@@ -439,8 +501,8 @@ export async function getDataRequests(
       params.push(status);
     }
 
-    query += ` ORDER BY dr.created_at DESC LIMIT ?`;
-    params.push(limit);
+    query += ` ORDER BY dr.created_at DESC LIMIT ? OFFSET ?`;
+    params.push(limit, offset);
 
     const stmt = db.prepare(query);
     const result = await stmt.bind(...params).all();
@@ -508,4 +570,3 @@ export async function getDataRequestDetail(
     return null;
   }
 }
-

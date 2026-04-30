@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { today, getLocalTimeZone } from '@internationalized/date';
 	import type { DateRange } from 'bits-ui';
@@ -18,6 +18,7 @@
 	import { Alert, AlertDescription } from '$lib/components/ui/alert';
 	import { Spinner } from '$lib/components/ui/spinner';
 
+	const LIMIT = 50;
 	const POLL_INTERVAL = 30_000;
 
 	type Source = 'ecostress' | 'landsat';
@@ -64,8 +65,23 @@
 	let error = $state('');
 	let filter = $state('all');
 	let filterLabel = $derived(filterOptions.find((o) => o.value === filter)?.label ?? 'All Requests');
+	let page = $state(1);
+	let total = $state(0);
+	let statusCounts = $state({
+		total: 0,
+		pending: 0,
+		submitted: 0,
+		processing: 0,
+		completed: 0,
+		completed_with_errors: 0,
+		failed: 0
+	});
 	let updatedAt = $state('');
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
+
+	const totalPages = $derived(Math.max(1, Math.ceil(total / LIMIT)));
+	const rangeStart = $derived((page - 1) * LIMIT + 1);
+	const rangeEnd = $derived(Math.min(page * LIMIT, total));
 
 	// Trigger dialog state — triggerSource syncs with active tab when dialog opens
 	let dialogOpen = $state(false);
@@ -142,13 +158,21 @@
 
 	async function fetchRequests() {
 		try {
-			const params = new URLSearchParams();
+			const params = new URLSearchParams({ limit: String(LIMIT), page: String(page) });
 			if (filter !== 'all') params.set('status', filter);
 			params.set('source', source);
 			const qs = params.toString();
 			const response = await fetch(`/api/admin/requests?${qs}`);
-			const data = (await response.json()) as { requests?: DataRequest[] };
+			const data = (await response.json()) as {
+				requests?: DataRequest[];
+				total?: number;
+				status_counts?: typeof statusCounts;
+				page?: number;
+				limit?: number;
+			};
 			requests = data.requests || [];
+			total = data.total ?? 0;
+			if (data.status_counts) statusCounts = data.status_counts;
 			error = '';
 			updatedAt = new Date().toLocaleTimeString();
 		} catch (e) {
@@ -157,6 +181,11 @@
 		} finally {
 			loading = false;
 		}
+	}
+
+	function goToPage(p: number) {
+		page = Math.max(1, Math.min(p, totalPages));
+		fetchRequests();
 	}
 
 	function formatDate(timestamp: number) {
@@ -232,6 +261,7 @@
 				triggerDateRange = { start: undefined, end: undefined };
 				triggerDescription = '';
 				triggerFeatureIds = [];
+				page = 1;
 				fetchRequests();
 				setTimeout(() => { dialogOpen = false; triggerSuccess = ''; }, 2000);
 			}
@@ -251,7 +281,12 @@
 	}
 
 	$effect(() => {
-		if (source || filter) fetchRequests();
+		source;
+		filter;
+		untrack(() => {
+			page = 1;
+			fetchRequests();
+		});
 	});
 
 	onMount(() => {
@@ -514,11 +549,11 @@
 
 		<div class="mb-6">
 			<StatBar stats={[
-				{ label: 'Total', count: requests.length },
-				{ label: 'Pending', count: requests.filter((r) => r.status === 'pending').length },
-				{ label: 'Processing', count: requests.filter((r) => r.status === 'processing').length },
-				{ label: 'Completed', count: requests.filter((r) => r.status === 'completed').length },
-				{ label: 'Failed', count: requests.filter((r) => r.status === 'failed' || r.status === 'completed_with_errors').length }
+				{ label: 'Total', count: statusCounts.total },
+				{ label: 'Pending', count: statusCounts.pending },
+				{ label: 'Processing', count: statusCounts.processing },
+				{ label: 'Completed', count: statusCounts.completed },
+				{ label: 'Failed', count: statusCounts.failed + statusCounts.completed_with_errors }
 			]} />
 		</div>
 
@@ -600,6 +635,32 @@
 							{/each}
 						</Table.Body>
 					</Table.Root>
+
+					<!-- Pagination controls -->
+					<div class="flex items-center justify-between px-4 py-3 border-t text-sm">
+						<span class="text-muted-foreground">
+							Showing {rangeStart}-{rangeEnd} of {total}
+						</span>
+						<div class="flex items-center gap-2">
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={() => goToPage(page - 1)}
+								disabled={page <= 1}
+							>
+								Prev
+							</Button>
+							<span class="text-muted-foreground">Page {page} of {totalPages}</span>
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={() => goToPage(page + 1)}
+								disabled={page >= totalPages}
+							>
+								Next
+							</Button>
+						</div>
+					</div>
 				</div>
 		{/if}
 	</div>
