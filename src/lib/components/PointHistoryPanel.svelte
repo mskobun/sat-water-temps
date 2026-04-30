@@ -177,6 +177,36 @@
 			}))
 	);
 
+	function scrollIntoViewWhenSelected(node: HTMLElement, selected: boolean) {
+		let wasSelected = false;
+
+		async function update(selectedNow: boolean) {
+			if (!selectedNow) {
+				wasSelected = false;
+				return;
+			}
+			if (wasSelected) return;
+			wasSelected = true;
+			await tick();
+			node.scrollIntoView({ block: 'center', inline: 'nearest' });
+		}
+
+		void update(selected);
+
+		return {
+			update(nextSelected: boolean) {
+				void update(nextSelected);
+			}
+		};
+	}
+
+	let echartsData = $derived(
+		chartData.map((d) => ({
+			value: [d.date.getTime(), d.temperature],
+			sourceDate: d.sourceDate
+		}))
+	);
+
 	let chartColor = $state('#f97316');
 
 	function resolveColor() {
@@ -220,7 +250,7 @@
 			{
 				name: 'Temperature',
 				type: 'line' as const,
-				data: chartData.map((d) => [d.date, d.temperature]),
+				data: echartsData,
 				smooth: true,
 				symbol: 'circle',
 				symbolSize: 5,
@@ -283,10 +313,14 @@
 
 	function handleChartInit(instance: ECharts) {
 		instance.on('click', (params: unknown) => {
-			const p = params as { componentType: string; dataIndex: number };
+			const p = params as {
+				componentType: string;
+				data?: { sourceDate?: string };
+				dataIndex?: number;
+			};
 			if (p.componentType !== 'series') return;
-			const d = chartData[p.dataIndex];
-			if (d?.sourceDate) ondatechange?.(d.sourceDate);
+			const date = p.data?.sourceDate ?? (p.dataIndex != null ? chartData[p.dataIndex]?.sourceDate : null);
+			if (date) ondatechange?.(date);
 		});
 	}
 
@@ -365,6 +399,7 @@
 							{#each rows as row (row.date)}
 								<tr
 									class="border-t border-border/40 hover:bg-muted/30 transition-colors cursor-pointer {row.date === selectedDate ? 'bg-primary/10' : ''}"
+									use:scrollIntoViewWhenSelected={row.date === selectedDate}
 									onmouseenter={() => handleRowHover(row)}
 									onmouseleave={() => handleRowHover(null)}
 									onclick={() => ondatechange?.(row.date)}

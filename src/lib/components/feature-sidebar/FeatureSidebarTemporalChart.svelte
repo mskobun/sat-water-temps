@@ -55,6 +55,13 @@
 				point.max != null
 		);
 
+	function makeSeriesData(valueKey: 'min' | 'mean' | 'median' | 'max') {
+		return chartData.map((d) => ({
+			value: [d.date.getTime(), d[valueKey]],
+			sourceDate: d.sourceDate
+		}));
+	}
+
 	let chartColors = ['#f97316', '#14b8a6', '#374151', '#eab308'];
 
 	function resolveColors() {
@@ -95,10 +102,10 @@
 		},
 		series: (
 			[
-				{ name: 'Min',    data: chartData.map((d) => [d.date, d.min]),    color: chartColors[0] },
-				{ name: 'Mean',   data: chartData.map((d) => [d.date, d.mean]),   color: chartColors[1] },
-				{ name: 'Median', data: chartData.map((d) => [d.date, d.median]), color: chartColors[2] },
-				{ name: 'Max',    data: chartData.map((d) => [d.date, d.max]),    color: chartColors[3] }
+				{ name: 'Min',    data: makeSeriesData('min'),    color: chartColors[0] },
+				{ name: 'Mean',   data: makeSeriesData('mean'),   color: chartColors[1] },
+				{ name: 'Median', data: makeSeriesData('median'), color: chartColors[2] },
+				{ name: 'Max',    data: makeSeriesData('max'),    color: chartColors[3] }
 			] as const
 		).map(({ name, data, color }) => ({
 			name,
@@ -153,10 +160,14 @@
 
 	function handleInit(instance: ECharts) {
 		instance.on('click', (params: unknown) => {
-			const p = params as { componentType: string; dataIndex: number };
+			const p = params as {
+				componentType: string;
+				data?: { sourceDate?: string };
+				dataIndex?: number;
+			};
 			if (p.componentType !== 'series') return;
-			const d = chartData[p.dataIndex];
-			if (d?.sourceDate) dispatch('dateChange', d.sourceDate);
+			const date = p.data?.sourceDate ?? (p.dataIndex != null ? chartData[p.dataIndex]?.sourceDate : null);
+			if (date) dispatch('dateChange', date);
 		});
 	}
 </script>
