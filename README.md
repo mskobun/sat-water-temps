@@ -138,9 +138,3 @@ cd terraform && terraform apply
 - `lambda_functions/common/` — shared storage, raster, metadata, and parquet helpers
 - `lambda_functions/local_fill/` — local CLI entrypoint
 - `wrangler.toml` — Cloudflare bindings and Pages config
-
-## More context
-
-- [CLAUDE.md](./CLAUDE.md) — contributor/agent notes
-- [docs/LOCAL_DEVELOPMENT.md](./docs/LOCAL_DEVELOPMENT.md) — detailed local workflow
-- [HYBRID_ARCHITECTURE.md](./HYBRID_ARCHITECTURE.md) — D1/R2 storage design notes
