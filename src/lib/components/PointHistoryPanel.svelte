@@ -1,9 +1,10 @@
 <script lang="ts">
 	import { parseDate } from '$lib/date-utils';
-	import { resolveSourceDateFromChartDetails } from '$lib/chart-date-selection';
-	import * as Chart from '$lib/components/ui/chart';
-	import { LineChart } from 'layerchart';
-	import { scaleUtc } from 'd3-scale';
+	import { onMount } from 'svelte';
+	import { tick } from 'svelte';
+	import { mode } from 'mode-watcher';
+	import EChartsWrapper from '$lib/components/ui/echarts/EChartsWrapper.svelte';
+	import type { ECharts } from 'echarts/core';
 	import { Button } from '$lib/components/ui/button';
 	import { Spinner } from '$lib/components/ui/spinner';
 	import XIcon from '@lucide/svelte/icons/x';
@@ -176,14 +177,104 @@
 			}))
 	);
 
-	function handlePointClick(_event: MouseEvent, details: unknown) {
-		const date = resolveSourceDateFromChartDetails(details);
-		if (date) ondatechange?.(date);
+	let chartColor = $state('#f97316');
+
+	function resolveColor() {
+		const style = getComputedStyle(document.documentElement);
+		chartColor = style.getPropertyValue('--chart-1').trim() || '#f97316';
 	}
 
-	const chartConfig = {
-		temperature: { label: 'Temperature', color: 'var(--chart-1)' }
-	} satisfies Chart.ChartConfig;
+	onMount(resolveColor);
+
+	$effect(() => {
+		if (mode.current !== undefined) tick().then(resolveColor);
+	});
+
+	let echartsOption = $derived({
+		animation: false,
+		grid: { top: 12, left: 44, bottom: 52, right: 16, containLabel: false },
+		xAxis: {
+			type: 'time' as const,
+			axisLabel: {
+				fontSize: 10,
+				color: 'var(--muted-foreground)',
+				formatter: (value: number) =>
+					new Date(value).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+			},
+			axisLine: { lineStyle: { color: 'var(--border)' } },
+			splitLine: { show: false }
+		},
+		yAxis: {
+			type: 'value' as const,
+			min: 'dataMin' as const,
+			splitNumber: 4,
+			axisLabel: {
+				fontSize: 10,
+				color: 'var(--muted-foreground)',
+				formatter: (value: number) => `${value.toFixed(1)}${unitSymbol}`
+			},
+			axisLine: { show: false },
+			splitLine: { lineStyle: { color: 'var(--border)', opacity: 0.5 } }
+		},
+		series: [
+			{
+				name: 'Temperature',
+				type: 'line' as const,
+				data: chartData.map((d) => [d.date, d.temperature]),
+				smooth: true,
+				symbol: 'circle',
+				symbolSize: 5,
+				itemStyle: { color: chartColor },
+				lineStyle: { color: chartColor, width: 2 }
+			}
+		],
+		dataZoom: [
+			{
+				type: 'slider' as const,
+				xAxisIndex: 0,
+				bottom: 4,
+				height: 20,
+				startValue: chartData.length > 10 ? chartData[chartData.length - 10].date.getTime() : undefined,
+				endValue: chartData[chartData.length - 1]?.date.getTime(),
+				borderColor: 'transparent',
+				fillerColor: 'rgba(128,128,128,0.15)',
+				handleStyle: { color: 'rgba(128,128,128,0.5)' },
+				moveHandleStyle: { color: 'rgba(128,128,128,0.5)' },
+				showDetail: false,
+				brushSelect: false
+			},
+			{
+				type: 'inside' as const,
+				xAxisIndex: 0
+			}
+		],
+		tooltip: {
+			trigger: 'axis' as const,
+			backgroundColor: 'var(--background)',
+			borderColor: 'var(--border)',
+			textStyle: { fontSize: 11, color: 'var(--foreground)' },
+			formatter: (params: unknown) => {
+				const items = params as Array<{ axisValue: number | Date; value: [Date, number] }>;
+				if (!items?.length) return '';
+				const date = new Date(items[0].axisValue);
+				const dateStr = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+				const timeStr = (date.getHours() !== 0 || date.getMinutes() !== 0)
+					? ', ' + date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+					: '';
+				const temp = Number(items[0].value[1]).toFixed(2);
+				return `<div style="font-size:11px"><div style="margin-bottom:4px;opacity:0.7">${dateStr}${timeStr}</div><span style="margin-right:8px;opacity:0.7">Temp</span><b>${temp}${unitSymbol}</b></div>`;
+			}
+		}
+	});
+
+	function handleChartInit(instance: ECharts) {
+		instance.on('click', (params: unknown) => {
+			const p = params as { componentType: string; dataIndex: number };
+			if (p.componentType !== 'series') return;
+			const d = chartData[p.dataIndex];
+			if (d?.sourceDate) ondatechange?.(d.sourceDate);
+		});
+	}
 
 	let sourceLabel = $derived.by(() => {
 		const src = rows[0]?.source;
@@ -230,67 +321,12 @@
 
 		<!-- Chart -->
 		{#if chartData.length > 1}
-			<div class="rounded-md border bg-muted/10 px-1 pb-1">
-				<Chart.Container
-					config={chartConfig}
-					class="h-44 w-full [&_.lc-axis-tick-label]:[font-size:10px]"
-				>
-					<LineChart
-						data={chartData}
-						x="date"
-						xScale={scaleUtc()}
-						axis={true}
-						padding={{ top: 12, left: 44, bottom: 20, right: 16 }}
-						points={{ r: 2.5 }}
-						series={[{ key: 'temperature', label: 'Temperature', color: chartConfig.temperature.color }]}
-						onPointClick={handlePointClick}
-						props={{
-							spline: { strokeWidth: 2 },
-							highlight: { points: { r: 6 } },
-							xAxis: {
-								ticks: 4,
-								format: (d: Date) =>
-									d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
-							},
-							yAxis: {
-								ticks: 4,
-								format: (v: number) => `${v.toFixed(1)}${unitSymbol}`
-							}
-						}}
-					>
-						{#snippet tooltip()}
-							<Chart.Tooltip
-								indicator="dot"
-								labelFormatter={(v) => {
-									if (!(v instanceof Date)) return String(v);
-									const date = v.toLocaleDateString('en-GB', {
-										day: 'numeric',
-										month: 'short',
-										year: 'numeric'
-									});
-									// Show time for ECOSTRESS (non-midnight observations)
-									if (v.getHours() !== 0 || v.getMinutes() !== 0) {
-										const time = v.toLocaleTimeString('en-GB', {
-											hour: '2-digit',
-											minute: '2-digit'
-										});
-										return `${date}, ${time}`;
-									}
-									return date;
-								}}
-							>
-								{#snippet formatter({ value })}
-									<div class="flex flex-1 items-center justify-between gap-4">
-										<span class="text-muted-foreground">Temp</span>
-										<span class="font-mono font-medium tabular-nums">
-											{Number(value).toFixed(2)}{unitSymbol}
-										</span>
-									</div>
-								{/snippet}
-							</Chart.Tooltip>
-						{/snippet}
-					</LineChart>
-				</Chart.Container>
+			<div class="rounded-md border bg-muted/10">
+				<EChartsWrapper
+					option={echartsOption}
+					class="h-56 w-full"
+					onInit={handleChartInit}
+				/>
 			</div>
 
 		{:else if chartData.length === 0}

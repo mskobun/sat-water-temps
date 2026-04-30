@@ -1,11 +1,11 @@
 <script lang="ts">
-	import { createEventDispatcher } from 'svelte';
-	import * as Chart from '$lib/components/ui/chart';
+	import { createEventDispatcher, onMount } from 'svelte';
+	import { tick } from 'svelte';
+	import { mode } from 'mode-watcher';
 	import { parseDate } from '$lib/date-utils';
-	import { resolveSourceDateFromChartDetails } from '$lib/chart-date-selection';
-	import { LineChart } from 'layerchart';
-	import { scaleUtc } from 'd3-scale';
+	import EChartsWrapper from '$lib/components/ui/echarts/EChartsWrapper.svelte';
 	import Clock3Icon from '@lucide/svelte/icons/clock-3';
+	import type { ECharts } from 'echarts/core';
 
 	type FeatureStatsHistoryEntry = {
 		date: string;
@@ -55,25 +55,133 @@
 				point.max != null
 		);
 
-	function resolveDateFromDetails(details: unknown): string | null {
-		return resolveSourceDateFromChartDetails(
-			details,
-			(xDate) =>
-				filteredEntries.find((entry) => parseDate(entry.date).getTime() === xDate.getTime())?.date
+	let chartColors = ['#f97316', '#14b8a6', '#374151', '#eab308'];
+
+	function resolveColors() {
+		const style = getComputedStyle(document.documentElement);
+		chartColors = [1, 2, 3, 4].map(
+			(i) => style.getPropertyValue(`--chart-${i}`).trim() || chartColors[i - 1]
 		);
 	}
 
-	function handlePointClick(_e: MouseEvent, details: unknown) {
-		const date = resolveDateFromDetails(details);
-		if (date) dispatch('dateChange', date);
-	}
+	onMount(resolveColors);
+	$: if (mode.current !== undefined) tick().then(resolveColors);
 
-	const chartConfig = {
-		min: { label: 'Min', color: 'var(--chart-1)' },
-		mean: { label: 'Mean', color: 'var(--chart-2)' },
-		median: { label: 'Median', color: 'var(--chart-3)' },
-		max: { label: 'Max', color: 'var(--chart-4)' }
-	} satisfies Chart.ChartConfig;
+	$: echartsOption = {
+		animation: false,
+		grid: { top: 12, left: 52, bottom: 52, right: 16, containLabel: false },
+		xAxis: {
+			type: 'time' as const,
+			axisLabel: {
+				fontSize: 10,
+				color: 'var(--muted-foreground)',
+				formatter: (value: number) =>
+					new Date(value).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+			},
+			axisLine: { lineStyle: { color: 'var(--border)' } },
+			splitLine: { show: false }
+		},
+		yAxis: {
+			type: 'value' as const,
+			min: 'dataMin' as const,
+			splitNumber: 4,
+			axisLabel: {
+				fontSize: 10,
+				color: 'var(--muted-foreground)',
+				formatter: (value: number) => `${value.toFixed(1)}${unitSymbol}`
+			},
+			axisLine: { show: false },
+			splitLine: { lineStyle: { color: 'var(--border)', opacity: 0.5 } }
+		},
+		series: [
+			{
+				name: 'Min',
+				type: 'line' as const,
+				data: chartData.map((d) => [d.date, d.min]),
+				smooth: true,
+				symbol: 'circle',
+				symbolSize: 5,
+				itemStyle: { color: chartColors[0] },
+				lineStyle: { color: chartColors[0], width: 2 }
+			},
+			{
+				name: 'Mean',
+				type: 'line' as const,
+				data: chartData.map((d) => [d.date, d.mean]),
+				smooth: true,
+				symbol: 'circle',
+				symbolSize: 5,
+				itemStyle: { color: chartColors[1] },
+				lineStyle: { color: chartColors[1], width: 2 }
+			},
+			{
+				name: 'Median',
+				type: 'line' as const,
+				data: chartData.map((d) => [d.date, d.median]),
+				smooth: true,
+				symbol: 'circle',
+				symbolSize: 5,
+				itemStyle: { color: chartColors[2] },
+				lineStyle: { color: chartColors[2], width: 2 }
+			},
+			{
+				name: 'Max',
+				type: 'line' as const,
+				data: chartData.map((d) => [d.date, d.max]),
+				smooth: true,
+				symbol: 'circle',
+				symbolSize: 5,
+				itemStyle: { color: chartColors[3] },
+				lineStyle: { color: chartColors[3], width: 2 }
+			}
+		],
+		dataZoom: [
+			{
+				type: 'slider' as const,
+				xAxisIndex: 0,
+				bottom: 4,
+				height: 20,
+				startValue: chartData.length > 10 ? chartData[chartData.length - 10].date.getTime() : undefined,
+				endValue: chartData[chartData.length - 1]?.date.getTime(),
+				borderColor: 'transparent',
+				fillerColor: 'rgba(128,128,128,0.15)',
+				handleStyle: { color: 'rgba(128,128,128,0.5)' },
+				moveHandleStyle: { color: 'rgba(128,128,128,0.5)' },
+				emphasis: { handleStyle: { color: 'rgba(128,128,128,0.8)' } },
+				showDetail: false,
+				brushSelect: false
+			},
+			{
+				type: 'inside' as const,
+				xAxisIndex: 0
+			}
+		],
+		tooltip: {
+			trigger: 'axis' as const,
+			backgroundColor: 'var(--background)',
+			borderColor: 'var(--border)',
+			textStyle: { fontSize: 11, color: 'var(--foreground)' },
+			formatter: (params: unknown) => {
+				const items = params as Array<{ axisValue: number | Date; seriesName: string; value: [Date, number] }>;
+				if (!items?.length) return '';
+				const date = new Date(items[0].axisValue);
+				const dateStr = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+				const rows = items
+					.map((p) => `<span style="margin-right:8px">${p.seriesName}</span><b>${Number(p.value[1]).toFixed(1)}${unitSymbol}</b>`)
+					.join('<br>');
+				return `<div style="font-size:11px"><div style="margin-bottom:4px;opacity:0.7">${dateStr}</div>${rows}</div>`;
+			}
+		}
+	};
+
+	function handleInit(instance: ECharts) {
+		instance.on('click', (params: unknown) => {
+			const p = params as { componentType: string; dataIndex: number };
+			if (p.componentType !== 'series') return;
+			const d = chartData[p.dataIndex];
+			if (d?.sourceDate) dispatch('dateChange', d.sourceDate);
+		});
+	}
 </script>
 
 <div class="space-y-3">
@@ -83,60 +191,28 @@
 	</h3>
 
 	{#if chartData.length > 1}
-		<div class="rounded-md border bg-muted/10 px-1 pb-1">
-			<Chart.Container config={chartConfig} class="h-52 w-full">
-				<LineChart
-					data={chartData}
-					x="date"
-					xScale={scaleUtc()}
-					axis={true}
-					padding={{ top: 12, left: 52, bottom: 24, right: 24 }}
-					points={{ r: 2.5 }}
-					series={[
-						{ key: 'min', label: 'Min', color: chartConfig.min.color },
-						{ key: 'mean', label: 'Mean', color: chartConfig.mean.color },
-						{ key: 'median', label: 'Median', color: chartConfig.median.color },
-						{ key: 'max', label: 'Max', color: chartConfig.max.color }
-					]}
-					onPointClick={handlePointClick}
-					props={{
-						spline: { strokeWidth: 2 },
-						xAxis: {
-							format: (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
-						},
-						yAxis: {
-							ticks: 5,
-							format: (v: number) => `${v.toFixed(1)}${unitSymbol}`
-						}
-					}}
-				>
-					{#snippet tooltip()}
-						<Chart.Tooltip
-							indicator="dot"
-							labelFormatter={(v) =>
-								v instanceof Date
-									? v.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-									: String(v)}
-						/>
-					{/snippet}
-				</LineChart>
-			</Chart.Container>
+		<div class="rounded-md border bg-muted/10">
+			<EChartsWrapper
+				option={echartsOption}
+				class="h-64 w-full"
+				onInit={handleInit}
+			/>
 		</div>
 		<div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
 			<span class="inline-flex items-center gap-1.5">
-				<span class="size-2 rounded-full bg-[var(--chart-1)]"></span>
+				<span class="size-2 rounded-full" style="background:{chartColors[0]}"></span>
 				Min
 			</span>
 			<span class="inline-flex items-center gap-1.5">
-				<span class="size-2 rounded-full bg-[var(--chart-2)]"></span>
+				<span class="size-2 rounded-full" style="background:{chartColors[1]}"></span>
 				Mean
 			</span>
 			<span class="inline-flex items-center gap-1.5">
-				<span class="size-2 rounded-full bg-[var(--chart-3)]"></span>
+				<span class="size-2 rounded-full" style="background:{chartColors[2]}"></span>
 				Median
 			</span>
 			<span class="inline-flex items-center gap-1.5">
-				<span class="size-2 rounded-full bg-[var(--chart-4)]"></span>
+				<span class="size-2 rounded-full" style="background:{chartColors[3]}"></span>
 				Max
 			</span>
 		</div>
