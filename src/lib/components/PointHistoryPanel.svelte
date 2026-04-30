@@ -225,7 +225,9 @@
 				symbol: 'circle',
 				symbolSize: 5,
 				itemStyle: { color: chartColor },
-				lineStyle: { color: chartColor, width: 2 }
+				lineStyle: { color: chartColor, width: 2 },
+				emphasis: { focus: 'none' as const, disabled: true },
+				blur: { lineStyle: { opacity: 1 }, itemStyle: { opacity: 1 } }
 			}
 		],
 		dataZoom: [

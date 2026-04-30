@@ -93,48 +93,25 @@
 			axisLine: { show: false },
 			splitLine: { lineStyle: { color: 'var(--border)', opacity: 0.5 } }
 		},
-		series: [
-			{
-				name: 'Min',
-				type: 'line' as const,
-				data: chartData.map((d) => [d.date, d.min]),
-				smooth: true,
-				symbol: 'circle',
-				symbolSize: 5,
-				itemStyle: { color: chartColors[0] },
-				lineStyle: { color: chartColors[0], width: 2 }
-			},
-			{
-				name: 'Mean',
-				type: 'line' as const,
-				data: chartData.map((d) => [d.date, d.mean]),
-				smooth: true,
-				symbol: 'circle',
-				symbolSize: 5,
-				itemStyle: { color: chartColors[1] },
-				lineStyle: { color: chartColors[1], width: 2 }
-			},
-			{
-				name: 'Median',
-				type: 'line' as const,
-				data: chartData.map((d) => [d.date, d.median]),
-				smooth: true,
-				symbol: 'circle',
-				symbolSize: 5,
-				itemStyle: { color: chartColors[2] },
-				lineStyle: { color: chartColors[2], width: 2 }
-			},
-			{
-				name: 'Max',
-				type: 'line' as const,
-				data: chartData.map((d) => [d.date, d.max]),
-				smooth: true,
-				symbol: 'circle',
-				symbolSize: 5,
-				itemStyle: { color: chartColors[3] },
-				lineStyle: { color: chartColors[3], width: 2 }
-			}
-		],
+		series: (
+			[
+				{ name: 'Min',    data: chartData.map((d) => [d.date, d.min]),    color: chartColors[0] },
+				{ name: 'Mean',   data: chartData.map((d) => [d.date, d.mean]),   color: chartColors[1] },
+				{ name: 'Median', data: chartData.map((d) => [d.date, d.median]), color: chartColors[2] },
+				{ name: 'Max',    data: chartData.map((d) => [d.date, d.max]),    color: chartColors[3] }
+			] as const
+		).map(({ name, data, color }) => ({
+			name,
+			type: 'line' as const,
+			data,
+			smooth: true,
+			symbol: 'circle',
+			symbolSize: 5,
+			itemStyle: { color },
+			lineStyle: { color, width: 2 },
+			emphasis: { focus: 'none' as const, disabled: true },
+			blur: { lineStyle: { opacity: 1 }, itemStyle: { opacity: 1 } }
+		})),
 		dataZoom: [
 			{
 				type: 'slider' as const,
