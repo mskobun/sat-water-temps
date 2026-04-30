@@ -236,8 +236,20 @@
 				xAxisIndex: 0,
 				bottom: 4,
 				height: 20,
-				startValue: chartData.length > 10 ? chartData[chartData.length - 10].date.getTime() : undefined,
-				endValue: chartData[chartData.length - 1]?.date.getTime(),
+				startValue: (() => {
+					if (chartData.length <= 10) return undefined;
+					const idx = selectedDate ? chartData.findIndex(d => d.sourceDate === selectedDate) : -1;
+					const center = idx >= 0 ? idx : chartData.length - 1;
+					const start = Math.max(0, Math.min(center - 4, chartData.length - 10));
+					return chartData[start].date.getTime();
+				})(),
+				endValue: (() => {
+					if (chartData.length <= 10) return undefined;
+					const idx = selectedDate ? chartData.findIndex(d => d.sourceDate === selectedDate) : -1;
+					const center = idx >= 0 ? idx : chartData.length - 1;
+					const end = Math.min(chartData.length - 1, Math.max(center + 5, 9));
+					return chartData[end].date.getTime();
+				})(),
 				borderColor: 'transparent',
 				fillerColor: 'rgba(128,128,128,0.15)',
 				handleStyle: { color: 'rgba(128,128,128,0.5)' },
