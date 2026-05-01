@@ -2,12 +2,12 @@
 	import { onMount } from 'svelte';
 	import * as echarts from 'echarts/core';
 	import { LineChart } from 'echarts/charts';
-	import { GridComponent, TooltipComponent, DataZoomComponent } from 'echarts/components';
+	import { GridComponent, TooltipComponent, DataZoomComponent, MarkLineComponent } from 'echarts/components';
 	import { SVGRenderer } from 'echarts/renderers';
 	import type { ECharts } from 'echarts/core';
 	import type { EChartsOption } from 'echarts';
 
-	echarts.use([LineChart, GridComponent, TooltipComponent, DataZoomComponent, SVGRenderer]);
+	echarts.use([LineChart, GridComponent, TooltipComponent, DataZoomComponent, MarkLineComponent, SVGRenderer]);
 
 	let {
 		option,
