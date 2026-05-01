@@ -220,6 +220,32 @@
 		if (mode.current !== undefined) tick().then(resolveColor);
 	});
 
+	function yearBoundaryMarkLines(data: { date: Date }[]) {
+		if (!data.length) return [];
+		const firstYear = data[0].date.getFullYear();
+		const lastYear = data[data.length - 1].date.getFullYear();
+		const lines = [];
+		for (let y = firstYear + 1; y <= lastYear; y++) {
+			lines.push({
+				xAxis: new Date(y, 0, 1).getTime(),
+				label: {
+					formatter: String(y),
+					position: 'insideStartTop' as const,
+					fontSize: 9,
+					color: 'var(--muted-foreground)',
+					opacity: 0.7
+				},
+				lineStyle: {
+					type: 'dashed' as const,
+					color: 'var(--border)',
+					opacity: 0.8,
+					width: 1
+				}
+			});
+		}
+		return lines;
+	}
+
 	let echartsOption = $derived({
 		animation: false,
 		grid: { top: 12, left: 44, bottom: 52, right: 16, containLabel: false },
@@ -241,6 +267,7 @@
 			axisLabel: {
 				fontSize: 10,
 				color: 'var(--muted-foreground)',
+				hideOverlap: true,
 				formatter: (value: number) => `${value.toFixed(1)}${unitSymbol}`
 			},
 			axisLine: { show: false },
@@ -257,7 +284,12 @@
 				itemStyle: { color: chartColor },
 				lineStyle: { color: chartColor, width: 2 },
 				emphasis: { focus: 'none' as const, disabled: true },
-				blur: { lineStyle: { opacity: 1 }, itemStyle: { opacity: 1 } }
+				blur: { lineStyle: { opacity: 1 }, itemStyle: { opacity: 1 } },
+				markLine: {
+					silent: true,
+					symbol: 'none',
+					data: yearBoundaryMarkLines(chartData)
+				}
 			}
 		],
 		dataZoom: [
