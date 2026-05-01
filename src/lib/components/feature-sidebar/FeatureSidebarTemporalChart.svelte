@@ -117,7 +117,7 @@
 		yAxis: {
 			type: 'value' as const,
 			min: 'dataMin' as const,
-			splitNumber: 4,
+			splitNumber: 3,
 			axisLabel: {
 				fontSize: 10,
 				color: 'var(--muted-foreground)',
