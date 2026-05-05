@@ -1117,7 +1117,7 @@
 
 		<!-- Drawer (slides up with full feature details) -->
 		<Drawer.Root open={drawerOpen} onOpenChange={handleDrawerOpenChange}>
-			<Drawer.Content class="max-h-[85vh]">
+			<Drawer.Content class="max-h-[85vh]" forceMount={true}>
 				<Drawer.Header class="flex flex-row items-center justify-between gap-2 px-4 py-3 border-b">
 					<Drawer.Title class="font-semibold text-foreground truncate">
 						{selectedFeature.name ?? selectedFeature.id ?? 'Water body'}
