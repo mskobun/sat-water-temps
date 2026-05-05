@@ -1,0 +1,38 @@
+flowchart TB
+  subgraph trigger["1. Trigger"]
+    ds["Daily schedule"]
+    ab["Admin backfill"]
+  end
+
+  subgraph discover["2. Discover + enqueue"]
+    settings["D1 settings\n(water-mask choice)"]
+    init["Source initiator\n(ECOSTRESS or Landsat)"]
+    stac["CMR-STAC / USGS STAC"]
+    sqs["SQS fan-out\none message per scene"]
+  end
+
+  subgraph process["3. Process"]
+    cogs["Open COGs\n(temperature + QA)"]
+    opera["Optional OPERA\nDSWx-HLS mask"]
+    filter["Clip, mask,\nrange + spatial checks"]
+  end
+
+  subgraph store["4. Store + serve"]
+    r2[("R2\nTIF, PNG, Parquet")]
+    d1[("D1\nmetadata, jobs,\nfilter_stats")]
+    app["SvelteKit app\nmap + admin UI"]
+  end
+
+  ds --> init
+  ab --> init
+  settings -.->|Landsat| init
+  init --> stac
+  init --> sqs
+  sqs -->|SQS message| cogs
+  cogs --> opera
+  opera -.->|Landsat only| filter
+  cogs --> filter
+  filter --> r2
+  filter --> d1
+  r2 --> app
+  d1 --> app

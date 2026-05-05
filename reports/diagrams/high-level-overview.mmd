@@ -1,0 +1,39 @@
+flowchart TB
+  subgraph users["Users"]
+    admin(["Administrator"])
+    researcher(["Researcher browser"])
+  end
+
+  subgraph cf["Cloudflare serving zone"]
+    pages["Cloudflare Pages\n(SvelteKit app + API)"]
+    d1[("D1 database\nmetadata, jobs,\nrequests, settings")]
+    r2[("R2 bucket\nPNG, TIF, Parquet")]
+  end
+
+  subgraph aws["AWS ingestion zone (us-west-2)"]
+    cw["CloudWatch schedules\n+ admin backfills"]
+    init["Source initiators\nECOSTRESS + Landsat"]
+    sqs["SQS queue"]
+    proc["Processor Lambda\nus-west-2\n50x concurrency cap"]
+  end
+
+  subgraph ext["Source catalogues + products"]
+    cmr["NASA CMR-STAC\nECOSTRESS L2T COGs\nS3 us-west-2"]
+    usgs["USGS STAC\nLandsat C2 L2 COGs\nS3 us-west-2"]
+    opera["NASA OPERA\nDSWx-HLS mask COGs\nS3 us-west-2"]
+  end
+
+  admin --> pages
+  researcher --> pages
+  pages <--> d1
+  pages <--> r2
+  pages -.->|manual trigger| init
+  d1 -.->|settings| init
+  cw --> init
+  init -->|search| cmr
+  init -->|search| usgs
+  init --> sqs
+  sqs --> proc
+  proc --> r2
+  proc --> d1
+  proc -.->|optional Landsat mask| opera
