@@ -68,6 +68,7 @@
 	let filterMinTemp = $derived(scaleMin + (filterRange[0] / 100) * (scaleMax - scaleMin));
 	let filterMaxTemp = $derived(scaleMin + (filterRange[1] / 100) * (scaleMax - scaleMin));
 	let isFiltering = $derived(filterRange[0] > 0 || filterRange[1] < 100);
+	let dataReady = $derived(scaleMax > scaleMin);
 
 	function convertTemp(kelvin: number, unit: 'Kelvin' | 'Celsius' | 'Fahrenheit'): number {
 		if (unit === 'Celsius') return kelvin - 273.15;
@@ -222,13 +223,16 @@
 				class="w-full"
 				trackClass={selectedColorScale === 'gray' ? 'color-scale-gray' : 'color-scale-rainbow'}
 				showRange={false}
+				disabled={!dataReady}
 			/>
 			<div class="flex items-center justify-between gap-2">
 				<div class="flex items-center gap-1">
 					<input
 						type="number"
 						step="0.1"
-						value={convertTemp(filterMinTemp, currentUnit).toFixed(1)}
+						value={dataReady ? convertTemp(filterMinTemp, currentUnit).toFixed(1) : ''}
+						placeholder={dataReady ? undefined : '—'}
+						disabled={!dataReady}
 						onchange={handleMinInputChange}
 						class="w-16 h-7 px-2 text-xs tabular-nums bg-muted border border-border rounded text-center focus:outline-none focus:ring-1 focus:ring-ring"
 					/>
@@ -239,7 +243,9 @@
 					<input
 						type="number"
 						step="0.1"
-						value={convertTemp(filterMaxTemp, currentUnit).toFixed(1)}
+						value={dataReady ? convertTemp(filterMaxTemp, currentUnit).toFixed(1) : ''}
+						placeholder={dataReady ? undefined : '—'}
+						disabled={!dataReady}
 						onchange={handleMaxInputChange}
 						class="w-16 h-7 px-2 text-xs tabular-nums bg-muted border border-border rounded text-center focus:outline-none focus:ring-1 focus:ring-ring"
 					/>
