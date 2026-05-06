@@ -62,7 +62,7 @@
 		}));
 	}
 
-	let chartColors = ['#f97316', '#14b8a6', '#374151', '#eab308'];
+	let chartColors = ['#3b82f6', '#14b8a6', '#d97706', '#ef4444'];
 
 	function resolveColors() {
 		const style = getComputedStyle(document.documentElement);
